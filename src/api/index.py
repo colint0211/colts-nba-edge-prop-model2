@@ -836,8 +836,54 @@ async def api_proxy(path: str, request: FastRequest):
             if path == "auto-board" and "json" in media_type.lower():
                 try:
                     board_payload = json.loads(response_body.decode("utf-8", "replace"))
+                    props = board_payload.get("props") or []
+                    for prop in props:
+                        if not isinstance(prop, dict) or prop.get("line") is None:
+                            continue
+                        athlete_id = prop.get("athlete_id")
+                        if not athlete_id:
+                            continue
+                        try:
+                            values, sample_label, player_minutes = _player_history(athlete_id, "points", "PTS")
+                            model = _simulate_market(
+                                values, float(prop["line"]), prop.get("over_odds"),
+                                prop.get("under_odds"),
+                                _norm_player_name(prop.get("player")) + "points",
+                                minutes=player_minutes, market="points"
+                            )
+                            if not model:
+                                prop["model_status"] = "unprojected"
+                                prop["reason"] = "Insufficient verified game-log history for the local points model."
+                                continue
+                            prop.update(model)
+                            prop["sample_label"] = sample_label
+                            prop["games_used"] = model.get("sample_size")
+                            prop["recent5_avg"] = model.get("recent5_mean")
+                            prop["raw_over_probability"] = model.get("over_probability")
+                            prop["expected_profit_per_100"] = (
+                                round(float(model["expected_value_pct"]) * 100, 2)
+                                if model.get("expected_value_pct") is not None else None
+                            )
+                            prop["implied_probability"] = None
+                            prop["probability_reliability"] = None
+                            prop["probability_note"] = "Local empirical game-log simulation; not calibrated until settled predictions are evaluated."
+                            prop["model_status"] = "projected"
+                            prop["confidence"] = "provisional"
+                            prop["recommendation"] = (
+                                "VALUE CANDIDATE" if model.get("expected_value_pct") is not None and model["expected_value_pct"] > 0.05
+                                else "LEAN / VERIFY" if model.get("expected_value_pct") is not None and model["expected_value_pct"] > 0
+                                else "PASS"
+                            )
+                            if prop.get("injury_flag") or prop.get("injury_status"):
+                                prop["recommendation"] = "PASS"
+                        except Exception as model_error:
+                            prop["model_status"] = "unprojected"
+                            prop["reason"] = "Local points model could not verify player history: " + type(model_error).__name__
+                    board_payload["props"] = props
+                    board_payload["model"] = "Local recency-weighted empirical distribution; ESPN game logs; minutes adjustment when available"
+                    response_body = json.dumps(board_payload, separators=(",", ":")).encode("utf-8")
                     prediction_ledger.initialize()
-                    prediction_ledger.save_predictions(board_payload.get("props") or [], "points")
+                    prediction_ledger.save_predictions(props, "points")
                 except Exception:
                     pass
             if path == "live-stats" and "json" in media_type.lower():
