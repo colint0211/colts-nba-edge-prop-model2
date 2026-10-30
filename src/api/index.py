@@ -1146,7 +1146,7 @@ async def api_proxy(path: str, request: FastRequest):
 
                     def _canonical_team(code):
                         code = str(code or "").strip().upper()
-                        return {"NY": "NYK", "GS": "GSW", "WAS": "WSH", "WSH": "WAS"}.get(code, code)
+                        return {"NY": "NYK", "GS": "GSW"}.get(code, code)
 
                     def _game_team_codes(game):
                         match = re.match(r"^\s*([A-Z]{2,3})@([A-Z]{2,3})", str(game or "").upper())
