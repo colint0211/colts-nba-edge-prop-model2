@@ -308,6 +308,7 @@ _BP_BOOKS_CACHE = {"at": 0, "ids": {}}
 _BP_PROPS_CACHE = {}
 _BP_BOARD_CACHE = {}
 _BP_RATE_LIMIT_UNTIL = 0.0
+_BP_MARKET_RATE_LIMIT_UNTIL = {}
 _BP_CACHE_TTL_SECONDS = 300
 _BP_BOARD_TTL_SECONDS = 180
 _BP_RATE_LIMIT_COOLDOWN_SECONDS = 300
@@ -315,15 +316,15 @@ _BP_STALE_CACHE_SECONDS = 3600
 
 def _bp_fetch_props(market, limit=50):
     """Shared per-market cache; never fan out repeated props requests during a provider cooldown."""
-    global _BP_RATE_LIMIT_UNTIL
     now = time.time()
     cached = _BP_PROPS_CACHE.get(market)
     if cached and now - cached[0] < _BP_CACHE_TTL_SECONDS:
         return cached[1], "cache"
-    if now < _BP_RATE_LIMIT_UNTIL:
+    market_cooldown_until = _BP_MARKET_RATE_LIMIT_UNTIL.get(market, 0.0)
+    if now < market_cooldown_until:
         if cached and now - cached[0] < _BP_STALE_CACHE_SECONDS:
             return cached[1], "stale-cache"
-        retry = max(1, int(_BP_RATE_LIMIT_UNTIL - now))
+        retry = max(1, int(market_cooldown_until - now))
         raise HTTPException(status_code=503, detail="BettingPros cooldown active. Retry in " + str(retry) + " seconds.")
     api_key = os.getenv("BETTINGPROS_API_KEY", "").strip()
     if not api_key:
@@ -347,7 +348,7 @@ def _bp_fetch_props(market, limit=50):
                 cooldown = max(_BP_RATE_LIMIT_COOLDOWN_SECONDS, min(1800, int(retry_after)))
             except (TypeError, ValueError):
                 cooldown = _BP_RATE_LIMIT_COOLDOWN_SECONDS
-            _BP_RATE_LIMIT_UNTIL = time.time() + cooldown
+            _BP_MARKET_RATE_LIMIT_UNTIL[market] = time.time() + cooldown
             if cached and time.time() - cached[0] < _BP_STALE_CACHE_SECONDS:
                 return cached[1], "stale-cache"
             raise HTTPException(status_code=503, detail="BettingPros rate limit reached. Cooling down for " + str(cooldown) + " seconds.") from exc
