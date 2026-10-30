@@ -3,6 +3,7 @@ import json
 import math
 import random
 import time
+import re
 from difflib import SequenceMatcher
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -1094,8 +1095,63 @@ async def api_proxy(path: str, request: FastRequest):
                 try:
                     board_payload = json.loads(response_body.decode("utf-8", "replace"))
                     props = board_payload.get("props") or []
+
+                    def _canonical_team(code):
+                        code = str(code or "").strip().upper()
+                        return {"NY": "NYK", "GS": "GSW", "WAS": "WSH", "WSH": "WAS"}.get(code, code)
+
+                    def _game_team_codes(game):
+                        match = re.match(r"^\\s*([A-Z]{2,3})@([A-Z]{2,3})", str(game or "").upper())
+                        return {_canonical_team(match.group(1)), _canonical_team(match.group(2))} if match else set()
+
+                    projection_fields = (
+                        "projection", "sd", "games_used", "recent5_avg", "sample_season",
+                        "sample_label", "confidence", "probability_reliability",
+                        "raw_over_probability", "over_probability", "under_probability",
+                        "best_side", "best_odds", "best_probability", "implied_probability",
+                        "edge_pp", "expected_profit_per_100", "expected_value_pct",
+                        "recommendation", "projected_minutes", "push_probability",
+                        "simulations", "sample_size", "long_run_mean", "recent5_mean",
+                        "recent10_mean", "weighted_mean", "distribution_std_dev",
+                        "minute_adjustment_factor", "minutes_sample_size",
+                        "baseline_minutes", "minutes_method", "calibration_status",
+                    )
+
                     for prop in props:
-                        if not isinstance(prop, dict) or prop.get("line") is None:
+                        if not isinstance(prop, dict):
+                            continue
+
+                        # The upstream feed can return a name that appears on
+                        # multiple team rosters. Never guess which athlete row
+                        # is intended or let an upstream value appear bettable.
+                        ambiguous_identity = (
+                            prop.get("model_status") == "roster_mismatch"
+                            or "multiple rosters" in str(prop.get("reason") or "").lower()
+                            or "identity is ambiguous" in str(prop.get("reason") or "").lower()
+                        )
+                        game_teams = _game_team_codes(prop.get("game"))
+                        roster_team = _canonical_team(prop.get("roster_team") or prop.get("team"))
+                        wrong_game_team = bool(roster_team and game_teams and roster_team not in game_teams)
+                        if ambiguous_identity or wrong_game_team:
+                            for key in projection_fields:
+                                prop.pop(key, None)
+                            prop["model_status"] = "unprojected"
+                            prop["identity_verified"] = False
+                            prop["expected_profit_per_100"] = None
+                            prop["expected_value_pct"] = None
+                            prop["recommendation"] = "PASS"
+                            prop["best_side"] = None
+                            prop["reason"] = (
+                                "Player identity is ambiguous across rosters; excluded from projections."
+                                if ambiguous_identity else
+                                "Roster team does not match either team in the listed matchup; excluded from projections."
+                            )
+                            continue
+
+                        if roster_team and game_teams:
+                            prop["identity_verified"] = True
+
+                        if prop.get("line") is None:
                             continue
                         athlete_id = prop.get("athlete_id")
                         if not athlete_id:
@@ -1180,7 +1236,10 @@ async def api_proxy(path: str, request: FastRequest):
                             prop["model_status"] = "unprojected"
                             prop["reason"] = "Local points model could not verify player history: " + type(model_error).__name__
                     board_payload["props"] = props
-                    board_payload["model"] = "Local recency-weighted empirical distribution; ESPN game logs; minutes adjustment when available"
+                    board_payload["projected_count"] = sum(1 for p in props if isinstance(p, dict) and p.get("model_status") == "projected")
+                    board_payload["unprojected_count"] = sum(1 for p in props if isinstance(p, dict) and p.get("model_status") != "projected")
+                    board_payload["roster_mismatch_count"] = sum(1 for p in props if isinstance(p, dict) and p.get("identity_verified") is False)
+                    board_payload["model"] = "Local recency-weighted empirical distribution; ESPN game logs; minutes adjustment when available; roster identity validation"
                     response_body = json.dumps(board_payload, separators=(",", ":")).encode("utf-8")
                     prediction_ledger.initialize()
                     prediction_ledger.save_predictions(props, "points")
