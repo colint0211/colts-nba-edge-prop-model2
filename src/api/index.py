@@ -14,6 +14,7 @@ from fastapi import FastAPI, Request as FastRequest, HTTPException
 from fastapi.responses import HTMLResponse, Response, JSONResponse
 from . import prediction_ledger
 from pathlib import Path
+from html.parser import HTMLParser
 HTML = Path(__file__).with_name("index.html").read_text(encoding="utf-8")
 UPSTREAM = "https://colts-nba-edge-prop-model-e2oyr9l03-colin-82ad.vercel.app"
 LIVE_UPSTREAM = "https://colts-nba-edge-prop-model-3xj6ghyhl-colin-82ad.vercel.app"
@@ -33,6 +34,129 @@ STAT_FIELDS = {
 _ESPN_ID_CACHE = {}
 _ESPN_LOG_CACHE = {}
 _ESPN_ROSTER_CACHE = {}
+
+_ESPN_POSITION_CACHE = {}
+_DVP_CACHE = {"at": 0.0, "data": None}
+_DVP_CACHE_TTL = 3600
+_TEAM_NAMES = {
+ "ATL":"Atlanta Hawks","BOS":"Boston Celtics","BKN":"Brooklyn Nets","CHA":"Charlotte Hornets","CHI":"Chicago Bulls",
+ "CLE":"Cleveland Cavaliers","DAL":"Dallas Mavericks","DEN":"Denver Nuggets","DET":"Detroit Pistons","GSW":"Golden State Warriors",
+ "HOU":"Houston Rockets","IND":"Indiana Pacers","LAC":"LA Clippers","LAL":"Los Angeles Lakers","MEM":"Memphis Grizzlies",
+ "MIA":"Miami Heat","MIL":"Milwaukee Bucks","MIN":"Minnesota Timberwolves","NOP":"New Orleans Pelicans","NYK":"New York Knicks",
+ "OKC":"Oklahoma City Thunder","ORL":"Orlando Magic","PHI":"Philadelphia 76ers","PHX":"Phoenix Suns","POR":"Portland Trail Blazers",
+ "SAC":"Sacramento Kings","SAS":"San Antonio Spurs","TOR":"Toronto Raptors","UTA":"Utah Jazz","WAS":"Washington Wizards"
+}
+_TEAM_ALIASES = {name.lower(): code for code, name in _TEAM_NAMES.items()}
+_TEAM_ALIASES.update({"los angeles clippers":"LAC","brooklyn":"BKN","new york":"NYK","golden state":"GSW",
+ "phoenix":"PHX","new orleans":"NOP","san antonio":"SAS"})
+class _DVPHTMLParser(HTMLParser):
+ def __init__(self):
+  super().__init__(); self.section=None; self.rows=[]; self.row=None; self.cell=None; self.heading=False
+ def handle_starttag(self, tag, attrs):
+  tag=tag.lower()
+  if tag in ("h1","h2","h3"): self.heading=True
+  elif tag=="tr": self.row=[]
+  elif tag in ("td","th") and self.row is not None: self.cell=[]
+ def handle_data(self, data):
+  value=str(data or "").strip()
+  if not value: return
+  if self.heading and value.lower() in ("guards","forwards","centers"): self.section=value.lower()
+  if self.cell is not None: self.cell.append(value)
+ def handle_endtag(self, tag):
+  tag=tag.lower()
+  if tag in ("h1","h2","h3"): self.heading=False
+  elif tag in ("td","th") and self.cell is not None and self.row is not None:
+   self.row.append(" ".join(self.cell).strip()); self.cell=None
+  elif tag=="tr" and self.row is not None:
+   if self.section and len(self.row)>=7: self.rows.append((self.section,list(self.row)))
+   self.row=None; self.cell=None
+def _canonical_team_code(value):
+ raw=str(value or "").strip(); upper=raw.upper()
+ aliases={"NY":"NYK","GS":"GSW","WSH":"WAS","PHO":"PHX","NO":"NOP"}
+ if upper in _TEAM_NAMES: return upper
+ if upper in aliases: return aliases[upper]
+ return _TEAM_ALIASES.get(raw.lower())
+def _team_codes_from_game(game):
+ text=str(game or "").upper()
+ match=re.search(r"\b([A-Z]{2,3})\s*(?:@|VS\.?|V)\s*([A-Z]{2,3})\b",text)
+ if match:
+  return {x for x in (_canonical_team_code(match.group(1)),_canonical_team_code(match.group(2))) if x}
+ lower=str(game or "").lower(); found=set()
+ for name,code in _TEAM_ALIASES.items():
+  if name in lower: found.add(code)
+ return found
+def _fetch_dvp_table():
+ now=time.time()
+ if _DVP_CACHE["data"] is not None and now-_DVP_CACHE["at"]<_DVP_CACHE_TTL: return _DVP_CACHE["data"]
+ request=Request("https://archivepicks.com/research/nba/defense-vs-position",
+  headers={"User-Agent":"Mozilla/5.0 ColtsNBAEdge/1.0","Accept":"text/html"})
+ with urlopen(request,timeout=12) as response: html=response.read().decode("utf-8","replace")
+ parser=_DVPHTMLParser(); parser.feed(html)
+ indexes={"threes":0,"assists":1,"points":3,"rebounds":4,"steals":5}; parsed={}
+ for group,cells in parser.rows:
+  team_text=cells[0].strip().lower(); code=_TEAM_ALIASES.get(team_text)
+  if not code: code=_TEAM_ALIASES.get(re.sub(r"^[a-z]{3}","",team_text).strip())
+  if not code: continue
+  values={}
+  for market,index in indexes.items():
+   if index+1<len(cells):
+    match=re.search(r"\(([0-9]+(?:\.[0-9]+)?)\)",cells[index+1])
+    if match: values[market]=float(match.group(1))
+  if values: parsed[(code,group)]=values
+ if len(parsed)<60: raise RuntimeError("Defense-vs-position source returned an incomplete table.")
+ _DVP_CACHE.update({"at":now,"data":parsed}); return parsed
+def _espn_player_position(athlete_id,team_code):
+ key=(str(athlete_id),str(team_code or "").upper())
+ if key in _ESPN_POSITION_CACHE: return _ESPN_POSITION_CACHE[key]
+ code=_canonical_team_code(team_code)
+ if not code: return None
+ try:
+  payload=_get_json("https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/"+code.lower()+"/roster",timeout=8)
+ except Exception:
+  _ESPN_POSITION_CACHE[key]=None; return None
+ found=None
+ def walk(value):
+  nonlocal found
+  if found: return
+  if isinstance(value,dict):
+   athlete=value.get("athlete") if isinstance(value.get("athlete"),dict) else value
+   if str(athlete.get("id") or "").strip()==str(athlete_id):
+    position=athlete.get("position") or value.get("position") or {}
+    found=(position.get("abbreviation") or position.get("displayName") or position.get("name")) if isinstance(position,dict) else position
+    return
+   for child in value.values():
+    if isinstance(child,(dict,list)): walk(child)
+  elif isinstance(value,list):
+   for child in value: walk(child)
+ walk(payload); _ESPN_POSITION_CACHE[key]=str(found).upper() if found else None
+ return _ESPN_POSITION_CACHE[key]
+def _position_group(position):
+ p=str(position or "").strip().upper()
+ if p in ("PG","SG","G","GUARD","POINT GUARD","SHOOTING GUARD") or "GUARD" in p: return "guards"
+ if p in ("SF","PF","F","FORWARD","SMALL FORWARD","POWER FORWARD") or "FORWARD" in p: return "forwards"
+ if p in ("C","CENTER") or "CENTER" in p: return "centers"
+ return None
+def _dvp_matchup_adjustment(athlete_id,player_team,game,market):
+ try:
+  team_code=_canonical_team_code(player_team); game_teams=_team_codes_from_game(game)
+  if not team_code or len(game_teams)<2: return None
+  opponent=next((code for code in game_teams if code!=team_code),None)
+  if not opponent or market not in ("points","rebounds","assists","steals","threes"): return None
+  position=_espn_player_position(athlete_id,team_code); group=_position_group(position)
+  if not group: return None
+  table=_fetch_dvp_table(); allowed=table.get((opponent,group),{}).get(market)
+  league_values=[row[market] for (team,pos),row in table.items() if pos==group and market in row]
+  if allowed is None or len(league_values)<20: return None
+  league_average=sum(league_values)/len(league_values)
+  if league_average<=0: return None
+  ratio=allowed/league_average; factor=max(0.92,min(1.08,1.0+(ratio-1.0)*0.30))
+  return {"position":position,"position_group":group,"opponent":opponent,"opponent_name":_TEAM_NAMES.get(opponent,opponent),
+   "stat":market,"allowed_per_game":round(allowed,2),"league_position_average":round(league_average,2),
+   "league_relative_ratio":round(ratio,3),"adjustment_pct":round((factor-1.0)*100,2),"factor":round(factor,4),
+   "source":"ArchivePicks NBA defense-vs-position table",
+   "method":"Position-group allowed-per-game vs league average; 30% dampening; adjustment capped at +/-8%"}
+ except Exception: return None
+
 
 def _espn_roster_player_id(name, team_codes):
     """Resolve an exact player identity only from the two teams in the matchup."""
@@ -400,7 +524,7 @@ def _projected_minutes(valid_minutes):
     # erase the player's established rotation baseline.
     return 0.55 * recent5 + 0.30 * recent10 + 0.15 * established
 
-def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, market=""):
+def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, market="", matchup_adjustment=None):
     """Recency-weighted empirical projection with minutes adjustment and discrete outcomes."""
     clean = [float(v) for v in values if v is not None and math.isfinite(float(v)) and float(v) >= 0]
     if len(clean) < 4:
@@ -431,6 +555,16 @@ def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, ma
         # Tight bounds reduce false swings caused by short-term rotations/noise.
         minute_factor = max(0.85, min(1.15, projected_min / baseline_min))
         target_mean *= minute_factor
+
+    matchup_factor = 1.0
+    if isinstance(matchup_adjustment, dict):
+        try:
+            candidate = float(matchup_adjustment.get("factor", 1.0))
+            if math.isfinite(candidate):
+                matchup_factor = max(0.92, min(1.08, candidate))
+                target_mean *= matchup_factor
+        except (TypeError, ValueError):
+            matchup_factor = 1.0
 
     distribution=[max(0.0,v*(target_mean/long_mean)) if long_mean>0 else v for v in clean]
     ordered=sorted(distribution)
@@ -472,11 +606,13 @@ def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, ma
         "expected_value_pct":round(best[0]*100,2) if best else None,
         "edge_pp":None,
         "recommendation":"VALUE CANDIDATE" if best and best[0]>0.05 else ("LEAN / VERIFY" if best and best[0]>0 else "PASS"),
-        "model_components":["exponentially weighted history","10-game form signal","minutes adjustment" if valid_minutes else "minutes unavailable; no adjustment","empirical/parametric mixture distribution","Monte Carlo probability estimation"],
+        "model_components":["exponentially weighted history","10-game form signal","minutes adjustment" if valid_minutes else "minutes unavailable; no adjustment","defense-vs-position matchup adjustment" if matchup_adjustment else "defense-vs-position unavailable; no adjustment","empirical/parametric mixture distribution","Monte Carlo probability estimation"],
         "model_method":"recency-weighted empirical/parametric mixture with minutes adjustment; provisional pending out-of-sample calibration",
         "sample_size":n,"long_run_mean":round(long_mean,2),"recent5_mean":round(recent5_mean,2),        "recent10_mean":round(recent10_mean,2),"weighted_mean":round(weighted_mean,2),
         "distribution_std_dev":round(std_dev,2),"minute_adjustment_factor":round(minute_factor,3),
         "minutes_sample_size":len(valid_minutes),
+        "matchup_adjustment_pct":round((matchup_factor - 1.0) * 100, 2),
+        "defense_vs_position":matchup_adjustment,
         "baseline_minutes":round(baseline_min,1) if baseline_min is not None else None,
         "minutes_method":"55% recent-5 median / 30% recent-10 median / 15% recent-20 median; adjustment capped at +/-15%",
         "calibration_status":"uncalibrated"
@@ -786,7 +922,9 @@ def proprietary_market_board(market: str = "rebounds"):
                 failures.append(name + ": ESPN player match unavailable")
                 continue
             values, sample_label, player_minutes = _player_history(athlete_id, field, label)
-            model = _simulate_market(values, line, None, None, _norm_player_name(name) + market, minutes=player_minutes, market=market)
+            player_team = player_obj.get("team") or participant.get("team_abbreviation") or participant.get("team") or raw.get("team_abbreviation")
+            matchup_adjustment = _dvp_matchup_adjustment(athlete_id, player_team, event.get("name") or raw.get("event_name") or raw.get("matchup"), market)
+            model = _simulate_market(values, line, None, None, _norm_player_name(name) + market, minutes=player_minutes, market=market, matchup_adjustment=matchup_adjustment)
             if not model:
                 failures.append(name + ": fewer than five valid game logs")
                 continue
@@ -825,6 +963,7 @@ def proprietary_market_board(market: str = "rebounds"):
                 "game": event.get("name") or raw.get("event_name") or raw.get("matchup") or "",
                 "market": market, "line": line, "over_odds": over_odds, "under_odds": under_odds,
                 "sample_label": sample_label, "athlete_id": athlete_id, "games_used": len(values),
+                "position": (matchup_adjustment or {}).get("position"),
                 **model,
             })
         except Exception as exc:
@@ -1210,7 +1349,8 @@ async def model_recalculate(request: FastRequest):
             raise HTTPException(status_code=400, detail="Odds are outside the supported range.")
         field, label = ("points", "PTS") if market == "points" else STAT_FIELDS[market]
         values, sample_label, minutes = _player_history(athlete_id, field, label)
-        model = _simulate_market(values, line, None, None, _norm_player_name(player) + market + "custom", minutes=minutes, market=market)
+        matchup_adjustment = _dvp_matchup_adjustment(athlete_id, payload.get("team"), payload.get("game"), market)
+        model = _simulate_market(values, line, None, None, _norm_player_name(player) + market + "custom", minutes=minutes, market=market, matchup_adjustment=matchup_adjustment)
         if not model:
             raise HTTPException(status_code=422, detail="Not enough verified game-log history to recalculate this player.")
         over_raw, under_raw = _american_probability(over_odds), _american_probability(under_odds)
@@ -1222,6 +1362,7 @@ async def model_recalculate(request: FastRequest):
         model.update({"player": player, "team": str(payload.get("team") or ""), "game": str(payload.get("game") or ""),
                       "market": market, "line": line, "over_odds": over_odds, "under_odds": under_odds,
                       "athlete_id": athlete_id, "sample_label": sample_label, "games_used": len(values),
+                      "position": (matchup_adjustment or {}).get("position"),
                       "expected_profit_per_100": model.get("expected_value_pct"), "custom_line": True,
                       "line_source": "User-entered sportsbook line and odds"})
         prediction_ledger.initialize()
@@ -1339,11 +1480,12 @@ async def api_proxy(path: str, request: FastRequest):
                             continue
                         try:
                             values, sample_label, player_minutes = _player_history(athlete_id, "points", "PTS")
+                            matchup_adjustment = _dvp_matchup_adjustment(athlete_id, roster_team, prop.get("game"), "points")
                             model = _simulate_market(
                                 values, float(prop["line"]), prop.get("over_odds"),
                                 prop.get("under_odds"),
                                 _norm_player_name(prop.get("player")) + "points",
-                                minutes=player_minutes, market="points"
+                                minutes=player_minutes, market="points", matchup_adjustment=matchup_adjustment
                             )
                             if not model:
                                 # Never leave an upstream projection/probability on a row
@@ -1366,6 +1508,7 @@ async def api_proxy(path: str, request: FastRequest):
                                 prop["reason"] = "Insufficient verified regular-season game-log history for the local points model."
                                 continue
                             prop.update(model)
+                            prop["position"] = (matchup_adjustment or {}).get("position")
                             prop["sample_label"] = sample_label
                             prop["games_used"] = model.get("sample_size")
                             prop["recent5_avg"] = model.get("recent5_mean")
