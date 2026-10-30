@@ -854,6 +854,15 @@ async def model_settle(request: FastRequest):
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Could not settle prediction.") from exc
 
+@app.get("/api/custom-lines")
+async def custom_lines():
+    """Return the latest persisted custom line and odds for each player/market/event."""
+    try:
+        prediction_ledger.initialize()
+        return JSONResponse({"props": prediction_ledger.list_custom_lines()})
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Saved custom lines are temporarily unavailable.") from exc
+
 @app.post("/api/model/recalculate")
 async def model_recalculate(request: FastRequest):
     """Reprice one player prop at the user's actual sportsbook line and two-sided odds."""
