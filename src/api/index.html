@@ -194,6 +194,12 @@ function livePace(p){
   const verdict=margin>=0.5?"ON PACE TO HIT":margin<=-0.5?"ON PACE TO MISS":"TOO CLOSE TO CALL";
   return {points,minutes,gameMinutesLeft,remainingPlayerMinutes,projected,margin,verdict};
 }
+function dvpSummary(p){
+  const d=p.defense_vs_position;
+  if(!d)return '<div class="card-bottom"><span>Positional defense: unavailable for this player / matchup; no adjustment applied.</span></div>';
+  const sign=Number(d.adjustment_pct)>0?'+':'';
+  return '<div class="card-bottom"><span>Defense vs '+esc(d.position_group||d.position||'position')+': '+esc(d.opponent_name||d.opponent)+' allows '+num(d.allowed_per_game,1)+' '+esc(String(d.stat||'').toUpperCase())+'/game vs '+num(d.league_position_average,1)+' league avg</span><span>Projection adjustment: '+sign+num(d.adjustment_pct,1)+'%</span></div>';
+}
 function card(p,i){
   const g=gameFor(p),st=playerLive(p),gr=grade(p),pts=st&&st.points!=null?Number(st.points):null;
   const line=Number(p.line),progress=pts==null||!Number.isFinite(line)||line<=0?0:Math.max(0,Math.min(100,pts/line*100));
@@ -209,7 +215,7 @@ function card(p,i){
   '<div class="scorebox"><div><div class="score-label">Live game score</div><div class="score">'+esc(score)+'</div></div><div class="game-status">'+liveText+'</div></div>'+
   '<div class="statline"><div class="mini"><div class="mini-label">Live points / prop line</div><div class="mini-value">'+(pts==null?'—':pts)+' <span>/ '+num(p.line)+' pts</span></div><div class="progress"><span style="width:'+progress+'%"></span></div></div><div class="mini"><div class="mini-label">Pre-game model projection</div><div class="mini-value">'+num(p.projection)+' <span>pts</span></div><div class="mini-label">'+num(p.best_probability)+'% best-side probability</div></div></div>'+paceHtml+
   '<div class="card-bottom"><span>Pick: <b>'+esc(p.best_side||'—')+'</b> · '+num(p.edge_pp)+' pp edge</span><span class="ev">'+(p.expected_profit_per_100==null?'—':'$'+num(p.expected_profit_per_100,2)+' EV')+'</span></div>'+
-  '<div class="card-bottom"><span>Odds O '+esc(p.over_odds??'—')+' / U '+esc(p.under_odds??'—')+'</span><span>'+gradeHtml+'</span></div>'+lineEditor(p)+reasoning(p)+'</article>';
+  '<div class="card-bottom"><span>Odds O '+esc(p.over_odds??'—')+' / U '+esc(p.under_odds??'—')+'</span><span>'+gradeHtml+'</span></div>'+dvpSummary(p)+lineEditor(p)+reasoning(p)+'</article>';
 }
 function bpNorm(p,m){
   const pr=p.projection||{},participant=p.participant||{},playerObj=participant.player||{},event=p.event||{},over=p.over||{},under=p.under||{};
@@ -282,7 +288,7 @@ function bpLineCard(p,i){
     '<div class="card-bottom"><span>Model pick: <b>'+esc(p.best_side||'—')+'</b> · '+num(p.edge_pp)+' pp edge</span><span class="ev">'+(p.expected_value_pct==null?'—':(Number(p.expected_value_pct)>0?'+':'')+num(p.expected_value_pct,2)+'% EV')+'</span></div>'+
     '<div class="card-bottom"><span>Simulations: '+esc(p.simulations||50000).toLocaleString()+'</span><span>Odds O '+esc(odds(p.overOdds??p.over_odds))+' / U '+esc(odds(p.underOdds??p.under_odds))+'</span></div>'+
     '<div class="card-bottom"><span>DK/FD market: '+esc((p.market_books||[]).join(', ')||'No verified pair')+'</span><span>Stake: '+(stake==null?'Enter bankroll / no qualifying bet':'$'+num(stake,2)+' (5%)')+'</span></div>'+
-    '<div class="card-bottom"><span>Kelly diagnostic: '+(p.kelly_fraction_pct==null?'—':num(p.kelly_fraction_pct,2)+'%')+'</span><span>50/50 model-market blend</span></div>'+lineEditor(p)+'</article>';
+    '<div class="card-bottom"><span>Kelly diagnostic: '+(p.kelly_fraction_pct==null?'—':num(p.kelly_fraction_pct,2)+'%')+'</span><span>50/50 model-market blend</span></div>'+dvpSummary(p)+lineEditor(p)+'</article>';
 }
 function allModelEV(){
   const all=rankEV(data).map(p=>({...p,market:'points'}));
