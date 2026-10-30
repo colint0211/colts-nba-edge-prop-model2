@@ -749,6 +749,25 @@ def proprietary_market_board(market: str = "rebounds"):
                 model["best_odds"] = None
                 model["edge_pp"] = None
                 model["blend_method"] = "No verified DK/FD two-sided quote at a matching line; no bet rating"
+
+            # Apply the same minimum sample rule used by the points board.
+            # A small sample can still produce a visible projection, but never
+            # a positive-EV recommendation or a Top 5 EV entry.
+            sample_size = int(model.get("sample_size") or len(values))
+            if sample_size < 8:
+                model["confidence"] = "low"
+                model["recommendation"] = "PASS"
+                model["expected_value_pct"] = None
+                model["best_side"] = None
+                model["best_probability"] = None
+                model["best_odds"] = None
+                model["edge_pp"] = None
+                model["probability_note"] = (
+                    "Projection only: fewer than 8 verified regular-season games. "
+                    "EV ranking is disabled until the sample grows."
+                )
+            else:
+                model.setdefault("confidence", "provisional")
             output.append({
                 "player": name,
                 "team": player_obj.get("team") or participant.get("team_abbreviation") or participant.get("team") or "",
