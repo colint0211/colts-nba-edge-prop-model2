@@ -75,7 +75,7 @@ def _gamelog_values(athlete_id, field, label, season):
     cache_key = (str(athlete_id), field, season)
     if cache_key in _ESPN_LOG_CACHE:
         return _ESPN_LOG_CACHE[cache_key]
-    url = ESPN_BASE + "/athletes/" + str(athlete_id) + "/gamelog?" + urlencode({"season": season, "seasontype": 2})
+    url = ESPN_BASE + "/athletes/" + str(athlete_id) + "/gamelog?" + urlencode({"season": season})
     payload = _get_json(url)
     names = payload.get("names") or []
     labels = payload.get("labels") or []
