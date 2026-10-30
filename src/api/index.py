@@ -9,6 +9,27 @@ HTML = '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" c
 UPSTREAM = "https://colts-nba-edge-prop-model-e2oyr9l03-colin-82ad.vercel.app"
 LIVE_UPSTREAM = "https://colts-nba-edge-prop-model-3xj6ghyhl-colin-82ad.vercel.app"
 BP_MARKETS = {"rebounds": 157, "assists": 151, "steals": 160, "threes": 162}
+@app.get("/api/bettingpros-markets")
+def bettingpros_markets():
+    api_key = os.getenv("BETTINGPROS_API_KEY", "").strip()
+    if not api_key:
+        raise HTTPException(status_code=503, detail="BettingPros API key is not configured.")
+    req = Request("https://api.bettingpros.com/v3/markets?" + urlencode({"sport": "NBA"}), headers={"x-api-key": api_key, "accept": "application/json", "user-agent": "ColtsNBAEdge/1.0"}, method="GET")
+    try:
+        with urlopen(req, timeout=15) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except HTTPError as e:
+        raise HTTPException(status_code=502, detail="BettingPros markets request returned HTTP " + str(e.code) + ".") from e
+    except (URLError, TimeoutError, json.JSONDecodeError) as e:
+        raise HTTPException(status_code=502, detail="Could not retrieve BettingPros market catalog.") from e
+    rows = payload.get("markets", payload.get("data", [])) if isinstance(payload, dict) else []
+    if isinstance(rows, dict):
+        rows = list(rows.values())
+    result = []
+    for row in rows if isinstance(rows, list) else []:
+        if isinstance(row, dict):
+            result.append({k: row.get(k) for k in ("id", "market_id", "name", "display_name", "label", "key", "sport") if row.get(k) is not None})
+    return JSONResponse({"markets": result, "source": "BettingPros API"})
 app = FastAPI()
 @app.get("/", response_class=HTMLResponse)
 async def home():
