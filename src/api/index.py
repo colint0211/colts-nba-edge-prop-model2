@@ -221,6 +221,42 @@ def _gamelog_records(athlete_id, field, label, season):
     return records
 
 
+@app.get("/api/model/espn-debug")
+def espn_debug(athlete_id: str = "4566434"):
+    """Temporary schema diagnostic for ESPN season/category parsing."""
+    output = {"athlete_id": athlete_id, "seasons": {}}
+    for season in (2027, 2026):
+        url = ESPN_BASE + "/athletes/" + str(athlete_id) + "/gamelog?" + urlencode({"season": season})
+        payload = _get_json(url)
+        season_rows = []
+        for item in payload.get("seasonTypes") or []:
+            if not isinstance(item, dict):
+                continue
+            categories = []
+            for category in item.get("categories") or []:
+                if not isinstance(category, dict):
+                    continue
+                events = category.get("events") or []
+                categories.append({
+                    "name": category.get("name"),
+                    "labels": category.get("labels") or payload.get("labels"),
+                    "names": category.get("names") or payload.get("names"),
+                    "event_count": len(events) if isinstance(events, (list, dict)) else None,
+                })
+            season_rows.append({
+                "id": item.get("id"), "name": item.get("name"),
+                "displayName": item.get("displayName"), "type": item.get("type"),
+                "categories": categories,
+            })
+        output["seasons"][str(season)] = {
+            "labels": payload.get("labels"), "names": payload.get("names"),
+            "seasonTypes": season_rows,
+            "parsed_points": len(_gamelog_records(athlete_id, "points", "PTS", season)),
+            "parsed_minutes": len(_gamelog_records(athlete_id, "minutes", "MIN", season)),
+        }
+    return JSONResponse(output)
+
+
 def _gamelog_values(athlete_id, field, label, season):
     """Compatibility helper returning values in the ESPN gamelog order."""
     return [row["value"] for row in _gamelog_records(athlete_id, field, label, season)]
