@@ -197,7 +197,8 @@ def _player_history(athlete_id, field, label):
     current_minutes = _gamelog_values(athlete_id, "minutes", "MIN", 2027)
     previous_minutes = _gamelog_values(athlete_id, "minutes", "MIN", 2026) if len(current) < 5 else []
     values = (current + previous)[-25:]
-    minutes = (current_minutes + previous_minutes)[-25:]    paired = [(v, m) for v, m in zip(values, minutes) if m is not None and m > 0]
+    minutes = (current_minutes + previous_minutes)[-25:]
+    paired = [(v, m) for v, m in zip(values, minutes) if m is not None and m > 0]
     if len(paired) >= 5:
         values, minutes = [x[0] for x in paired], [x[1] for x in paired]
     else:
@@ -507,7 +508,8 @@ def _score_blended_market(model, market_quote):
         "best_over_book": market_quote["over_book"],
         "best_under_book": market_quote["under_book"],
         "calibration_status": "uncalibrated",
-    })    return model
+    })
+    return model
 
 @app.get("/api/proprietary-market-board")
 def proprietary_market_board(market: str = "rebounds"):
@@ -633,7 +635,8 @@ def bettingpros_books():
     )
     try:
         with urlopen(req, timeout=15) as response:
-            payload = json.loads(response.read().decode("utf-8", "replace"))    except HTTPError as exc:
+            payload = json.loads(response.read().decode("utf-8", "replace"))
+    except HTTPError as exc:
         raise HTTPException(status_code=502, detail="BettingPros books endpoint returned HTTP " + str(exc.code)) from exc
     except Exception as exc:
         raise HTTPException(status_code=502, detail="Could not retrieve BettingPros sportsbook IDs.") from exc
