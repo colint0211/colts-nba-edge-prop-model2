@@ -737,7 +737,8 @@ def _enrich_live_quarters(payload):
                 summary = json.loads(response.read().decode("utf-8", "replace"))
         except Exception:
             continue
-        plays = summary.get("scoringPlays") or []        if not plays:
+        plays = summary.get("scoringPlays") or []
+        if not plays:
             plays = (summary.get("plays") or {}).get("scoringPlays") or []
         totals_by_id = {}
         totals_by_name = {}
