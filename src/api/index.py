@@ -29,8 +29,12 @@ _ESPN_LOG_CACHE = {}
 
 def _get_json(url, timeout=12):
     req = Request(url, headers={"User-Agent": "Mozilla/5.0 ColtsNBAEdge/1.0", "Accept": "application/json"})
-    with urlopen(req, timeout=timeout) as response:
-        return json.loads(response.read().decode("utf-8", "replace"))
+    try:
+        with urlopen(req, timeout=timeout) as response:
+            return json.loads(response.read().decode("utf-8", "replace"))
+    except HTTPError as exc:
+        detail = exc.read(500).decode("utf-8", "replace").replace("\\n", " ")
+        raise RuntimeError("ESPN HTTP " + str(exc.code) + ": " + detail[:220]) from exc
 
 def _norm_player_name(value):
     return "".join(ch.lower() for ch in str(value or "") if ch.isalnum())
