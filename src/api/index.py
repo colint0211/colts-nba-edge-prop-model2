@@ -22,7 +22,7 @@ STAT_FIELDS = {
     "rebounds": ("rebounds", "REB"),
     "assists": ("assists", "AST"),
     "steals": ("steals", "STL"),
-    "threes": ("threePointsMade", "3PM"),
+    "threes": ("threePointsMade", "3PT"),
 }
 _ESPN_ID_CACHE = {}
 _ESPN_LOG_CACHE = {}
@@ -134,85 +134,59 @@ def _gamelog_values(athlete_id, field, label, season):
     cache_key = (str(athlete_id), field, season)
     if cache_key in _ESPN_LOG_CACHE:
         return _ESPN_LOG_CACHE[cache_key]
-
     url = ESPN_BASE + "/athletes/" + str(athlete_id) + "/gamelog?" + urlencode({"season": season})
     payload = _get_json(url)
     if not isinstance(payload, dict):
         _ESPN_LOG_CACHE[cache_key] = []
         return []
-
-    names = payload.get("names") or payload.get("statNames") or []
     labels = payload.get("labels") or []
-    index = names.index(field) if isinstance(names, list) and field in names else (
-        labels.index(label) if isinstance(labels, list) and label in labels else -1
-    )
-
-    # ESPN v3 places stat rows inside seasonTypes[].categories[].events[].
-    # The top-level events field is usually a dictionary of game metadata,
-    # not a list of stat rows. Older/alternate responses may expose flat rows.
+    names = payload.get("names") or payload.get("statNames") or []
+    # Labels match the stats arrays; names may also include DATE/OPP/RESULT.
+    index = labels.index(label) if isinstance(labels, list) and label in labels else -1
     rows = []
     season_types = payload.get("seasonTypes") or []
     if isinstance(season_types, list):
         for season_type in season_types:
             if not isinstance(season_type, dict):
                 continue
-            categories = season_type.get("categories") or []
-            if not isinstance(categories, list):
-                continue
-            for category in categories:
-                if not isinstance(category, dict):
-                    continue
-                category_rows = category.get("events") or []
-                if isinstance(category_rows, dict):
-                    category_rows = list(category_rows.values())
-                if isinstance(category_rows, list):
-                    rows.extend(row for row in category_rows if isinstance(row, dict))
-
-    # Some ESPN responses return game rows directly in events/gameLog.
-    if not rows:
-        direct = payload.get("gameLog") or payload.get("games") or payload.get("events") or []
-        if isinstance(direct, dict):
-            # Dict values can be game metadata; accept only entries with stats.
-            direct = list(direct.values())
-        if isinstance(direct, list):
-            rows = [row for row in direct if isinstance(row, dict) and isinstance(row.get("stats"), list)]
-
-    # If the schema doesn't supply names/labels, use the category's label metadata.
-    if index < 0:
-        for season_type in season_types if isinstance(season_types, list) else []:
-            if not isinstance(season_type, dict):
-                continue
             for category in season_type.get("categories") or []:
                 if not isinstance(category, dict):
                     continue
-                category_names = category.get("names") or []
-                category_labels = category.get("labels") or []
-                if isinstance(category_names, list) and field in category_names:
-                    index = category_names.index(field)
-                    break
-                if isinstance(category_labels, list) and label in category_labels:
-                    index = category_labels.index(label)
-                    break
-            if index >= 0:
-                break
-
+                cat_labels = category.get("labels") or labels
+                cat_names = category.get("names") or names
+                cat_index = cat_labels.index(label) if isinstance(cat_labels, list) and label in cat_labels else -1
+                if cat_index < 0 and isinstance(cat_names, list) and field in cat_names:
+                    cat_index = cat_names.index(field)
+                cat_rows = category.get("events") or []
+                if isinstance(cat_rows, dict):
+                    cat_rows = list(cat_rows.values())
+                if isinstance(cat_rows, list):
+                    rows.extend((row, cat_index) for row in cat_rows if isinstance(row, dict))
+    if not rows:
+        direct = payload.get("gameLog") or payload.get("games") or payload.get("events") or []
+        if isinstance(direct, dict):
+            direct = list(direct.values())
+        if isinstance(direct, list):
+            rows = [(row, index) for row in direct if isinstance(row, dict) and isinstance(row.get("stats"), list)]
     values = []
-    for row in rows:
+    for row, row_index in rows:
         stats = row.get("stats") or []
         if not isinstance(stats, list):
             continue
-        if index < 0 or index >= len(stats):
+        use_index = row_index if row_index >= 0 else index
+        if use_index < 0 and isinstance(names, list) and len(names) == len(stats) and field in names:
+            use_index = names.index(field)
+        if use_index < 0 or use_index >= len(stats):
             continue
-        raw_value = str(stats[index]).replace(",", "").strip()
-        # Stats like 3PT/FG are formatted "made-attempted"; target markets
-        # are count fields and should be plain numeric values.
+        raw_value = str(stats[use_index]).replace(",", "").strip()
+        if field == "threePointsMade" and "-" in raw_value:
+            raw_value = raw_value.split("-", 1)[0].strip()
         try:
             value = float(raw_value)
         except (TypeError, ValueError):
             continue
         if math.isfinite(value) and value >= 0:
             values.append(value)
-
     _ESPN_LOG_CACHE[cache_key] = values
     return values
 
@@ -356,6 +330,7 @@ def proprietary_market_board(market: str = "rebounds"):
                 "under_odds": under_odds,
                 "sample_label": sample_label,
                 "athlete_id": athlete_id,
+                "games_used": len(values),
                 **model,
             })
         except Exception as exc:
