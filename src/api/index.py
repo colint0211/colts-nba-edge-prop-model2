@@ -1146,7 +1146,7 @@ async def api_proxy(path: str, request: FastRequest):
 
                     def _canonical_team(code):
                         code = str(code or "").strip().upper()
-                        return {"NY": "NYK", "GS": "GSW"}.get(code, code)
+                        return {"NY": "NYK", "GS": "GSW", "WSH": "WAS"}.get(code, code)
 
                     def _game_team_codes(game):
                         match = re.match(r"^\s*([A-Z]{2,3})@([A-Z]{2,3})", str(game or "").upper())
@@ -1191,6 +1191,9 @@ async def api_proxy(path: str, request: FastRequest):
                                 prop["athlete_id"] = resolved_id
                                 prop["roster_team"] = resolved_team
                                 prop["identity_resolution"] = "exact_matchup_roster"
+                                prop["identity_verified"] = True
+                                prop["model_status"] = "unprojected"
+                                prop["reason"] = "Identity resolved by exact ESPN matchup-roster match."
                                 roster_team = _canonical_team(resolved_team)
                                 ambiguous_identity = False
 
