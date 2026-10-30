@@ -2,6 +2,7 @@ import os
 import json
 import math
 import random
+import time
 from difflib import SequenceMatcher
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -97,8 +98,7 @@ def _espn_player_id(name):
             candidate_id = (
                 numeric_id(athlete_obj.get("id"))
                 or id_from_uid(athlete_obj.get("uid"))
-                or id_from_href(athlete_obj.get("href"))
-                or id_from_href(value.get("href"))
+                or id_from_href(athlete_obj.get("href"))                or id_from_href(value.get("href"))
                 or id_from_href(value.get("link"))
             )
             links = athlete_obj.get("links") or value.get("links") or []
@@ -197,8 +197,7 @@ def _player_history(athlete_id, field, label):
     current_minutes = _gamelog_values(athlete_id, "minutes", "MIN", 2027)
     previous_minutes = _gamelog_values(athlete_id, "minutes", "MIN", 2026) if len(current) < 5 else []
     values = (current + previous)[-25:]
-    minutes = (current_minutes + previous_minutes)[-25:]
-    paired = [(v, m) for v, m in zip(values, minutes) if m is not None and m > 0]
+    minutes = (current_minutes + previous_minutes)[-25:]    paired = [(v, m) for v, m in zip(values, minutes) if m is not None and m > 0]
     if len(paired) >= 5:
         values, minutes = [x[0] for x in paired], [x[1] for x in paired]
     else:
@@ -297,14 +296,19 @@ def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, ma
         "recommendation":"VALUE CANDIDATE" if best and best[0]>0.05 else ("LEAN / VERIFY" if best and best[0]>0 else "PASS"),
         "model_components":["exponentially weighted history","10-game form signal","minutes adjustment" if valid_minutes else "minutes unavailable; no adjustment","market-specific empirical distribution","Monte Carlo probability estimation"],
         "model_method":"recency-weighted empirical distribution with minutes adjustment; provisional pending out-of-sample calibration",
-        "sample_size":n,"long_run_mean":round(long_mean,2),"recent5_mean":round(recent5_mean,2),
-        "recent10_mean":round(recent10_mean,2),"weighted_mean":round(weighted_mean,2),
+        "sample_size":n,"long_run_mean":round(long_mean,2),"recent5_mean":round(recent5_mean,2),        "recent10_mean":round(recent10_mean,2),"weighted_mean":round(weighted_mean,2),
         "distribution_std_dev":round(std_dev,2),"minute_adjustment_factor":round(minute_factor,3),
         "calibration_status":"uncalibrated"
     }
 
 _BP_OFFERS_CACHE = {}
 _BP_BOOKS_CACHE = {"at": 0, "ids": {}}
+_BP_PROPS_CACHE = {}
+_BP_BOARD_CACHE = {}
+_BP_RATE_LIMIT_UNTIL = 0.0
+_BP_CACHE_TTL_SECONDS = 300
+_BP_BOARD_TTL_SECONDS = 180
+_BP_RATE_LIMIT_COOLDOWN_SECONDS = 90
 
 def _american_probability(odds):
     try:
@@ -345,11 +349,14 @@ def _bp_books():
         return {}
 
 def _bp_event_offers(event_id, market):
+    global _BP_RATE_LIMIT_UNTIL
     key = (str(event_id), market)
-    now = __import__("time").time()
+    now = time.time()
     cached = _BP_OFFERS_CACHE.get(key)
-    if cached and now - cached[0] < 120:
+    if cached and now - cached[0] < 600:
         return cached[1]
+    if now < _BP_RATE_LIMIT_UNTIL:
+        return []
     api_key = os.getenv("BETTINGPROS_API_KEY", "").strip()
     if not api_key:
         return []
@@ -362,6 +369,10 @@ def _bp_event_offers(event_id, market):
         rows = payload.get("offers", []) if isinstance(payload, dict) else []
         _BP_OFFERS_CACHE[key] = (now, rows)
         return rows
+    except HTTPError as exc:
+        if exc.code == 429:
+            _BP_RATE_LIMIT_UNTIL = time.time() + _BP_RATE_LIMIT_COOLDOWN_SECONDS
+        return []
     except Exception:
         return []
 
@@ -397,8 +408,7 @@ def _bp_two_book_market(offers, player_name):
                         line = float(line_obj.get("line"))
                         odds = float(line_obj.get("cost"))
                     except (TypeError, ValueError):
-                        continue
-                    if odds == 0:
+                        continue                    if odds == 0:
                         continue
                     side_prices[side].setdefault(line, {})[book_id] = {
                         "odds": odds, "link": line_obj.get("link"), "updated": line_obj.get("updated")
@@ -497,25 +507,48 @@ def _score_blended_market(model, market_quote):
         "best_over_book": market_quote["over_book"],
         "best_under_book": market_quote["under_book"],
         "calibration_status": "uncalibrated",
-    })
-    return model
+    })    return model
 
 @app.get("/api/proprietary-market-board")
 def proprietary_market_board(market: str = "rebounds"):
+    global _BP_RATE_LIMIT_UNTIL
     market = market.lower().strip()
     if market not in STAT_FIELDS:
         raise HTTPException(status_code=400, detail="Use rebounds, assists, steals, or threes.")
+    now = time.time()
+    cached_board = _BP_BOARD_CACHE.get(market)
+    if cached_board and now - cached_board[0] < _BP_BOARD_TTL_SECONDS:
+        return JSONResponse(cached_board[1])
+    if now < _BP_RATE_LIMIT_UNTIL:
+        raise HTTPException(status_code=503, detail="BettingPros is temporarily rate-limiting requests. The app is cooling down before retrying.")
     api_key = os.getenv("BETTINGPROS_API_KEY", "").strip()
     if not api_key:
         raise HTTPException(status_code=503, detail="BettingPros lines unavailable: API key missing.")
     market_id = BP_MARKETS[market]
-    bp_url = "https://api.bettingpros.com/v3/props?" + urlencode({"sport": "NBA", "market_id": market_id, "page": 1, "limit": 50})
-    try:
-        req = Request(bp_url, headers={"x-api-key": api_key, "accept": "application/json", "user-agent": "ColtsNBAEdge/1.0"})
-        with urlopen(req, timeout=20) as response:
-            bp_payload = json.loads(response.read().decode("utf-8", "replace"))
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail="Could not retrieve " + market + " prop lines from BettingPros.") from exc
+    props_cached = _BP_PROPS_CACHE.get(market)
+    if props_cached and now - props_cached[0] < _BP_CACHE_TTL_SECONDS:
+        bp_payload = props_cached[1]
+    else:
+        bp_url = "https://api.bettingpros.com/v3/props?" + urlencode({"sport": "NBA", "market_id": market_id, "page": 1, "limit": 50})
+        try:
+            req = Request(bp_url, headers={"x-api-key": api_key, "accept": "application/json", "user-agent": "ColtsNBAEdge/1.0"})
+            with urlopen(req, timeout=20) as response:
+                bp_payload = json.loads(response.read().decode("utf-8", "replace"))
+            _BP_PROPS_CACHE[market] = (time.time(), bp_payload)
+        except HTTPError as exc:
+            if exc.code == 429:
+                retry_after = exc.headers.get("Retry-After")
+                try:
+                    cooldown = max(_BP_RATE_LIMIT_COOLDOWN_SECONDS, min(600, int(retry_after)))
+                except (TypeError, ValueError):
+                    cooldown = _BP_RATE_LIMIT_COOLDOWN_SECONDS
+                _BP_RATE_LIMIT_UNTIL = time.time() + cooldown
+                raise HTTPException(status_code=503, detail="BettingPros rate limit reached. The app has paused retries for " + str(cooldown) + " seconds.") from exc
+            if exc.code in (401, 403):
+                raise HTTPException(status_code=502, detail="BettingPros rejected the API key or this account tier does not allow this endpoint.") from exc
+            raise HTTPException(status_code=502, detail="BettingPros props endpoint returned HTTP " + str(exc.code) + ".") from exc
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail="Could not retrieve " + market + " prop lines from BettingPros.") from exc
     field, label = STAT_FIELDS[market]
     output, failures = [], []
     props = bp_payload.get("props") or [] if isinstance(bp_payload, dict) else []
@@ -575,13 +608,16 @@ def proprietary_market_board(market: str = "rebounds"):
         prediction_ledger.save_predictions(output, market)
     except Exception:
         pass
-    return JSONResponse({
+    result = {
         "market": market,
         "source": "ESPN game-log distribution + BettingPros DraftKings/FanDuel no-vig market blend",
         "blend": "50/50 logarithmic opinion pool (provisional pending historical calibration)",
         "line_count": len(props), "projected_count": len(output), "props": output,
         "unavailable": failures[:20],
-    })
+        "cache_ttl_seconds": _BP_BOARD_TTL_SECONDS,
+    }
+    _BP_BOARD_CACHE[market] = (time.time(), result)
+    return JSONResponse(result)
 
 
 @app.get("/api/bettingpros-books")
@@ -597,8 +633,7 @@ def bettingpros_books():
     )
     try:
         with urlopen(req, timeout=15) as response:
-            payload = json.loads(response.read().decode("utf-8", "replace"))
-    except HTTPError as exc:
+            payload = json.loads(response.read().decode("utf-8", "replace"))    except HTTPError as exc:
         raise HTTPException(status_code=502, detail="BettingPros books endpoint returned HTTP " + str(exc.code)) from exc
     except Exception as exc:
         raise HTTPException(status_code=502, detail="Could not retrieve BettingPros sportsbook IDs.") from exc
@@ -697,8 +732,7 @@ def _enrich_live_quarters(payload):
                 summary = json.loads(response.read().decode("utf-8", "replace"))
         except Exception:
             continue
-        plays = summary.get("scoringPlays") or []
-        if not plays:
+        plays = summary.get("scoringPlays") or []        if not plays:
             plays = (summary.get("plays") or {}).get("scoringPlays") or []
         totals_by_id = {}
         totals_by_name = {}
@@ -798,7 +832,6 @@ def model_metrics(market: str = "all"):
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Could not calculate calibration metrics.") from exc
-
 @app.post("/api/model/settle")
 async def model_settle(request: FastRequest):
     try:
