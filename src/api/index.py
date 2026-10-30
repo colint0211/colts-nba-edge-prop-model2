@@ -19,6 +19,216 @@ BP_MARKETS = {"points": 156, "rebounds": 157, "assists": 151, "steals": 160, "th
 @app.get("/", response_class=HTMLResponse)
 async def home():
     return HTMLResponse(HTML)
+
+import math
+import random
+from difflib import SequenceMatcher
+
+ESPN_BASE = "https://site.web.api.espn.com/apis/common/v3/sports/basketball/nba"
+ESPN_SEARCH = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/athletes"
+STAT_FIELDS = {
+    "rebounds": ("rebounds", "rebounds"),
+    "assists": ("assists", "assists"),
+    "steals": ("steals", "steals"),
+    "threes": ("threePointsMade", "3PT"),
+}
+_ESPN_ID_CACHE = {}
+_ESPN_LOG_CACHE = {}
+
+def _get_json(url, timeout=12):
+    req = Request(url, headers={"User-Agent": "Mozilla/5.0 ColtsNBAEdge/1.0", "Accept": "application/json"})
+    with urlopen(req, timeout=timeout) as response:
+        return json.loads(response.read().decode("utf-8", "replace"))
+
+def _norm_player_name(value):
+    return "".join(ch.lower() for ch in str(value or "") if ch.isalnum())
+
+def _espn_player_id(name):
+    key = _norm_player_name(name)
+    if key in _ESPN_ID_CACHE:
+        return _ESPN_ID_CACHE[key]
+    payload = _get_json(ESPN_SEARCH + "?" + urlencode({"search": name, "limit": 10}))
+    candidates = payload.get("athletes") or payload.get("items") or []
+    if isinstance(candidates, dict):
+        candidates = candidates.get("items") or []
+    best_id, best_score = None, 0
+    for item in candidates:
+        if not isinstance(item, dict):
+            continue
+        athlete = item.get("athlete") if isinstance(item.get("athlete"), dict) else item
+        candidate_name = athlete.get("fullName") or athlete.get("displayName") or athlete.get("name") or ""
+        score = SequenceMatcher(None, key, _norm_player_name(candidate_name)).ratio()
+        ref = athlete.get("id") or item.get("id")
+        if score > best_score and ref:
+            best_id, best_score = str(ref), score
+    if best_score < 0.78:
+        best_id = None
+    _ESPN_ID_CACHE[key] = best_id
+    return best_id
+
+def _gamelog_values(athlete_id, field, label, season):
+    cache_key = (str(athlete_id), field, season)
+    if cache_key in _ESPN_LOG_CACHE:
+        return _ESPN_LOG_CACHE[cache_key]
+    url = ESPN_BASE + "/athletes/" + str(athlete_id) + "/gamelog?" + urlencode({"season": season, "seasontype": 2})
+    payload = _get_json(url)
+    names = payload.get("names") or []
+    labels = payload.get("labels") or []
+    index = names.index(field) if field in names else (labels.index(label) if label in labels else -1)
+    values = []
+    if index >= 0:
+        for event in payload.get("events") or []:
+            stats = event.get("stats") or []
+            if index >= len(stats):
+                continue
+            try:
+                value = float(str(stats[index]).replace(",", ""))
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(value) and value >= 0:
+                values.append(value)
+    _ESPN_LOG_CACHE[cache_key] = values
+    return values
+
+def _player_history(athlete_id, field, label):
+    current = _gamelog_values(athlete_id, field, label, 2027)
+    previous = _gamelog_values(athlete_id, field, label, 2026) if len(current) < 5 else []
+    values = current + previous
+    return values[-25:], ("2026-27 + 2025-26" if previous else "2026-27 regular season")
+
+def _odds_profit(probability, odds):
+    if odds is None:
+        return None
+    try:
+        price = float(odds)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(price) or price == 0:
+        return None
+    payout = 100.0 / abs(price) if price < 0 else price / 100.0
+    return probability * payout - (1.0 - probability)
+
+def _simulate_market(values, line, over_odds, under_odds, seed):
+    if len(values) < 5:
+        return None
+    # Recency-weighted empirical bootstrap: 60% last-five form, 40% full available sample.
+    recent = values[-5:]
+    rng = random.Random(seed)
+    sims = 50000
+    over = under = push = total = 0
+    for _ in range(sims):
+        sample = recent[rng.randrange(len(recent))] if rng.random() < 0.60 else values[rng.randrange(len(values))]
+        total += sample
+        if sample > line:
+            over += 1
+        elif sample < line:
+            under += 1
+        else:
+            push += 1
+    over_p, under_p, push_p = over / sims, under / sims, push / sims
+    over_ev = _odds_profit(over_p, over_odds)
+    under_ev = _odds_profit(under_p, under_odds)
+    choices = [(over_ev, "OVER", over_p, over_odds), (under_ev, "UNDER", under_p, under_odds)]
+    choices = [x for x in choices if x[0] is not None]
+    best = max(choices, key=lambda x: x[0]) if choices else None
+    return {
+        "projection": round(total / sims, 2),
+        "over_probability": round(over_p * 100, 2),
+        "under_probability": round(under_p * 100, 2),
+        "push_probability": round(push_p * 100, 2),
+        "simulations": sims,
+        "best_side": best[1] if best else None,
+        "best_probability": round(best[2] * 100, 2) if best else None,
+        "best_odds": best[3] if best else None,
+        "expected_value_pct": round(best[0] * 100, 2) if best else None,
+        "edge_pp": None,
+        "recommendation": "VALUE CANDIDATE" if best and best[0] > 0.05 else ("LEAN / VERIFY" if best and best[0] > 0 else "PASS"),
+    }
+
+@app.get("/api/proprietary-market-board")
+def proprietary_market_board(market: str = "rebounds"):
+    market = market.lower().strip()
+    if market not in STAT_FIELDS:
+        raise HTTPException(status_code=400, detail="Use rebounds, assists, steals, or threes.")
+    api_key = os.getenv("BETTINGPROS_API_KEY", "").strip()
+    if not api_key:
+        raise HTTPException(status_code=503, detail="BettingPros lines unavailable: API key missing.")
+    market_id = BP_MARKETS[market]
+    bp_url = "https://api.bettingpros.com/v3/props?" + urlencode({"sport": "NBA", "market_id": market_id, "page": 1, "limit": 50})
+    try:
+        bp_payload = _get_json(bp_url) if False else None
+        req = Request(bp_url, headers={"x-api-key": api_key, "accept": "application/json", "user-agent": "ColtsNBAEdge/1.0"})
+        with urlopen(req, timeout=20) as response:
+            bp_payload = json.loads(response.read().decode("utf-8", "replace"))
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Could not retrieve " + market + " prop lines from BettingPros.") from exc
+    field, label = STAT_FIELDS[market]
+    output, failures = [], []
+    props = bp_payload.get("props") or [] if isinstance(bp_payload, dict) else []
+    for raw in props:
+        participant = raw.get("participant") or {}
+        player_obj = participant.get("player") or {}
+        event = raw.get("event") or {}
+        over, under = raw.get("over") or {}, raw.get("under") or {}
+        name = participant.get("name") or raw.get("player_name") or (raw.get("player") if isinstance(raw.get("player"), str) else None) or player_obj.get("name") or player_obj.get("full_name")
+        if not name:
+            continue
+        line = over.get("line", under.get("line", raw.get("line", raw.get("line_value"))))
+        try:
+            line = float(line)
+        except (TypeError, ValueError):
+            continue
+        over_odds = over.get("odds", raw.get("over_odds"))
+        under_odds = under.get("odds", raw.get("under_odds"))
+        try:
+            athlete_id = _espn_player_id(name)
+            if not athlete_id:
+                failures.append(name + ": ESPN player match unavailable")
+                continue
+            values, sample_label = _player_history(athlete_id, field, label)
+            model = _simulate_market(values, line, over_odds, under_odds, _norm_player_name(name) + market)
+            if not model:
+                failures.append(name + ": fewer than five valid game logs")
+                continue
+            implied = None
+            if model["best_side"] == "OVER":
+                chosen_odds = over_odds
+                opposite_odds = under_odds
+            else:
+                chosen_odds = under_odds
+                opposite_odds = over_odds
+            try:
+                price = float(chosen_odds)
+                implied = (abs(price) / (abs(price) + 100) * 100) if price < 0 else (100 / (price + 100) * 100)
+            except (TypeError, ValueError):
+                pass
+            if implied is not None and model["best_probability"] is not None:
+                model["edge_pp"] = round(model["best_probability"] - implied, 2)
+            output.append({
+                "player": name,
+                "team": player_obj.get("team") or participant.get("team_abbreviation") or participant.get("team") or "",
+                "game": event.get("name") or raw.get("event_name") or raw.get("matchup") or "",
+                "market": market,
+                "line": line,
+                "over_odds": over_odds,
+                "under_odds": under_odds,
+                "sample_label": sample_label,
+                "athlete_id": athlete_id,
+                **model,
+            })
+        except Exception as exc:
+            failures.append(name + ": data retrieval failed")
+    output.sort(key=lambda x: (x.get("expected_value_pct") is None, -(x.get("expected_value_pct") or -999)))
+    return JSONResponse({
+        "market": market,
+        "source": "Proprietary ESPN game-log bootstrap model; BettingPros lines and odds only",
+        "simulations_per_prop": 50000,
+        "line_count": len(props),
+        "projected_count": len(output),
+        "props": output,
+        "unavailable": failures[:20],
+    })
+
 @app.get("/api/bettingpros-props")
 def bettingpros_props(market: str = "rebounds"):
     market = market.lower().strip()
