@@ -48,13 +48,38 @@ async function loadCustomLines(){
     for(const p of (d.props||[]))customOverrides[customLineKey(p,p.market)]=p;
   }catch(e){console.warn('Could not load saved custom lines:',e.message||e)}
 }
-function applySavedOverrides(rows,m){
-  return (rows||[]).map(p=>{
+async function applySavedOverrides(rows,m){
+  const output=await Promise.all((rows||[]).map(async p=>{
     const saved=customOverrides[customLineKey(p,m)];
-    return saved?{...p,...saved,market:m,custom_line:true,overOdds:saved.over_odds,underOdds:saved.under_odds,
-      expected_profit_per_100:saved.expected_profit_per_100??saved.expected_value_pct,
-      model_status:'projected'}:p;
-  });
+    if(!saved)return p;
+    // Persist only the user's line and prices. Never reuse an old projection
+    // or probability snapshot: recalculate it from the current shared model.
+    const payload={
+      player:p.player,team:p.team||saved.team||'',game:p.game||saved.game||'',
+      athlete_id:p.athlete_id||saved.athlete_id,market:m,
+      line:saved.line,over_odds:saved.over_odds,under_odds:saved.under_odds
+    };
+    try{
+      const r=await fetch('/api/model/recalculate',{
+        method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(payload),cache:'no-store'
+      });
+      const d=await r.json();
+      if(!r.ok||!d.prop)throw Error(d.detail||'Saved line recalculation failed');
+      return {...p,...d.prop,market:m,custom_line:true,
+        overOdds:d.prop.over_odds,underOdds:d.prop.under_odds,
+        model_status:'projected'};
+    }catch(e){
+      console.warn('Could not refresh saved line for '+p.player+':',e.message||e);
+      return {...p,line:saved.line,over_odds:saved.over_odds,under_odds:saved.under_odds,
+        overOdds:saved.over_odds,underOdds:saved.under_odds,
+        projection:null,best_probability:null,best_side:null,
+        expected_value_pct:null,expected_profit_per_100:null,edge_pp:null,
+        recommendation:'PASS',model_status:'unprojected',
+        reason:'Saved sportsbook line retained; current model recalculation unavailable.'};
+    }
+  }));
+  return output;
 }
 function isEligibleEV(p){
   const sample=Number(p.sample_size??p.games_used??0);
@@ -87,7 +112,7 @@ async function load(refresh=false){
     const r=await fetch('/api/auto-board'+(refresh?'?refresh=true':''),{cache:'no-store'}),d=await r.json();
     if(!r.ok)throw Error(d.detail?.message||d.detail||'Board unavailable');
     data=d.props||[];
-    await loadCustomLines();data=applySavedOverrides(data,'points');
+    await loadCustomLines();data=await applySavedOverrides(data,'points');
     el('ng').textContent=d.schedule_game_count??'—';
     el('nl').textContent=d.line_count??data.length;
     el('np').textContent=d.projected_count??0;
@@ -203,7 +228,7 @@ async function loadBP(m){
     const r=await fetch('/api/proprietary-market-board?market='+encodeURIComponent(m)+'&ts='+Date.now(),{cache:'no-store'});
     const d=await r.json();
     if(!r.ok)throw Error(d.detail||d.error||'Proprietary model request failed');
-    bpCache[m]=applySavedOverrides((d.props||[]).map(p=>({...p,overOdds:p.over_odds,underOdds:p.under_odds,ev:p.expected_value_pct==null?null:Number(p.expected_value_pct)/100,expected_profit_per_100:p.expected_value_pct,model_status:'projected',best_side:p.best_side,best_probability:p.best_probability,market:m,simulations:p.simulations})).filter(p=>p.player&&p.line!=null),m);
+    bpCache[m]=await applySavedOverrides((d.props||[]).map(p=>({...p,overOdds:p.over_odds,underOdds:p.under_odds,ev:p.expected_value_pct==null?null:Number(p.expected_value_pct)/100,expected_profit_per_100:p.expected_value_pct,model_status:'projected',best_side:p.best_side,best_probability:p.best_probability,market:m,simulations:p.simulations})).filter(p=>p.player&&p.line!=null),m);
     bpLoading[m]=false;render();renderFull();
   }catch(e){bpLoading[m]=false;bpCache[m]={error:e.message};render();renderFull()}
 }
