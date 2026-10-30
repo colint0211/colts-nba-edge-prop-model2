@@ -30,6 +30,54 @@ STAT_FIELDS = {
 }
 _ESPN_ID_CACHE = {}
 _ESPN_LOG_CACHE = {}
+_ESPN_ROSTER_CACHE = {}
+
+def _espn_roster_player_id(name, team_codes):
+    """Resolve an exact player identity only from the two teams in the matchup."""
+    normalized_name = _norm_player_name(name)
+    matches = {}
+
+    for team_code in sorted(set(team_codes or [])):
+        team_code = str(team_code or "").strip().lower()
+        if not team_code:
+            continue
+        if team_code not in _ESPN_ROSTER_CACHE:
+            url = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/" + team_code + "/roster"
+            try:
+                payload = _get_json(url, timeout=8)
+            except Exception:
+                payload = {}
+            found = {}
+
+            def walk_roster(value):
+                if isinstance(value, dict):
+                    athlete = value.get("athlete") if isinstance(value.get("athlete"), dict) else value
+                    athlete_id = str(athlete.get("id") or "").strip()
+                    athlete_name = (
+                        athlete.get("fullName") or athlete.get("displayName")
+                        or athlete.get("name") or ""
+                    )
+                    if athlete_id.isdigit() and athlete_name:
+                        found[athlete_id] = str(athlete_name)
+                    for child in value.values():
+                        if isinstance(child, (dict, list)):
+                            walk_roster(child)
+                elif isinstance(value, list):
+                    for child in value:
+                        walk_roster(child)
+
+            walk_roster(payload)
+            _ESPN_ROSTER_CACHE[team_code] = found
+
+        for athlete_id, athlete_name in _ESPN_ROSTER_CACHE[team_code].items():
+            if _norm_player_name(athlete_name) == normalized_name:
+                matches[(athlete_id, team_code.upper())] = athlete_name
+
+    if len(matches) == 1:
+        athlete_id, team_code = next(iter(matches))
+        canonical = {"NYK": "NYK", "GSW": "GSW"}.get(team_code, team_code)
+        return athlete_id, canonical
+    return None, None
 
 def _get_json(url, timeout=12):
     req = Request(url, headers={"User-Agent": "Mozilla/5.0 ColtsNBAEdge/1.0", "Accept": "application/json"})
@@ -1131,6 +1179,21 @@ async def api_proxy(path: str, request: FastRequest):
                         )
                         game_teams = _game_team_codes(prop.get("game"))
                         roster_team = _canonical_team(prop.get("roster_team") or prop.get("team"))
+
+                        # Re-resolve ambiguous upstream names against the actual
+                        # ESPN rosters for this matchup. Only an exact name found
+                        # on exactly one of the two teams is accepted.
+                        if ambiguous_identity and game_teams:
+                            resolved_id, resolved_team = _espn_roster_player_id(
+                                prop.get("player"), game_teams
+                            )
+                            if resolved_id and resolved_team:
+                                prop["athlete_id"] = resolved_id
+                                prop["roster_team"] = resolved_team
+                                prop["identity_resolution"] = "exact_matchup_roster"
+                                roster_team = _canonical_team(resolved_team)
+                                ambiguous_identity = False
+
                         wrong_game_team = bool(roster_team and game_teams and roster_team not in game_teams)
                         if ambiguous_identity or wrong_game_team:
                             for key in projection_fields:
