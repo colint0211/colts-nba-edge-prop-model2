@@ -131,9 +131,9 @@ def _espn_player_id(name):
     _ESPN_ID_CACHE[key] = best_id
     return best_id
 
-def _gamelog_values(athlete_id, field, label, season):
-    """Read per-game stat rows from ESPN's nested common-v3 gamelog schema."""
-    cache_key = (str(athlete_id), field, season)
+def _gamelog_records(athlete_id, field, label, season):
+    """Return stat values with their ESPN event identifiers so stats and minutes align."""
+    cache_key = (str(athlete_id), field, season, "records")
     if cache_key in _ESPN_LOG_CACHE:
         return _ESPN_LOG_CACHE[cache_key]
     url = ESPN_BASE + "/athletes/" + str(athlete_id) + "/gamelog?" + urlencode({"season": season})
@@ -143,68 +143,102 @@ def _gamelog_values(athlete_id, field, label, season):
         return []
     labels = payload.get("labels") or []
     names = payload.get("names") or payload.get("statNames") or []
-    # Labels match the stats arrays; names may also include DATE/OPP/RESULT.
-    index = labels.index(label) if isinstance(labels, list) and label in labels else -1
-    rows = []
-    season_types = payload.get("seasonTypes") or []
-    if isinstance(season_types, list):
-        for season_type in season_types:
-            if not isinstance(season_type, dict):
+    default_index = labels.index(label) if isinstance(labels, list) and label in labels else -1
+    source_rows = []
+    for season_type in payload.get("seasonTypes") or []:
+        if not isinstance(season_type, dict):
+            continue
+        for category in season_type.get("categories") or []:
+            if not isinstance(category, dict):
                 continue
-            for category in season_type.get("categories") or []:
-                if not isinstance(category, dict):
-                    continue
-                cat_labels = category.get("labels") or labels
-                cat_names = category.get("names") or names
-                cat_index = cat_labels.index(label) if isinstance(cat_labels, list) and label in cat_labels else -1
-                if cat_index < 0 and isinstance(cat_names, list) and field in cat_names:
-                    cat_index = cat_names.index(field)
-                cat_rows = category.get("events") or []
-                if isinstance(cat_rows, dict):
-                    cat_rows = list(cat_rows.values())
-                if isinstance(cat_rows, list):
-                    rows.extend((row, cat_index) for row in cat_rows if isinstance(row, dict))
-    if not rows:
+            cat_labels = category.get("labels") or labels
+            cat_names = category.get("names") or names
+            idx = cat_labels.index(label) if isinstance(cat_labels, list) and label in cat_labels else -1
+            if idx < 0 and isinstance(cat_names, list) and field in cat_names:
+                idx = cat_names.index(field)
+            events = category.get("events") or []
+            if isinstance(events, dict):
+                events = list(events.values())
+            if isinstance(events, list):
+                source_rows.extend((row, idx) for row in events if isinstance(row, dict))
+    if not source_rows:
         direct = payload.get("gameLog") or payload.get("games") or payload.get("events") or []
         if isinstance(direct, dict):
             direct = list(direct.values())
         if isinstance(direct, list):
-            rows = [(row, index) for row in direct if isinstance(row, dict) and isinstance(row.get("stats"), list)]
-    values = []
-    for row, row_index in rows:
+            source_rows = [(row, default_index) for row in direct if isinstance(row, dict) and isinstance(row.get("stats"), list)]
+    records = []
+    for row, row_index in source_rows:
         stats = row.get("stats") or []
         if not isinstance(stats, list):
             continue
-        use_index = row_index if row_index >= 0 else index
-        if use_index < 0 and isinstance(names, list) and len(names) == len(stats) and field in names:
-            use_index = names.index(field)
-        if use_index < 0 or use_index >= len(stats):
+        idx = row_index if row_index >= 0 else default_index
+        if idx < 0 and isinstance(names, list) and len(names) == len(stats) and field in names:
+            idx = names.index(field)
+        if idx < 0 or idx >= len(stats):
             continue
-        raw_value = str(stats[use_index]).replace(",", "").strip()
-        if field == "threePointsMade" and "-" in raw_value:
-            raw_value = raw_value.split("-", 1)[0].strip()
+        raw = str(stats[idx]).replace(",", "").strip()
+        if field == "threePointsMade" and "-" in raw:
+            raw = raw.split("-", 1)[0].strip()
         try:
-            value = float(raw_value)
+            value = float(raw)
         except (TypeError, ValueError):
             continue
-        if math.isfinite(value) and value >= 0:
-            values.append(value)
-    _ESPN_LOG_CACHE[cache_key] = values
-    return values
+        if not math.isfinite(value) or value < 0:
+            continue
+        event = row.get("event") if isinstance(row.get("event"), dict) else {}
+        event_id = row.get("eventId") or row.get("event_id") or event.get("id") or row.get("id")
+        date = row.get("date") or row.get("gameDate") or event.get("date") or ""
+        records.append({"event_id": str(event_id) if event_id is not None else None,
+                        "date": str(date), "value": value})
+    _ESPN_LOG_CACHE[cache_key] = records
+    return records
+
+
+def _gamelog_values(athlete_id, field, label, season):
+    """Compatibility helper returning values in the ESPN gamelog order."""
+    return [row["value"] for row in _gamelog_records(athlete_id, field, label, season)]
+
 
 def _player_history(athlete_id, field, label):
-    current = _gamelog_values(athlete_id, field, label, 2027)
-    previous = _gamelog_values(athlete_id, field, label, 2026) if len(current) < 5 else []
-    current_minutes = _gamelog_values(athlete_id, "minutes", "MIN", 2027)
-    previous_minutes = _gamelog_values(athlete_id, "minutes", "MIN", 2026) if len(current) < 5 else []
-    values = (current + previous)[-25:]
-    minutes = (current_minutes + previous_minutes)[-25:]
-    paired = [(v, m) for v, m in zip(values, minutes) if m is not None and m > 0]
-    if len(paired) >= 5:
-        values, minutes = [x[0] for x in paired], [x[1] for x in paired]
-    else:
-        minutes = []
-    return values, ("2026-27 + 2025-26" if previous else "2026-27 regular season"), minutes
+    """Align stat and minutes by game ID; use prior season only as limited fallback."""
+    current_stats = _gamelog_records(athlete_id, field, label, 2027)
+    current_minutes = _gamelog_records(athlete_id, "minutes", "MIN", 2027)
+    prior_stats = []
+    prior_minutes = []
+    if len(current_stats) < 5:
+        prior_stats = _gamelog_records(athlete_id, field, label, 2026)
+        prior_minutes = _gamelog_records(athlete_id, "minutes", "MIN", 2026)
+
+    def pair_records(stats, mins):
+        minute_by_event = {r["event_id"]: r for r in mins if r.get("event_id")}
+        paired = []
+        if minute_by_event:
+            for stat in stats:
+                event_id = stat.get("event_id")
+                minute = minute_by_event.get(event_id) if event_id else None
+                if minute and minute["value"] > 0:
+                    paired.append((stat, minute))
+        elif len(stats) == len(mins):
+            paired = [(a, b) for a, b in zip(stats, mins) if b["value"] > 0]
+        return paired
+
+    paired = pair_records(current_stats, current_minutes)
+    used_prior = False
+    if len(current_stats) < 5 and len(paired) < 5 and prior_stats:
+        prior_pairs = pair_records(prior_stats, prior_minutes)
+        paired = prior_pairs + paired
+        used_prior = bool(prior_pairs)
+
+    # Keep only verified stat/minute pairs; sort chronologically when dates exist.
+    paired = [(a, b) for a, b in paired if math.isfinite(a["value"]) and math.isfinite(b["value"]) and b["value"] > 0]
+    if any(a.get("date") for a, _ in paired):
+        paired.sort(key=lambda item: item[0].get("date") or "")
+    paired = paired[-25:]
+    values = [a["value"] for a, _ in paired]
+    minutes = [b["value"] for _, b in paired]
+    sample_label = "2026-27 + 2025-26 limited fallback" if used_prior else "2026-27 regular season"
+    return values, sample_label, minutes
 
 def _odds_profit(win_probability, loss_probability, odds):
     if odds is None:
