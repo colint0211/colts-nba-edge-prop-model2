@@ -1070,7 +1070,7 @@ def _run_pending_settlements():
 
     try:
         prediction_ledger.initialize()
-        candidates = prediction_ledger.list_settlement_candidates(1000)
+        candidates = prediction_ledger.list_settlement_candidates(150)
         result["checked"] = len(candidates)
         for candidate in candidates:
             snap = candidate.get("snapshot") or {}
