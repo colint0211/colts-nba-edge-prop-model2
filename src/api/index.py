@@ -239,13 +239,37 @@ def _player_history(athlete_id, field, label):
     def pair_records(stats, mins):
         minute_by_event = {r["event_id"]: r for r in mins if r.get("event_id")}
         paired = []
-        if minute_by_event:
-            for stat in stats:
-                event_id = stat.get("event_id")
-                minute = minute_by_event.get(event_id) if event_id else None
-                if minute and minute["value"] > 0:
-                    paired.append((stat, minute))
-        elif len(stats) == len(mins):
+        used_minutes = set()
+        unmatched_stats = []
+        for stat in stats:
+            event_id = stat.get("event_id")
+            minute = minute_by_event.get(event_id) if event_id else None
+            if minute and minute["value"] > 0:
+                paired.append((stat, minute))
+                used_minutes.add(id(minute))
+            else:
+                unmatched_stats.append(stat)
+
+        # ESPN can expose different event-ID formats across season/category
+        # payloads. Exact game-date matching is a safe secondary key and avoids
+        # discarding an otherwise valid prior-season fallback.
+        minute_by_date = {}
+        for minute in mins:
+            date_key = str(minute.get("date") or "")[:10]
+            if date_key and minute["value"] > 0:
+                minute_by_date.setdefault(date_key, []).append(minute)
+        for stat in unmatched_stats:
+            date_key = str(stat.get("date") or "")[:10]
+            candidates = minute_by_date.get(date_key, []) if date_key else []
+            minute = next((item for item in candidates if id(item) not in used_minutes), None)
+            if minute:
+                paired.append((stat, minute))
+                used_minutes.add(id(minute))
+
+        # Positional matching is only safe when neither feed has event IDs and
+        # both arrays have identical lengths.
+        has_any_event_ids = any(r.get("event_id") for r in stats) or any(r.get("event_id") for r in mins)
+        if not paired and not has_any_event_ids and len(stats) == len(mins):
             paired = [(a, b) for a, b in zip(stats, mins) if b["value"] > 0]
         return paired
 
@@ -1050,8 +1074,24 @@ async def api_proxy(path: str, request: FastRequest):
                                 minutes=player_minutes, market="points"
                             )
                             if not model:
+                                # Never leave an upstream projection/probability on a row
+                                # after the local model has rejected its history.
+                                for key in (
+                                    "projection", "sd", "games_used", "recent5_avg", "sample_season",
+                                    "sample_label", "confidence", "probability_reliability",
+                                    "raw_over_probability", "over_probability", "under_probability",
+                                    "best_side", "best_odds", "best_probability", "implied_probability",
+                                    "edge_pp", "expected_profit_per_100", "recommendation",
+                                    "projected_minutes", "push_probability", "simulations",
+                                    "expected_value_pct", "model_components", "model_method",
+                                    "sample_size", "long_run_mean", "recent5_mean", "recent10_mean",
+                                    "weighted_mean", "distribution_std_dev", "minute_adjustment_factor",
+                                    "minutes_sample_size", "baseline_minutes", "minutes_method",
+                                    "calibration_status"
+                                ):
+                                    prop.pop(key, None)
                                 prop["model_status"] = "unprojected"
-                                prop["reason"] = "Insufficient verified game-log history for the local points model."
+                                prop["reason"] = "Insufficient verified regular-season game-log history for the local points model."
                                 continue
                             prop.update(model)
                             prop["sample_label"] = sample_label
