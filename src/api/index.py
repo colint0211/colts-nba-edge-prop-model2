@@ -363,6 +363,28 @@ def proprietary_market_board(market: str = "rebounds"):
     })
 
 
+@app.get("/api/bettingpros-books")
+def bettingpros_books():
+    """Return active BettingPros sportsbook IDs/names so book IDs are never guessed."""
+    api_key = os.getenv("BETTINGPROS_API_KEY", "").strip()
+    if not api_key:
+        raise HTTPException(status_code=503, detail="BETTINGPROS_API_KEY is missing.")
+    req = Request(
+        "https://api.bettingpros.com/v3/books?sport=NBA",
+        headers={"x-api-key": api_key, "accept": "application/json", "user-agent": "ColtsNBAEdge/1.0"},
+        method="GET",
+    )
+    try:
+        with urlopen(req, timeout=15) as response:
+            payload = json.loads(response.read().decode("utf-8", "replace"))
+    except HTTPError as exc:
+        raise HTTPException(status_code=502, detail="BettingPros books endpoint returned HTTP " + str(exc.code)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Could not retrieve BettingPros sportsbook IDs.") from exc
+    books = payload.get("books", []) if isinstance(payload, dict) else []
+    return JSONResponse({"books": books, "count": len(books), "source": "BettingPros API"})
+
+
 @app.get("/api/bettingpros-props")
 def bettingpros_props(market: str = "rebounds"):
     market = market.lower().strip()
