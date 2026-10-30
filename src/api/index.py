@@ -922,9 +922,8 @@ def proprietary_market_board(market: str = "rebounds"):
                 failures.append(name + ": ESPN player match unavailable")
                 continue
             values, sample_label, player_minutes = _player_history(athlete_id, field, label)
-            player_team = player_obj.get("team") or participant.get("team_abbreviation") or participant.get("team") or raw.get("team_abbreviation")
-            matchup_adjustment = _dvp_matchup_adjustment(athlete_id, player_team, event.get("name") or raw.get("event_name") or raw.get("matchup"), market)
-            model = _simulate_market(values, line, None, None, _norm_player_name(name) + market, minutes=player_minutes, market=market, matchup_adjustment=matchup_adjustment)
+            # Positional defense is intentionally applied to the points model only.
+            model = _simulate_market(values, line, None, None, _norm_player_name(name) + market, minutes=player_minutes, market=market)
             if not model:
                 failures.append(name + ": fewer than five valid game logs")
                 continue
@@ -1349,7 +1348,10 @@ async def model_recalculate(request: FastRequest):
             raise HTTPException(status_code=400, detail="Odds are outside the supported range.")
         field, label = ("points", "PTS") if market == "points" else STAT_FIELDS[market]
         values, sample_label, minutes = _player_history(athlete_id, field, label)
-        matchup_adjustment = _dvp_matchup_adjustment(athlete_id, payload.get("team"), payload.get("game"), market)
+        matchup_adjustment = (
+            _dvp_matchup_adjustment(athlete_id, payload.get("team"), payload.get("game"), "points")
+            if market == "points" else None
+        )
         model = _simulate_market(values, line, None, None, _norm_player_name(player) + market + "custom", minutes=minutes, market=market, matchup_adjustment=matchup_adjustment)
         if not model:
             raise HTTPException(status_code=422, detail="Not enough verified game-log history to recalculate this player.")
