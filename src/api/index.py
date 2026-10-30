@@ -208,35 +208,49 @@ def _odds_profit(win_probability, loss_probability, odds):
     payout = 100.0 / abs(price) if price < 0 else price / 100.0
     return win_probability * payout - loss_probability
 
-def _simulate_market(values, line, over_odds, under_odds, seed):
+def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, market=""):
     if len(values) < 5:
         return None
     recent = values[-5:]
+    valid_minutes = [float(x) for x in (minutes or []) if x is not None and float(x) > 0]
+    projected_min = _projected_minutes(valid_minutes)
+    baseline_min = sum(valid_minutes) / len(valid_minutes) if valid_minutes else None
+    # Blend recent and full-season per-minute rates, then adjust game-log outcomes
+    # toward the player's projected rotation. This retains observed variance.
+    adjusted_projection = None
+    if projected_min and baseline_min:
+        recent_pairs = list(zip(values[-min(len(values), len(valid_minutes)):], valid_minutes[-min(len(values), len(valid_minutes)):]))
+        recent_pairs = [(v, m) for v, m in recent_pairs if m > 0]
+        if recent_pairs:
+            recent_rate = sum(v / m for v, m in recent_pairs[-5:]) / len(recent_pairs[-5:])
+            season_rate = sum(v / m for v, m in recent_pairs) / len(recent_pairs)
+            rate = 0.65 * recent_rate + 0.35 * season_rate
+            adjusted_projection = rate * projected_min
     rng = random.Random(seed)
     sims = 50000
     over = under = push = total = 0.0
     for _ in range(sims):
         sample = recent[rng.randrange(len(recent))] if rng.random() < 0.60 else values[rng.randrange(len(values))]
+        if projected_min and baseline_min:
+            sample = 0.55 * sample + 0.45 * (sample * projected_min / baseline_min)
         total += sample
-        if sample > line:
-            over += 1
-        elif sample < line:
-            under += 1
-        else:
-            push += 1
+        if sample > line: over += 1
+        elif sample < line: under += 1
+        else: push += 1
     over_p, under_p, push_p = over / sims, under / sims, push / sims
     over_ev = _odds_profit(over_p, under_p, over_odds)
     under_ev = _odds_profit(under_p, over_p, under_odds)
     best = max([(v, side, prob, price) for v, side, prob, price in [
         (over_ev, "OVER", over_p, over_odds), (under_ev, "UNDER", under_p, under_odds)
     ] if v is not None], key=lambda x: x[0], default=None)
-    # Re-run close decisions at 100k to reduce Monte Carlo noise; deterministic seed.
     if best and -0.02 <= best[0] <= 0.08:
         sims = 100000
         rng = random.Random(seed)
         over = under = push = total = 0.0
         for _ in range(sims):
             sample = recent[rng.randrange(len(recent))] if rng.random() < 0.60 else values[rng.randrange(len(values))]
+            if projected_min and baseline_min:
+                sample = 0.55 * sample + 0.45 * (sample * projected_min / baseline_min)
             total += sample
             if sample > line: over += 1
             elif sample < line: under += 1
@@ -248,7 +262,8 @@ def _simulate_market(values, line, over_odds, under_odds, seed):
             (over_ev, "OVER", over_p, over_odds), (under_ev, "UNDER", under_p, under_odds)
         ] if v is not None], key=lambda x: x[0], default=None)
     return {
-        "projection": round(total / sims, 2),
+        "projection": round(adjusted_projection if adjusted_projection is not None else total / sims, 2),
+        "projected_minutes": round(projected_min, 1) if projected_min else None,
         "over_probability": round(over_p * 100, 2),
         "under_probability": round(under_p * 100, 2),
         "push_probability": round(push_p * 100, 2),
@@ -259,6 +274,7 @@ def _simulate_market(values, line, over_odds, under_odds, seed):
         "expected_value_pct": round(best[0] * 100, 2) if best else None,
         "edge_pp": None,
         "recommendation": "VALUE CANDIDATE" if best and best[0] > 0.05 else ("LEAN / VERIFY" if best and best[0] > 0 else "PASS"),
+        "model_components": ["recent form", "season baseline", "projected minutes", "per-minute production", "rotation trend"],
     }
 
 @app.get("/api/proprietary-market-board")
