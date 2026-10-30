@@ -17,12 +17,12 @@ BP_MARKETS = {"points": 156, "rebounds": 157, "assists": 151, "steals": 160, "th
 async def home():
     return HTMLResponse(HTML)
 ESPN_BASE = "https://site.web.api.espn.com/apis/common/v3/sports/basketball/nba"
-ESPN_SEARCH = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/athletes"
+ESPN_SEARCH = "https://site.web.api.espn.com/apis/search/v2"
 STAT_FIELDS = {
-    "rebounds": ("rebounds", "rebounds"),
-    "assists": ("assists", "assists"),
-    "steals": ("steals", "steals"),
-    "threes": ("threePointsMade", "3PT"),
+    "rebounds": ("rebounds", "REB"),
+    "assists": ("assists", "AST"),
+    "steals": ("steals", "STL"),
+    "threes": ("threePointsMade", "3PM"),
 }
 _ESPN_ID_CACHE = {}
 _ESPN_LOG_CACHE = {}
@@ -39,20 +39,33 @@ def _espn_player_id(name):
     key = _norm_player_name(name)
     if key in _ESPN_ID_CACHE:
         return _ESPN_ID_CACHE[key]
-    payload = _get_json(ESPN_SEARCH + "?" + urlencode({"search": name, "limit": 10}))
-    candidates = payload.get("athletes") or payload.get("items") or []
-    if isinstance(candidates, dict):
-        candidates = candidates.get("items") or []
+    query = urlencode({"query": name, "limit": 20, "sport": "basketball", "league": "nba"})
+    payload = _get_json(ESPN_SEARCH + "?" + query)
+    candidates = []
+    def walk(value):
+        if isinstance(value, dict):
+            candidate_type = str(value.get("type") or value.get("uid") or "").lower()
+            href = str(value.get("href") or value.get("link") or "").lower()
+            athlete_obj = value.get("athlete") if isinstance(value.get("athlete"), dict) else value
+            candidate_name = (athlete_obj.get("fullName") or athlete_obj.get("displayName")
+                              or athlete_obj.get("name") or value.get("title") or "")
+            candidate_id = athlete_obj.get("id") or value.get("id")
+            is_athlete = ("athlete" in candidate_type or "/athletes/" in href
+                          or isinstance(value.get("athlete"), dict))
+            if candidate_id and candidate_name and is_athlete:
+                candidates.append((str(candidate_id), str(candidate_name)))
+            for child in value.values():
+                if isinstance(child, (dict, list)):
+                    walk(child)
+        elif isinstance(value, list):
+            for child in value:
+                walk(child)
+    walk(payload)
     best_id, best_score = None, 0
-    for item in candidates:
-        if not isinstance(item, dict):
-            continue
-        athlete = item.get("athlete") if isinstance(item.get("athlete"), dict) else item
-        candidate_name = athlete.get("fullName") or athlete.get("displayName") or athlete.get("name") or ""
+    for candidate_id, candidate_name in candidates:
         score = SequenceMatcher(None, key, _norm_player_name(candidate_name)).ratio()
-        ref = athlete.get("id") or item.get("id")
-        if score > best_score and ref:
-            best_id, best_score = str(ref), score
+        if score > best_score:
+            best_id, best_score = candidate_id, score
     if best_score < 0.78:
         best_id = None
     _ESPN_ID_CACHE[key] = best_id
