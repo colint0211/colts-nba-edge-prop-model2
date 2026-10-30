@@ -1,4 +1,6 @@
 import os
+import secrets
+from datetime import datetime, timedelta
 import json
 import math
 import random
@@ -1031,17 +1033,41 @@ def model_diagnostics():
     return JSONResponse(result)
 
 
-@app.post("/api/model/settle-pending")
-async def settle_pending_predictions():
-    """Settle only when ESPN confirms the saved athlete played on the prediction date."""
+
+def _run_pending_settlements():
+    """Settle only completed ESPN games with exact athlete and matchup verification."""
     market_fields = {
-        "points": ("points", "PTS"),
-        "rebounds": ("rebounds", "REB"),
-        "assists": ("assists", "AST"),
-        "steals": ("steals", "STL"),
+        "points": ("points", "PTS"), "rebounds": ("rebounds", "REB"),
+        "assists": ("assists", "AST"), "steals": ("steals", "STL"),
         "threes": ("threePointsMade", "3PT"),
     }
+    team_aliases = {"NY": "NYK", "GS": "GSW", "WSH": "WAS"}
+    event_team_cache = {}
     result = {"checked": 0, "settled": 0, "skipped": 0, "errors": 0, "settlements": []}
+
+    def matchup_for_event(event_id):
+        if not event_id:
+            return None
+        key = str(event_id)
+        if key not in event_team_cache:
+            try:
+                payload = _get_json(
+                    "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/summary?"
+                    + urlencode({"event": key}), timeout=8
+                )
+                competitions = (payload.get("header") or {}).get("competitions") or []
+                competitors = competitions[0].get("competitors") if competitions else []
+                teams = set()
+                for competitor in competitors or []:
+                    team = competitor.get("team") or {}
+                    code = str(team.get("abbreviation") or "").upper()
+                    if code:
+                        teams.add(team_aliases.get(code, code))
+                event_team_cache[key] = teams if len(teams) == 2 else None
+            except Exception:
+                event_team_cache[key] = None
+        return event_team_cache[key]
+
     try:
         prediction_ledger.initialize()
         candidates = prediction_ledger.list_settlement_candidates(1000)
@@ -1050,38 +1076,49 @@ async def settle_pending_predictions():
             snap = candidate.get("snapshot") or {}
             athlete_id = str(snap.get("athlete_id") or "").strip()
             market = str(candidate.get("market") or "").lower()
-            target_date = str(candidate.get("created_date") or "")
             mapping = market_fields.get(market)
-            if not athlete_id.isdigit() or not mapping or not target_date:
+            game = str(snap.get("game") or "").upper().replace(" ", "")
+            created_date = str(candidate.get("created_date") or "")
+            if not athlete_id.isdigit() or not mapping or not created_date or "@" not in game:
+                result["skipped"] += 1
+                continue
+            expected_teams = {
+                team_aliases.get(code, code) for code in game.split("@", 1) if code
+            }
+            if len(expected_teams) != 2:
                 result["skipped"] += 1
                 continue
             field, label = mapping
             try:
                 records = _gamelog_records(athlete_id, field, label, 2027)
-                # Prior-season lookups are only relevant for dated snapshots
-                # from that season; never match a player by name alone.
-                matches = [
-                    row for row in records
-                    if str(row.get("date") or "")[:10] == target_date
-                ]
-                if not matches:
+                possible = []
+                created = datetime.fromisoformat(created_date).date()
+                for row in records:
+                    row_date = str(row.get("date") or "")[:10]
+                    event_id = row.get("event_id")
+                    if not row_date or not event_id:
+                        continue
+                    try:
+                        game_date = datetime.fromisoformat(row_date).date()
+                    except ValueError:
+                        continue
+                    # Picks may be entered up to two days before tipoff.
+                    if not (created <= game_date <= created + timedelta(days=2)):
+                        continue
+                    if matchup_for_event(event_id) == expected_teams:
+                        possible.append(row)
+                # More than one possible event is ambiguous; do not settle it.
+                if len(possible) != 1:
                     result["skipped"] += 1
                     continue
-                # Ambiguous multiple entries on one date are deliberately not settled.
-                values = {float(row["value"]) for row in matches}
-                if len(values) != 1:
-                    result["skipped"] += 1
-                    continue
-                actual = next(iter(values))
+                actual = float(possible[0]["value"])
                 settled = prediction_ledger.settle_prediction(candidate["id"], actual)
                 result["settled"] += 1
                 result["settlements"].append({
                     "id": candidate["id"], "player": candidate["player"],
-                    "market": market, "actual": actual,
-                    "outcome": settled["outcome"],
+                    "market": market, "actual": actual, "outcome": settled["outcome"],
                 })
             except ValueError:
-                # A concurrent/manual settlement is not an error.
                 result["skipped"] += 1
             except Exception:
                 result["errors"] += 1
@@ -1090,6 +1127,20 @@ async def settle_pending_predictions():
         raise HTTPException(status_code=503, detail="Prediction database unavailable.") from exc
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Automatic settlement could not run.") from exc
+
+@app.post("/api/model/settle-pending")
+async def settle_pending_predictions(request: FastRequest):
+    secret = os.getenv("CRON_SECRET", "")
+    if not secret or not secrets.compare_digest(request.headers.get("authorization", ""), "Bearer " + secret):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    return _run_pending_settlements()
+
+@app.get("/api/cron/settle-pending")
+async def cron_settle_pending(request: FastRequest):
+    secret = os.getenv("CRON_SECRET", "")
+    if not secret or not secrets.compare_digest(request.headers.get("authorization", ""), "Bearer " + secret):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    return _run_pending_settlements()
 
 @app.get("/api/model/ledger")
 def model_ledger(status: str = "unsettled", market: str = "all", limit: int = 100):
