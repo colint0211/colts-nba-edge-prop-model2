@@ -50,9 +50,9 @@ def _espn_player_id(name):
             candidate_name = (athlete_obj.get("fullName") or athlete_obj.get("displayName")
                               or athlete_obj.get("name") or value.get("title") or "")
             candidate_id = athlete_obj.get("id") or value.get("id")
-            is_athlete = ("athlete" in candidate_type or "/athletes/" in href
-                          or isinstance(value.get("athlete"), dict))
-            if candidate_id and candidate_name and is_athlete:
+            # ESPN search result schemas vary and may omit an explicit athlete type.
+            # Similarity scoring below prevents unrelated results from being selected.
+            if candidate_id and candidate_name:
                 candidates.append((str(candidate_id), str(candidate_name)))
             for child in value.values():
                 if isinstance(child, (dict, list)):
