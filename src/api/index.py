@@ -51,24 +51,20 @@ _TEAM_ALIASES.update({"los angeles clippers":"LAC","brooklyn":"BKN","new york":"
  "phoenix":"PHX","new orleans":"NOP","san antonio":"SAS"})
 class _DVPHTMLParser(HTMLParser):
  def __init__(self):
-  super().__init__(); self.section=None; self.rows=[]; self.row=None; self.cell=None; self.heading=False
- def handle_starttag(self, tag, attrs):
+  super().__init__(); self.rows=[]; self.row=None; self.cell=None
+ def handle_starttag(self,tag,attrs):
   tag=tag.lower()
-  if tag in ("h1","h2","h3"): self.heading=True
-  elif tag=="tr": self.row=[]
+  if tag=="tr": self.row=[]
   elif tag in ("td","th") and self.row is not None: self.cell=[]
- def handle_data(self, data):
+ def handle_data(self,data):
   value=str(data or "").strip()
-  if not value: return
-  if self.heading and value.lower() in ("guards","forwards","centers"): self.section=value.lower()
-  if self.cell is not None: self.cell.append(value)
- def handle_endtag(self, tag):
+  if value and self.cell is not None: self.cell.append(value)
+ def handle_endtag(self,tag):
   tag=tag.lower()
-  if tag in ("h1","h2","h3"): self.heading=False
-  elif tag in ("td","th") and self.cell is not None and self.row is not None:
+  if tag in ("td","th") and self.cell is not None and self.row is not None:
    self.row.append(" ".join(self.cell).strip()); self.cell=None
   elif tag=="tr" and self.row is not None:
-   if self.section and len(self.row)>=7: self.rows.append((self.section,list(self.row)))
+   if self.row: self.rows.append(list(self.row))
    self.row=None; self.cell=None
 def _canonical_team_code(value):
  raw=str(value or "").strip(); upper=raw.upper()
@@ -88,22 +84,21 @@ def _team_codes_from_game(game):
 def _fetch_dvp_table():
  now=time.time()
  if _DVP_CACHE["data"] is not None and now-_DVP_CACHE["at"]<_DVP_CACHE_TTL: return _DVP_CACHE["data"]
- request=Request("https://archivepicks.com/research/nba/defense-vs-position",
+ request=Request("https://www.nbahouse.net/defense-vs-position?stat=PTS&tf=season",
   headers={"User-Agent":"Mozilla/5.0 ColtsNBAEdge/1.0","Accept":"text/html"})
  with urlopen(request,timeout=12) as response: html=response.read().decode("utf-8","replace")
  parser=_DVPHTMLParser(); parser.feed(html)
- indexes={"threes":0,"assists":1,"points":3,"rebounds":4,"steals":5}; parsed={}
- for group,cells in parser.rows:
-  team_text=cells[0].strip().lower(); code=_TEAM_ALIASES.get(team_text)
+ positions=("PG","SG","SF","PF","C"); parsed={}
+ for cells in parser.rows:
+  if len(cells)<6: continue
+  team_text=cells[0].strip().lower()
+  code=_TEAM_ALIASES.get(team_text)
   if not code: code=_TEAM_ALIASES.get(re.sub(r"^[a-z]{3}","",team_text).strip())
   if not code: continue
-  values={}
-  for market,index in indexes.items():
-   if index+1<len(cells):
-    match=re.search(r"\(([0-9]+(?:\.[0-9]+)?)\)",cells[index+1])
-    if match: values[market]=float(match.group(1))
-  if values: parsed[(code,group)]=values
- if len(parsed)<60: raise RuntimeError("Defense-vs-position source returned an incomplete table.")
+  for position,cell in zip(positions,cells[1:6]):
+   match=re.search(r"([0-9]+(?:\\.[0-9]+)?)",str(cell))
+   if match: parsed[(code,position)]={"points":float(match.group(1))}
+ if len(parsed)<120: raise RuntimeError("Individual-position defense-vs-position source returned an incomplete table.")
  _DVP_CACHE.update({"at":now,"data":parsed}); return parsed
 def _espn_player_position(athlete_id,team_code):
  key=(str(athlete_id),str(team_code or "").upper())
@@ -132,29 +127,28 @@ def _espn_player_position(athlete_id,team_code):
  return _ESPN_POSITION_CACHE[key]
 def _position_group(position):
  p=str(position or "").strip().upper()
- if p in ("PG","SG","G","GUARD","POINT GUARD","SHOOTING GUARD") or "GUARD" in p: return "guards"
- if p in ("SF","PF","F","FORWARD","SMALL FORWARD","POWER FORWARD") or "FORWARD" in p: return "forwards"
- if p in ("C","CENTER") or "CENTER" in p: return "centers"
- return None
+ return p if p in ("PG","SG","SF","PF","C") else None
 def _dvp_matchup_adjustment(athlete_id,player_team,game,market):
  try:
   team_code=_canonical_team_code(player_team); game_teams=_team_codes_from_game(game)
   if not team_code or len(game_teams)<2: return None
   opponent=next((code for code in game_teams if code!=team_code),None)
   if not opponent or market not in ("points","rebounds","assists","steals","threes"): return None
-  position=_espn_player_position(athlete_id,team_code); group=_position_group(position)
-  if not group: return None
-  table=_fetch_dvp_table(); allowed=table.get((opponent,group),{}).get(market)
-  league_values=[row[market] for (team,pos),row in table.items() if pos==group and market in row]
+  position=_espn_player_position(athlete_id,team_code); position_key=_position_group(position)
+  if not position_key: return None
+  table=_fetch_dvp_table(); allowed=table.get((opponent,position_key),{}).get("points")
+  league_values=[row["points"] for (team,pos),row in table.items() if pos==position_key and "points" in row]
   if allowed is None or len(league_values)<20: return None
   league_average=sum(league_values)/len(league_values)
   if league_average<=0: return None
   ratio=allowed/league_average; factor=max(0.92,min(1.08,1.0+(ratio-1.0)*0.30))
-  return {"position":position,"position_group":group,"opponent":opponent,"opponent_name":_TEAM_NAMES.get(opponent,opponent),
-   "stat":market,"allowed_per_game":round(allowed,2),"league_position_average":round(league_average,2),
+  position_names={"PG":"Point Guard","SG":"Shooting Guard","SF":"Small Forward","PF":"Power Forward","C":"Center"}
+  return {"position":position,"position_group":position_key,"position_name":position_names[position_key],
+   "opponent":opponent,"opponent_name":_TEAM_NAMES.get(opponent,opponent),
+   "stat":"points","allowed_per_game":round(allowed,2),"league_position_average":round(league_average,2),
    "league_relative_ratio":round(ratio,3),"adjustment_pct":round((factor-1.0)*100,2),"factor":round(factor,4),
-   "source":"ArchivePicks NBA defense-vs-position table",
-   "method":"Position-group allowed-per-game vs league average; 30% dampening; adjustment capped at +/-8%"}
+   "source":"NBA House individual-position points allowed table",
+   "method":"Individual position points allowed per game vs same-position league average; 30% dampening; adjustment capped at +/-8%"}
  except Exception: return None
 
 
