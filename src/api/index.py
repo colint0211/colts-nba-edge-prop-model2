@@ -96,7 +96,7 @@ def _fetch_dvp_table():
   if not code: code=_TEAM_ALIASES.get(re.sub(r"^[a-z]{3}","",team_text).strip())
   if not code: continue
   for position,cell in zip(positions,cells[1:6]):
-   match=re.search(r"([0-9]+(?:\\.[0-9]+)?)",str(cell))
+   match=re.search(r"([0-9]+(?:\.[0-9]+)?)",str(cell))
    if match: parsed[(code,position)]={"points":float(match.group(1))}
  if len(parsed)<120: raise RuntimeError("Individual-position defense-vs-position source returned an incomplete table.")
  _DVP_CACHE.update({"at":now,"data":parsed}); return parsed
