@@ -1030,6 +1030,67 @@ def model_diagnostics():
         return JSONResponse(result, status_code=503)
     return JSONResponse(result)
 
+
+@app.post("/api/model/settle-pending")
+async def settle_pending_predictions():
+    """Settle only when ESPN confirms the saved athlete played on the prediction date."""
+    market_fields = {
+        "points": ("points", "PTS"),
+        "rebounds": ("rebounds", "REB"),
+        "assists": ("assists", "AST"),
+        "steals": ("steals", "STL"),
+        "threes": ("threePointsMade", "3PT"),
+    }
+    result = {"checked": 0, "settled": 0, "skipped": 0, "errors": 0, "settlements": []}
+    try:
+        prediction_ledger.initialize()
+        candidates = prediction_ledger.list_settlement_candidates(1000)
+        result["checked"] = len(candidates)
+        for candidate in candidates:
+            snap = candidate.get("snapshot") or {}
+            athlete_id = str(snap.get("athlete_id") or "").strip()
+            market = str(candidate.get("market") or "").lower()
+            target_date = str(candidate.get("created_date") or "")
+            mapping = market_fields.get(market)
+            if not athlete_id.isdigit() or not mapping or not target_date:
+                result["skipped"] += 1
+                continue
+            field, label = mapping
+            try:
+                records = _gamelog_records(athlete_id, field, label, 2027)
+                # Prior-season lookups are only relevant for dated snapshots
+                # from that season; never match a player by name alone.
+                matches = [
+                    row for row in records
+                    if str(row.get("date") or "")[:10] == target_date
+                ]
+                if not matches:
+                    result["skipped"] += 1
+                    continue
+                # Ambiguous multiple entries on one date are deliberately not settled.
+                values = {float(row["value"]) for row in matches}
+                if len(values) != 1:
+                    result["skipped"] += 1
+                    continue
+                actual = next(iter(values))
+                settled = prediction_ledger.settle_prediction(candidate["id"], actual)
+                result["settled"] += 1
+                result["settlements"].append({
+                    "id": candidate["id"], "player": candidate["player"],
+                    "market": market, "actual": actual,
+                    "outcome": settled["outcome"],
+                })
+            except ValueError:
+                # A concurrent/manual settlement is not an error.
+                result["skipped"] += 1
+            except Exception:
+                result["errors"] += 1
+        return JSONResponse(result)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail="Prediction database unavailable.") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Automatic settlement could not run.") from exc
+
 @app.get("/api/model/ledger")
 def model_ledger(status: str = "unsettled", market: str = "all", limit: int = 100):
     try:
