@@ -436,7 +436,7 @@ def list_settlement_candidates(limit=500):
             SELECT id, market, player, created_at, snapshot
             FROM nba_predictions
             WHERE settled_at IS NULL
-            ORDER BY created_at ASC, id ASC
+            ORDER BY created_at DESC, id DESC
             LIMIT %s
             """,
             (requested_limit,),
