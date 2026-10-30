@@ -806,6 +806,13 @@ async def api_proxy(path: str, request: FastRequest):
         with urlopen(req, timeout=25) as response:
             response_body = response.read()
             media_type = response.headers.get("content-type", "application/json")
+            if path == "auto-board" and "json" in media_type.lower():
+                try:
+                    board_payload = json.loads(response_body.decode("utf-8", "replace"))
+                    prediction_ledger.initialize()
+                    prediction_ledger.save_predictions(board_payload.get("props") or [], "points")
+                except Exception:
+                    pass
             if path == "live-stats" and "json" in media_type.lower():
                 try:
                     live_payload = json.loads(response_body.decode("utf-8", "replace"))
