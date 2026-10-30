@@ -209,60 +209,80 @@ def _odds_profit(win_probability, loss_probability, odds):
     return win_probability * payout - loss_probability
 
 def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, market=""):
-    if len(values) < 5:
+    """
+    Benter-inspired player-prop distribution model.
+    Uses recency-weighted empirical outcomes, shrinkage toward the longer-run
+    baseline, minutes normalization, robust dispersion, and deterministic
+    Monte Carlo. It is not a trained Benter model: calibration weights remain
+    provisional until settled historical predictions are available.
+    """
+    clean = [float(v) for v in values if v is not None and math.isfinite(float(v)) and float(v) >= 0]
+    if len(clean) < 5:
         return None
-    recent = values[-5:]
-    valid_minutes = [float(x) for x in (minutes or []) if x is not None and float(x) > 0]
+    recent = clean[-5:]
+    long_mean = sum(clean) / len(clean)
+    recent_mean = sum(recent) / len(recent)
+    # Empirical-Bayes shrinkage: small/recent samples are pulled toward the
+    # player's longer-run level rather than being allowed to dominate.
+    n = len(clean)
+    prior_games = 8.0
+    shrunk_mean = (n * long_mean + prior_games * (sum(clean) / n)) / (n + prior_games)
+    recency_weight = min(0.35, len(recent) / (len(recent) + 12.0))
+    target_mean = (1.0 - recency_weight) * shrunk_mean + recency_weight * recent_mean
+
+    valid_minutes = []
+    for item in (minutes or []):
+        try:
+            value = float(item)
+            if math.isfinite(value) and value > 0:
+                valid_minutes.append(value)
+        except (TypeError, ValueError):
+            continue
     projected_min = _projected_minutes(valid_minutes)
     baseline_min = sum(valid_minutes) / len(valid_minutes) if valid_minutes else None
-    # Blend recent and full-season per-minute rates, then adjust game-log outcomes
-    # toward the player's projected rotation. This retains observed variance.
-    adjusted_projection = None
-    if projected_min and baseline_min:
-        recent_pairs = list(zip(values[-min(len(values), len(valid_minutes)):], valid_minutes[-min(len(values), len(valid_minutes)):]))
-        recent_pairs = [(v, m) for v, m in recent_pairs if m > 0]
-        if recent_pairs:
-            recent_rate = sum(v / m for v, m in recent_pairs[-5:]) / len(recent_pairs[-5:])
-            season_rate = sum(v / m for v, m in recent_pairs) / len(recent_pairs)
-            rate = 0.65 * recent_rate + 0.35 * season_rate
-            adjusted_projection = rate * projected_min
-    rng = random.Random(seed)
-    sims = 50000
-    over = under = push = total = 0.0
+    minute_factor = 1.0
+    if projected_min and baseline_min and baseline_min > 0:
+        minute_factor = max(0.65, min(1.25, projected_min / baseline_min))
+        target_mean *= minute_factor
+
+    # Rescale each empirical game outcome around the shrunk target mean. This
+    # preserves observed skew/zero-inflation while avoiding raw recent-form chasing.
+    raw_mean = long_mean if long_mean > 0 else 1.0
+    distribution = [max(0.0, v * (target_mean / raw_mean)) for v in clean]
+    # Winsorize only extreme observations for the center estimate; retain the
+    # untrimmed empirical distribution for outcome variance.
+    ordered = sorted(distribution)
+    median = ordered[len(ordered)//2]
+    deviations = sorted(abs(x - median) for x in ordered)
+    mad = deviations[len(deviations)//2] if deviations else 0.0
+    robust_scale = max(0.0, 1.4826 * mad)
+    variance = sum((x - target_mean) ** 2 for x in distribution) / max(1, len(distribution)-1)
+    std_dev = max(math.sqrt(max(0.0, variance)), robust_scale, 0.35)
+
+    rng = random.Random(str(seed) + "|" + str(line) + "|" + str(market))
+    sims = 60000
+    over = under = push = total = 0
+    # A mild normal residual component smooths sparse discrete game-log
+    # distributions without replacing their empirical shape.
     for _ in range(sims):
-        sample = recent[rng.randrange(len(recent))] if rng.random() < 0.60 else values[rng.randrange(len(values))]
-        if projected_min and baseline_min:
-            sample = 0.55 * sample + 0.45 * (sample * projected_min / baseline_min)
+        sample = distribution[rng.randrange(len(distribution))]
+        if rng.random() < 0.20:
+            sample = max(0.0, 0.75 * sample + 0.25 * rng.gauss(target_mean, std_dev))
         total += sample
-        if sample > line: over += 1
-        elif sample < line: under += 1
-        else: push += 1
-    over_p, under_p, push_p = over / sims, under / sims, push / sims
+        if abs(sample - line) < 1e-9:
+            push += 1
+        elif sample > line:
+            over += 1
+        else:
+            under += 1
+    over_p, under_p, push_p = over/sims, under/sims, push/sims
     over_ev = _odds_profit(over_p, under_p, over_odds)
     under_ev = _odds_profit(under_p, over_p, under_odds)
     best = max([(v, side, prob, price) for v, side, prob, price in [
         (over_ev, "OVER", over_p, over_odds), (under_ev, "UNDER", under_p, under_odds)
     ] if v is not None], key=lambda x: x[0], default=None)
-    if best and -0.02 <= best[0] <= 0.08:
-        sims = 100000
-        rng = random.Random(seed)
-        over = under = push = total = 0.0
-        for _ in range(sims):
-            sample = recent[rng.randrange(len(recent))] if rng.random() < 0.60 else values[rng.randrange(len(values))]
-            if projected_min and baseline_min:
-                sample = 0.55 * sample + 0.45 * (sample * projected_min / baseline_min)
-            total += sample
-            if sample > line: over += 1
-            elif sample < line: under += 1
-            else: push += 1
-        over_p, under_p, push_p = over / sims, under / sims, push / sims
-        over_ev = _odds_profit(over_p, under_p, over_odds)
-        under_ev = _odds_profit(under_p, over_p, under_odds)
-        best = max([(v, side, prob, price) for v, side, prob, price in [
-            (over_ev, "OVER", over_p, over_odds), (under_ev, "UNDER", under_p, under_odds)
-        ] if v is not None], key=lambda x: x[0], default=None)
     return {
-        "projection": round(adjusted_projection if adjusted_projection is not None else total / sims, 2),
+        "projection": round(target_mean, 2),
         "projected_minutes": round(projected_min, 1) if projected_min else None,
         "over_probability": round(over_p * 100, 2),
         "under_probability": round(under_p * 100, 2),
@@ -274,7 +294,16 @@ def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, ma
         "expected_value_pct": round(best[0] * 100, 2) if best else None,
         "edge_pp": None,
         "recommendation": "VALUE CANDIDATE" if best and best[0] > 0.05 else ("LEAN / VERIFY" if best and best[0] > 0 else "PASS"),
-        "model_components": ["recent form", "season baseline", "projected minutes", "per-minute production", "rotation trend"],
+        "model_components": ["empirical outcome distribution", "recency weighting", "long-run shrinkage",
+                             "minutes adjustment", "robust dispersion", "Monte Carlo smoothing"],
+        "model_method": "Benter-inspired empirical-Bayes distribution; provisional, requires out-of-sample calibration",
+        "sample_size": n,
+        "long_run_mean": round(long_mean, 2),
+        "recent5_mean": round(recent_mean, 2),
+        "shrunk_mean": round(target_mean, 2),
+        "distribution_std_dev": round(std_dev, 2),
+        "minute_adjustment_factor": round(minute_factor, 3),
+        "calibration_status": "uncalibrated",
     }
 
 _BP_OFFERS_CACHE = {}
@@ -419,18 +448,27 @@ def _log_pool(model_p, market_p, weight=0.5):
     return z / (z + other)
 
 def _score_blended_market(model, market_quote):
-    """Benter-inspired logarithmic opinion pool; equal weights are provisional pending calibration."""
+    """
+    Logarithmic opinion pool on the conditional Over/Under probabilities.
+    Push probability remains a separate model outcome, avoiding the previous
+    distortion from independently pooling two non-complementary probabilities.
+    """
     model_over = model["over_probability"] / 100.0
     model_under = model["under_probability"] / 100.0
+    model_push = max(0.0, min(0.25, model.get("push_probability", 0.0) / 100.0))
+    model_decision_mass = max(1e-9, model_over + model_under)
+    model_over_cond = model_over / model_decision_mass
     market_over = market_quote["over_probability"]
     market_under = market_quote["under_probability"]
-    over = _log_pool(model_over, market_over, 0.5)
-    under = _log_pool(model_under, market_under, 0.5)
-    push = model.get("push_probability", 0.0) / 100.0
-    # Keep the model's push mass; normalize the blended win/loss mass around it.
-    mass = max(1e-9, over + under)
-    available = max(0.0, 1.0 - push)
-    over, under = available * over/mass, available * under/mass
+    market_mass = max(1e-9, market_over + market_under)
+    market_over_cond = market_over / market_mass
+    # Fixed 50% market weight is a transparent starting point, not a learned
+    # optimum. The response exposes this so calibration can replace it later.
+    market_weight = 0.50
+    blended_over_cond = _log_pool(model_over_cond, market_over_cond, market_weight)
+    blended_under_cond = 1.0 - blended_over_cond
+    over = (1.0 - model_push) * blended_over_cond
+    under = (1.0 - model_push) * blended_under_cond
     choices = []
     for side, prob, loss, odds in (
         ("OVER", over, under, market_quote["over_odds"]),
@@ -441,24 +479,27 @@ def _score_blended_market(model, market_quote):
             choices.append((ev, side, prob, odds, loss))
     best = max(choices, key=lambda x: x[0], default=None)
     model.update({
-        "model_over_probability": round(model["over_probability"], 2),
-        "model_under_probability": round(model["under_probability"], 2),
-        "market_over_probability": round(market_over*100, 2),
-        "market_under_probability": round(market_under*100, 2),
-        "over_probability": round(over*100, 2),
-        "under_probability": round(under*100, 2),
+        "model_over_probability": round(model_over * 100, 2),
+        "model_under_probability": round(model_under * 100, 2),
+        "market_over_probability": round(market_over * 100, 2),
+        "market_under_probability": round(market_under * 100, 2),
+        "over_probability": round(over * 100, 2),
+        "under_probability": round(under * 100, 2),
+        "push_probability": round(model_push * 100, 2),
         "best_side": best[1] if best else None,
-        "best_probability": round(best[2]*100, 2) if best else None,
+        "best_probability": round(best[2] * 100, 2) if best else None,
         "best_odds": best[3] if best else None,
-        "expected_value_pct": round(best[0]*100, 2) if best else None,
-        "edge_pp": round((best[2] - _american_probability(best[3]))*100, 2) if best else None,
+        "expected_value_pct": round(best[0] * 100, 2) if best else None,
+        "edge_pp": round((best[2] - _american_probability(best[3])) * 100, 2) if best else None,
         "recommendation": "VALUE CANDIDATE" if best and best[0] > 0.05 else ("LEAN / VERIFY" if best and best[0] > 0 else "PASS"),
-        "kelly_fraction_pct": round(max(0.0, (best[2]*_american_payout(best[3]) - best[4]) /
-            max(1e-9, _american_payout(best[3])*(best[2]+best[4]))) * 100, 2) if best else None,
-        "blend_method": "50/50 logarithmic model-market pool; provisional, not yet outcome-calibrated",
+        "kelly_fraction_pct": round(max(0.0, (best[2] * _american_payout(best[3]) - best[4]) /
+            max(1e-9, _american_payout(best[3]) * (best[2] + best[4]))) * 100, 2) if best else None,
+        "blend_method": "50/50 conditional logarithmic pool; market weight awaits out-of-sample optimization",
+        "market_weight": market_weight,
         "market_books": market_quote["books_used"],
         "best_over_book": market_quote["over_book"],
         "best_under_book": market_quote["under_book"],
+        "calibration_status": "uncalibrated",
     })
     return model
 
