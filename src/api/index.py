@@ -752,6 +752,37 @@ def _enrich_live_quarters(payload):
                 player["points_by_quarter"] = qpoints
     return payload
 
+@app.get("/api/model/diagnostics")
+def model_diagnostics():
+    """Safe database diagnostics; never returns connection strings or credentials."""
+    import re
+    result = {
+        "database_url_configured": bool(os.getenv("DATABASE_URL")),
+        "postgres_url_configured": bool(os.getenv("POSTGRES_URL")),
+        "psycopg_importable": False,
+        "connection_ok": False,
+        "table_exists": False,
+    }
+    try:
+        import psycopg
+        result["psycopg_importable"] = True
+    except Exception as exc:
+        result["error_type"] = type(exc).__name__
+        result["error"] = str(exc)[:240]
+        return JSONResponse(result, status_code=503)
+    try:
+        with prediction_ledger._connect() as conn:
+            result["connection_ok"] = True
+            row = conn.execute("SELECT to_regclass('public.nba_predictions')").fetchone()
+            result["table_exists"] = bool(row and row[0])
+    except Exception as exc:
+        message = str(exc)
+        message = re.sub(r'postgres(?:ql)?://[^\s]+', '[redacted database URL]', message, flags=re.I)
+        result["error_type"] = type(exc).__name__
+        result["error"] = message[:300]
+        return JSONResponse(result, status_code=503)
+    return JSONResponse(result)
+
 @app.get("/api/model/ledger")
 def model_ledger(status: str = "unsettled", market: str = "all", limit: int = 100):
     try:
