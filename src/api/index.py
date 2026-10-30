@@ -1163,6 +1163,19 @@ async def api_proxy(path: str, request: FastRequest):
                                 )
                             if prop.get("injury_flag") or prop.get("injury_status"):
                                 prop["recommendation"] = "PASS"
+                                # Availability overrides the mathematical edge:
+                                # retain the projection for reference, but never
+                                # display a positive EV or a suggested side.
+                                prop["expected_value_pct"] = None
+                                prop["expected_profit_per_100"] = None
+                                prop["edge_pp"] = None
+                                prop["best_side"] = None
+                                prop["best_odds"] = None
+                                prop["best_probability"] = None
+                                prop["probability_note"] = (
+                                    "No bet: player is listed unavailable or has an injury status. "
+                                    "Recheck availability before using this projection."
+                                )
                         except Exception as model_error:
                             prop["model_status"] = "unprojected"
                             prop["reason"] = "Local points model could not verify player history: " + type(model_error).__name__
