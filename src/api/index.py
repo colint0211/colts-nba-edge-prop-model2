@@ -252,18 +252,36 @@ def _odds_profit(win_probability, loss_probability, odds):
     payout = 100.0 / abs(price) if price < 0 else price / 100.0
     return win_probability * payout - loss_probability
 
-def _projected_minutes(valid_minutes):
-    """Robust minutes estimate from available recent positive-minute observations."""
-    if not valid_minutes:
+def _median(values):
+    ordered = sorted(float(value) for value in values)
+    if not ordered:
         return None
-    recent = [float(value) for value in valid_minutes[-5:] if math.isfinite(float(value)) and float(value) > 0]
-    if not recent:
-        return None
-    ordered = sorted(recent)
     middle = len(ordered) // 2
     if len(ordered) % 2:
         return ordered[middle]
     return (ordered[middle - 1] + ordered[middle]) / 2.0
+
+
+def _projected_minutes(valid_minutes):
+    """Blend recent and established playing time so one short stretch cannot dominate."""
+    clean = []
+    for item in valid_minutes or []:
+        try:
+            value = float(item)
+            if math.isfinite(value) and 0 < value <= 60:
+                clean.append(value)
+        except (TypeError, ValueError):
+            continue
+    if not clean:
+        return None
+    recent5 = _median(clean[-5:])
+    recent10 = _median(clean[-10:])
+    established = _median(clean[-20:])
+    if len(clean) < 5:
+        return recent5
+    # Give recent role changes weight without allowing a handful of games to
+    # erase the player's established rotation baseline.
+    return 0.55 * recent5 + 0.30 * recent10 + 0.15 * established
 
 def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, market=""):
     """Recency-weighted empirical projection with minutes adjustment and discrete outcomes."""
@@ -289,11 +307,13 @@ def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, ma
         except (TypeError,ValueError):
             continue
     projected_min = _projected_minutes(valid_minutes)
-    baseline_min = sum(valid_minutes)/len(valid_minutes) if valid_minutes else None
+    baseline_min = _median(valid_minutes[-20:]) if valid_minutes else None
     minute_factor = 1.0
-    if projected_min is not None and baseline_min and baseline_min>0:
-        minute_factor=max(0.70,min(1.20,projected_min/baseline_min))
-        target_mean*=minute_factor
+    if projected_min is not None and baseline_min and baseline_min > 0 and len(valid_minutes) >= 8:
+        # Minutes are a projection adjustment, not a second full projection.
+        # Tight bounds reduce false swings caused by short-term rotations/noise.
+        minute_factor = max(0.85, min(1.15, projected_min / baseline_min))
+        target_mean *= minute_factor
 
     distribution=[max(0.0,v*(target_mean/long_mean)) if long_mean>0 else v for v in clean]
     ordered=sorted(distribution)
@@ -339,6 +359,9 @@ def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, ma
         "model_method":"recency-weighted empirical/parametric mixture with minutes adjustment; provisional pending out-of-sample calibration",
         "sample_size":n,"long_run_mean":round(long_mean,2),"recent5_mean":round(recent5_mean,2),        "recent10_mean":round(recent10_mean,2),"weighted_mean":round(weighted_mean,2),
         "distribution_std_dev":round(std_dev,2),"minute_adjustment_factor":round(minute_factor,3),
+        "minutes_sample_size":len(valid_minutes),
+        "baseline_minutes":round(baseline_min,1) if baseline_min is not None else None,
+        "minutes_method":"55% recent-5 median / 30% recent-10 median / 15% recent-20 median; adjustment capped at +/-15%",
         "calibration_status":"uncalibrated"
     }
 
