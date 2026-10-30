@@ -410,7 +410,8 @@ def _bp_two_book_market(offers, player_name):
                         line = float(line_obj.get("line"))
                         odds = float(line_obj.get("cost"))
                     except (TypeError, ValueError):
-                        continue                    if odds == 0:
+                        continue
+                    if odds == 0:
                         continue
                     side_prices[side].setdefault(line, {})[book_id] = {
                         "odds": odds, "link": line_obj.get("link"), "updated": line_obj.get("updated")
