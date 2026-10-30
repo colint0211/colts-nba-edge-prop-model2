@@ -1101,7 +1101,7 @@ async def api_proxy(path: str, request: FastRequest):
                         return {"NY": "NYK", "GS": "GSW", "WAS": "WSH", "WSH": "WAS"}.get(code, code)
 
                     def _game_team_codes(game):
-                        match = re.match(r"^\\s*([A-Z]{2,3})@([A-Z]{2,3})", str(game or "").upper())
+                        match = re.match(r"^\s*([A-Z]{2,3})@([A-Z]{2,3})", str(game or "").upper())
                         return {_canonical_team(match.group(1)), _canonical_team(match.group(2))} if match else set()
 
                     projection_fields = (
