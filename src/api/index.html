@@ -89,26 +89,6 @@ async function updateLive(){
     el('liveUpdated').textContent='Scores checked '+new Date(liveData.updated_at||Date.now()).toLocaleTimeString();
   }catch(_){el('liveUpdated').textContent='Live feed temporarily unavailable'}
 }
-function quarterValues(p){
-  const st=playerLive(p)||{};
-  const candidates=[st,p];
-  const pick=(keys)=>{
-    for(const obj of candidates){
-      for(const key of keys){
-        const v=obj?.[key];
-        if(v!==undefined&&v!==null&&Number.isFinite(Number(v)))return Number(v);
-      }
-    }
-    return null;
-  };
-  const arr=st.points_by_quarter||st.quarter_points||st.period_points||p.points_by_quarter||p.quarter_points||p.period_points;
-  const vals=Array.isArray(arr)?arr:[];
-  const obj=st.quarters||p.quarters||{};
-  return [1,2,3,4].map((q,i)=>{
-    const v=vals[i]??obj['q'+q]??obj['Q'+q]??obj[q]??pick(['q'+q+'_points','Q'+q+'_points','period'+q+'_points','quarter'+q+'_points']);
-    return v==null?'—':num(v,0);
-  });
-}
 function reasoning(p){
   const gap=Number(p.projection)-Number(p.line),rows=[];
   rows.push('<div><b>Projection vs line:</b> '+(Number.isFinite(gap)?(gap>=0?'+':'')+num(gap,2)+' points '+(gap>=0?'above':'below')+' the line':'Unavailable')+'.</div>');
@@ -119,6 +99,26 @@ function reasoning(p){
   if(p.reason)rows.push('<div><b>Model note:</b> '+esc(p.reason)+'.</div>');
   return '<details class="reasoning"><summary>Why this projection? Data &amp; confidence</summary><div class="reasoning-body">'+rows.join('')+'</div></details>';
 }
+function livePace(p){
+  const st=playerLive(p)||{},g=gameFor(p)||{};
+  const points=Number(st.points);
+  const line=Number(p.line);
+  const minutesRaw=st.minutes_played??st.minutesPlayed??st.minutes??st.min??st.minutes_used;
+  const minutes=typeof minutesRaw==="string"?Number(minutesRaw.replace(":",".")):Number(minutesRaw);
+  const period=Number(g.period||g.period_number||0);
+  const clock=String(g.clock||g.display_clock||"").trim();
+  const match=clock.match(/^(\d{1,2}):(\d{2})$/);
+  if(g.state!=="in"||!Number.isFinite(points)||!Number.isFinite(minutes)||minutes<=0||!Number.isFinite(line)||!match||period<1)return null;
+  const secondsLeft=Number(match[1])*60+Number(match[2]);
+  const periodLength=12*60;
+  const regulationRemaining=period<=4?Math.max(0,(4-period)*periodLength+secondsLeft):secondsLeft;
+  const minutesLeft=regulationRemaining/60;
+  const pace=points/minutes;
+  const projected=points+pace*minutesLeft;
+  const margin=projected-line;
+  const verdict=margin>=0.5?"ON PACE TO HIT":margin<=-0.5?"ON PACE TO MISS":"ON THE LINE";
+  return {points,minutes,minutesLeft,projected,margin,verdict};
+}
 function card(p,i){
   const g=gameFor(p),st=playerLive(p),gr=grade(p),pts=st&&st.points!=null?Number(st.points):null;
   const line=Number(p.line),progress=pts==null||!Number.isFinite(line)||line<=0?0:Math.max(0,Math.min(100,pts/line*100));
@@ -127,15 +127,14 @@ function card(p,i){
   const d=fallback?'pass':p.recommendation==='VALUE CANDIDATE'?'value':p.recommendation==='LEAN / VERIFY'?'lean':'pass';
   const score=g?(g.away_score!=null&&g.home_score!=null?g.away+' '+g.away_score+' – '+g.home_score+' '+g.home:g.away+' @ '+g.home):'Score unavailable';
   const liveText=g&&g.state==='in'?'<span class="live-dot"></span>'+esc((g.period?'Q'+g.period:'LIVE')+(g.clock&&g.clock!=='0:00'?' · '+g.clock+' left':'')):esc(g?g.status:'Game status unavailable');
+  const pace=livePace(p);
+  const paceHtml=pace?'<div class="statline" style="margin-top:10px"><div class="mini"><div class="mini-label">Live scoring pace</div><div class="mini-value">'+num(pace.projected,1)+' pts projected</div><div class="mini-label">'+num(pace.points,0)+' pts in '+num(pace.minutes,1)+' min · '+num(pace.minutesLeft,1)+' min left</div></div><div class="mini"><div class="mini-label">Live bet outlook</div><div class="mini-value">'+esc(pace.verdict)+'</div><div class="mini-label">'+(pace.margin>=0?'+':'')+num(pace.margin,1)+' vs '+num(p.line,1)+' line</div></div></div>':'<div class="mini" style="margin-top:10px"><div class="mini-label">Live pace</div><div class="mini-value">Waiting for live minutes and game clock</div><div class="mini-label">Pace estimate appears during a live game when player minutes are available.</div></div>';
   const gradeHtml=gr?'<span class="grade '+(gr==='HIT'?'hit':gr==='MISS'?'miss':'push')+'">'+(gr==='HIT'?'✓ HIT':gr==='MISS'?'✕ MISS':'PUSH')+'</span>':'<span>Pending</span>';
-  const quarters=quarterValues(p);
   return '<article class="player-card '+d+'"><div class="player-top"><div><div class="player-name">'+esc((i+1)+'. '+p.player+(p.roster_team?' ('+p.roster_team+')':''))+'</div><div class="matchup">'+esc(p.game||'Matchup unavailable')+' · '+esc(p.sample_label||'Projection unavailable')+'</div></div><span class="decision '+d+'">'+esc(shownRecommendation)+'</span></div>'+
   '<div class="scorebox"><div><div class="score-label">Live game score</div><div class="score">'+esc(score)+'</div></div><div class="game-status">'+liveText+'</div></div>'+
-  '<div class="statline"><div class="mini"><div class="mini-label">Live points / prop line</div><div class="mini-value">'+(pts==null?'—':pts)+' <span>/ '+num(p.line)+' pts</span></div><div class="progress"><span style="width:'+progress+'%"></span></div></div><div class="mini"><div class="mini-label">Model projection</div><div class="mini-value">'+num(p.projection)+' <span>pts</span></div><div class="mini-label">'+num(p.best_probability)+'% best-side probability</div></div></div>'+
-  '<div class="mini" style="margin-top:10px"><div class="mini-label">Points by quarter (only when supplied by live feed)</div><div class="statline">'+quarters.map((v,i)=>'<div><div class="mini-label">Q'+(i+1)+'</div><div class="mini-value" style="font-size:18px">'+esc(v)+'</div></div>').join('')+'</div></div>'+
+  '<div class="statline"><div class="mini"><div class="mini-label">Live points / prop line</div><div class="mini-value">'+(pts==null?'—':pts)+' <span>/ '+num(p.line)+' pts</span></div><div class="progress"><span style="width:'+progress+'%"></span></div></div><div class="mini"><div class="mini-label">Pre-game model projection</div><div class="mini-value">'+num(p.projection)+' <span>pts</span></div><div class="mini-label">'+num(p.best_probability)+'% best-side probability</div></div></div>'+paceHtml+
   '<div class="card-bottom"><span>Pick: <b>'+esc(p.best_side||'—')+'</b> · '+num(p.edge_pp)+' pp edge</span><span class="ev">'+(p.expected_profit_per_100==null?'—':'$'+num(p.expected_profit_per_100,2)+' EV')+'</span></div>'+
-  '<div class="card-bottom"><span>Odds O '+esc(p.over_odds)+' / U '+esc(p.under_odds)+'</span><span>'+gradeHtml+'</span></div>'+
-  '<div class="card-bottom"><button onclick="recordResult(this)" data-player="'+esc(p.player)+'" data-game="'+esc(p.game)+'" data-line="'+esc(p.line)+'" data-side="'+esc(p.best_side)+'" data-odds="'+esc(p.best_odds)+'" data-prob="'+esc(p.best_probability)+'" '+(p.model_status==='projected'&&p.best_side?'':'disabled')+'>Record final points</button></div>' +lineEditor(p)+reasoning(p)+'</article>';
+  '<div class="card-bottom"><span>Odds O '+esc(p.over_odds??'—')+' / U '+esc(p.under_odds??'—')+'</span><span>'+gradeHtml+'</span></div>'+lineEditor(p)+reasoning(p)+'</article>';
 }
 function bpNorm(p,m){
   const pr=p.projection||{},participant=p.participant||{},playerObj=participant.player||{},event=p.event||{},over=p.over||{},under=p.under||{};
@@ -173,7 +172,8 @@ async function loadBP(m){
 }
 function lineEditor(p){
   const m=p.market||"points",team=p.team||p.roster_team||"";
-  return '<div class="custom-line-editor" style="margin-top:12px;padding:10px;border:1px solid var(--border,#444);border-radius:10px"><div class="mini-label" style="margin-bottom:7px">Your sportsbook line &amp; prices</div><div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px"><label class="mini-label">Line<input type="number" step="0.5" class="custom-line" value="'+esc(p.line??"")+'" style="width:100%;padding:8px"></label><label class="mini-label">Over odds<input type="number" step="1" class="custom-over" value="'+esc(p.over_odds??p.overOdds??"")+'" style="width:100%;padding:8px"></label><label class="mini-label">Under odds<input type="number" step="1" class="custom-under" value="'+esc(p.under_odds??p.underOdds??"")+'" style="width:100%;padding:8px"></label></div><button style="margin-top:8px" onclick="saveCustomLine(this)" data-market="'+esc(m)+'" data-player="'+esc(p.player||"")+'" data-team="'+esc(team)+'" data-game="'+esc(p.game||"")+'" data-athlete="'+esc(p.athlete_id||"")+'">Save &amp; Recalculate</button><span class="mini-label custom-save-status" style="margin-left:8px"></span></div>';
+  const athlete=p.athlete_id||"";
+  return '<div class="custom-line-editor" style="margin-top:14px;padding:12px;border:1px solid var(--border,#777);border-radius:10px;background:var(--panel,rgba(127,127,127,.08))"><div style="font-weight:700;margin-bottom:8px">Enter your sportsbook line and odds</div><div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px"><label class="mini-label">Prop line<input type="number" step="0.5" class="custom-line" value="'+esc(p.line??"")+'" placeholder="e.g. 24.5" style="display:block;width:100%;box-sizing:border-box;padding:9px;margin-top:4px"></label><label class="mini-label">Over odds<input type="number" step="1" class="custom-over" value="'+esc(p.over_odds??p.overOdds??-110)+'" placeholder="-110" style="display:block;width:100%;box-sizing:border-box;padding:9px;margin-top:4px"></label><label class="mini-label">Under odds<input type="number" step="1" class="custom-under" value="'+esc(p.under_odds??p.underOdds??-110)+'" placeholder="-110" style="display:block;width:100%;box-sizing:border-box;padding:9px;margin-top:4px"></label></div><button style="margin-top:10px" onclick="saveCustomLine(this)" data-market="'+esc(m)+'" data-player="'+esc(p.player||"")+'" data-team="'+esc(team)+'" data-game="'+esc(p.game||"")+'" data-athlete="'+esc(athlete)+'">Save line &amp; recalculate EV</button><span class="mini-label custom-save-status" style="display:block;margin-top:7px"></span></div>';
 }
 function sharedPropKey(p){return [p.market||"points",String(p.player||"").toLowerCase(),String(p.game||"").toLowerCase()].join("|");}
 function updateSharedProp(updated){
@@ -191,7 +191,7 @@ async function saveCustomLine(button){
     const body={market:button.dataset.market,player:button.dataset.player,team:button.dataset.team,game:button.dataset.game,athlete_id:button.dataset.athlete,line:Number(line),over_odds:Number(over),under_odds:Number(under)};
     const response=await fetch("/api/model/recalculate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
     const result=await response.json();if(!response.ok)throw Error(result.detail||"Recalculation failed");
-    updateSharedProp(result.prop);const note=document.querySelector(".custom-save-status");if(note)note.textContent="Saved · EV "+Number(result.prop.expected_value_pct).toFixed(2)+"%";
+    const statusText="Saved · EV "+Number(result.prop.expected_value_pct).toFixed(2)+"%";updateSharedProp(result.prop);const matching=[...document.querySelectorAll(".custom-line-editor")].find(x=>x.querySelector("button")?.dataset.player===result.prop.player);if(matching)matching.querySelector(".custom-save-status").textContent=statusText;
   }catch(error){status.textContent=error.message;}finally{button.disabled=false;}
 }
 function bpLineCard(p,i){
