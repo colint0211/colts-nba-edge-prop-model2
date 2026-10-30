@@ -572,8 +572,6 @@ def proprietary_market_board(market: str = "rebounds"):
     cached_board = _BP_BOARD_CACHE.get(market)
     if cached_board and now - cached_board[0] < _BP_BOARD_TTL_SECONDS:
         return JSONResponse(cached_board[1])
-    if now < _BP_RATE_LIMIT_UNTIL:
-        raise HTTPException(status_code=503, detail="BettingPros is temporarily rate-limiting requests. The app is cooling down before retrying.")
     api_key = os.getenv("BETTINGPROS_API_KEY", "").strip()
     if not api_key:
         raise HTTPException(status_code=503, detail="BettingPros lines unavailable: API key missing.")
