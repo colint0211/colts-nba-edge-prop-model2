@@ -56,8 +56,15 @@ function applySavedOverrides(rows,m){
       model_status:'projected'}:p;
   });
 }
+function isEligibleEV(p){
+  const sample=Number(p.sample_size??p.games_used??0);
+  const approved=p.recommendation==='VALUE CANDIDATE'||p.recommendation==='LEAN / VERIFY';
+  return p.model_status==='projected'&&approved&&!isFallback(p)&&sample>=8
+    &&!p.injury_flag&&!p.injury_status
+    &&p.expected_profit_per_100!=null&&Number(p.expected_profit_per_100)>0&&!!p.best_side;
+}
 function rankEV(a){
-  return a.filter(p=>p.model_status==='projected'&&!isFallback(p)&&p.expected_profit_per_100!=null&&Number(p.expected_profit_per_100)>0&&p.best_side)
+  return (a||[]).filter(isEligibleEV)
     .slice().sort((x,y)=>Number(y.expected_profit_per_100)-Number(x.expected_profit_per_100)
       ||Number(y.edge_pp||-999)-Number(x.edge_pp||-999)
       ||String(x.player||'').localeCompare(String(y.player||''))
@@ -243,10 +250,10 @@ function allModelEV(){
   const all=rankEV(data).map(p=>({...p,market:'points'}));
   for(const m of ['rebounds','assists','steals','threes']){
     const rows=bpCache[m];
-    if(Array.isArray(rows))all.push(...rows.filter(p=>p.model_status==='projected'&&p.expected_value_pct!=null&&Number(p.expected_value_pct)>0&&p.best_side&&!isFallback(p)));
+    if(Array.isArray(rows))all.push(...rankEV(rows).map(p=>({...p,market:m})));
   }
-  return all.filter(p=>p.model_status==='projected'&&!isFallback(p)&&p.expected_profit_per_100!=null&&Number(p.expected_profit_per_100)>0&&p.best_side)
-    .sort((a,b)=>Number(b.expected_profit_per_100)-Number(a.expected_profit_per_100)||Number(b.edge_pp||-999)-Number(a.edge_pp||-999)||String(a.player).localeCompare(String(b.player)));
+  return all.sort((a,b)=>Number(b.expected_profit_per_100)-Number(a.expected_profit_per_100)
+    ||Number(b.edge_pp||-999)-Number(a.edge_pp||-999)||String(a.player).localeCompare(String(b.player)));
 }
 function bpCard(p,i){
   const hasProjection=p.projection!=null&&Number.isFinite(Number(p.projection));
