@@ -209,6 +209,19 @@ def _odds_profit(win_probability, loss_probability, odds):
     payout = 100.0 / abs(price) if price < 0 else price / 100.0
     return win_probability * payout - loss_probability
 
+def _projected_minutes(valid_minutes):
+    """Robust minutes estimate from available recent positive-minute observations."""
+    if not valid_minutes:
+        return None
+    recent = [float(value) for value in valid_minutes[-5:] if math.isfinite(float(value)) and float(value) > 0]
+    if not recent:
+        return None
+    ordered = sorted(recent)
+    middle = len(ordered) // 2
+    if len(ordered) % 2:
+        return ordered[middle]
+    return (ordered[middle - 1] + ordered[middle]) / 2.0
+
 def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, market=""):
     """
     Benter-inspired player-prop distribution model.
