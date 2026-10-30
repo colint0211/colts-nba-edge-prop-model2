@@ -302,14 +302,19 @@ def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, ma
     mad=deviations[len(deviations)//2] if deviations else 0.0
     variance=sum((x-target_mean)**2 for x in distribution)/max(1,len(distribution)-1)
     std_dev=max(math.sqrt(max(0.0,variance)),1.4826*mad,0.25)
-    smoothing=0.08 if market in ("steals","threes") else 0.12
+    # A pure empirical bootstrap assigns zero probability to outcomes beyond
+    # the observed sample. Blend it with a wider parametric component so small
+    # samples do not create false near-certainty (for example, 99.9% unders).
+    parametric_weight=0.25 if market in ("steals","threes") else 0.35
+    uncertainty_factor=min(1.25,1.0+0.50/math.sqrt(n))
     rng=random.Random(str(seed)+"|"+str(line)+"|"+str(market))
     sims=60000
     over=under=push=0
     for _ in range(sims):
-        sample=distribution[rng.randrange(len(distribution))]
-        if rng.random()<smoothing:
-            sample=max(0.0,0.85*sample+0.15*rng.gauss(target_mean,std_dev))
+        if rng.random()<parametric_weight:
+            sample=max(0.0,rng.gauss(target_mean,std_dev*uncertainty_factor))
+        else:
+            sample=distribution[rng.randrange(len(distribution))]
         if abs(sample-line)<1e-9: push+=1
         elif sample>line: over+=1
         else: under+=1
@@ -330,8 +335,8 @@ def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, ma
         "expected_value_pct":round(best[0]*100,2) if best else None,
         "edge_pp":None,
         "recommendation":"VALUE CANDIDATE" if best and best[0]>0.05 else ("LEAN / VERIFY" if best and best[0]>0 else "PASS"),
-        "model_components":["exponentially weighted history","10-game form signal","minutes adjustment" if valid_minutes else "minutes unavailable; no adjustment","market-specific empirical distribution","Monte Carlo probability estimation"],
-        "model_method":"recency-weighted empirical distribution with minutes adjustment; provisional pending out-of-sample calibration",
+        "model_components":["exponentially weighted history","10-game form signal","minutes adjustment" if valid_minutes else "minutes unavailable; no adjustment","empirical/parametric mixture distribution","Monte Carlo probability estimation"],
+        "model_method":"recency-weighted empirical/parametric mixture with minutes adjustment; provisional pending out-of-sample calibration",
         "sample_size":n,"long_run_mean":round(long_mean,2),"recent5_mean":round(recent5_mean,2),        "recent10_mean":round(recent10_mean,2),"weighted_mean":round(weighted_mean,2),
         "distribution_std_dev":round(std_dev,2),"minute_adjustment_factor":round(minute_factor,3),
         "calibration_status":"uncalibrated"
