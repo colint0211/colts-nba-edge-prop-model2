@@ -1272,6 +1272,10 @@ async def api_proxy(path: str, request: FastRequest):
                                 # not promote a 4-7 game sample into an EV wager.
                                 prop["expected_value_pct"] = None
                                 prop["expected_profit_per_100"] = None
+                                prop["edge_pp"] = None
+                                prop["best_side"] = None
+                                prop["best_odds"] = None
+                                prop["best_probability"] = None
                                 prop["recommendation"] = "PASS"
                                 prop["probability_note"] = (
                                     "Projection only: fewer than 8 verified regular-season games. "
