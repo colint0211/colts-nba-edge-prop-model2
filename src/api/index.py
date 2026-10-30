@@ -275,17 +275,30 @@ def _player_history(athlete_id, field, label):
 
     paired = pair_records(current_stats, current_minutes)
     used_prior = False
-    if len(current_stats) < 5 and len(paired) < 5 and prior_stats:
+    history_stats = list(current_stats)
+    if len(current_stats) < 5 and prior_stats:
+        # Prior-season scoring records remain valid even if ESPN's separate
+        # stat/minute categories cannot be joined. Minutes are optional; never
+        # throw away verified scoring history solely because that join failed.
+        history_stats = list(prior_stats) + history_stats
         prior_pairs = pair_records(prior_stats, prior_minutes)
         paired = prior_pairs + paired
-        used_prior = bool(prior_pairs)
+        used_prior = True
 
-    # Keep only verified stat/minute pairs; sort chronologically when dates exist.
-    paired = [(a, b) for a, b in paired if math.isfinite(a["value"]) and math.isfinite(b["value"]) and b["value"] > 0]
+    history_stats = [
+        row for row in history_stats
+        if math.isfinite(row.get("value", float("nan"))) and row.get("value", -1) >= 0
+    ]
+    if any(row.get("date") for row in history_stats):
+        history_stats.sort(key=lambda row: row.get("date") or "")
+    history_stats = history_stats[-25:]
+
+    # Minutes are used only when verified by event ID or exact game date.
+    paired = [(a, b) for a, b in paired if math.isfinite(a["value"]) and math.isfinite(b["value"]) and 0 < b["value"] <= 60]
     if any(a.get("date") for a, _ in paired):
         paired.sort(key=lambda item: item[0].get("date") or "")
     paired = paired[-25:]
-    values = [a["value"] for a, _ in paired]
+    values = [row["value"] for row in history_stats]
     minutes = [b["value"] for _, b in paired]
     sample_label = "2026-27 + 2025-26 limited fallback" if used_prior else "2026-27 regular season"
     return values, sample_label, minutes
