@@ -1079,11 +1079,14 @@ def _run_pending_settlements():
             mapping = market_fields.get(market)
             game = str(snap.get("game") or "").upper().replace(" ", "")
             created_date = str(candidate.get("created_date") or "")
-            if not athlete_id.isdigit() or not mapping or not created_date or "@" not in game:
+            # Provider labels may append weekday/tipoff text, e.g. CHA@WASFRI7:00.
+            # Match only the leading two team abbreviations before validating ESPN.
+            matchup = re.match(r"^([A-Z]{2,3})@([A-Z]{2,3})", game)
+            if not athlete_id.isdigit() or not mapping or not created_date or not matchup:
                 result["skipped"] += 1
                 continue
             expected_teams = {
-                team_aliases.get(code, code) for code in game.split("@", 1) if code
+                team_aliases.get(code, code) for code in matchup.groups()
             }
             if len(expected_teams) != 2:
                 result["skipped"] += 1
