@@ -277,6 +277,191 @@ def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, ma
         "model_components": ["recent form", "season baseline", "projected minutes", "per-minute production", "rotation trend"],
     }
 
+_BP_OFFERS_CACHE = {}
+_BP_BOOKS_CACHE = {"at": 0, "ids": {}}
+
+def _american_probability(odds):
+    try:
+        value = float(odds)
+        if not math.isfinite(value) or value == 0:
+            return None
+        return abs(value) / (abs(value) + 100.0) if value < 0 else 100.0 / (value + 100.0)
+    except (TypeError, ValueError):
+        return None
+
+def _american_payout(odds):
+    value = float(odds)
+    return 100.0 / abs(value) if value < 0 else value / 100.0
+
+def _bp_books():
+    now = __import__("time").time()
+    if now - _BP_BOOKS_CACHE["at"] < 3600 and _BP_BOOKS_CACHE["ids"]:
+        return _BP_BOOKS_CACHE["ids"]
+    api_key = os.getenv("BETTINGPROS_API_KEY", "").strip()
+    if not api_key:
+        return {}
+    req = Request("https://api.bettingpros.com/v3/books?sport=NBA",
+        headers={"x-api-key": api_key, "accept": "application/json", "user-agent": "ColtsNBAEdge/1.0"})
+    try:
+        with urlopen(req, timeout=12) as response:
+            payload = json.loads(response.read().decode("utf-8", "replace"))
+        rows = payload.get("books", []) if isinstance(payload, dict) else []
+        ids = {}
+        for row in rows:
+            name = str(row.get("name") or row.get("title") or "").lower()
+            if "draftkings" in name or "draft kings" in name:
+                ids["draftkings"] = int(row["id"])
+            elif "fanduel" in name or "fan duel" in name:
+                ids["fanduel"] = int(row["id"])
+        _BP_BOOKS_CACHE.update({"at": now, "ids": ids})
+        return ids
+    except Exception:
+        return {}
+
+def _bp_event_offers(event_id, market):
+    key = (str(event_id), market)
+    now = __import__("time").time()
+    cached = _BP_OFFERS_CACHE.get(key)
+    if cached and now - cached[0] < 120:
+        return cached[1]
+    api_key = os.getenv("BETTINGPROS_API_KEY", "").strip()
+    if not api_key:
+        return []
+    params = urlencode({"sport": "NBA", "market_id": BP_MARKETS[market], "event_id": event_id, "page": 1, "limit": 50})
+    req = Request("https://api.bettingpros.com/v3/offers?" + params,
+        headers={"x-api-key": api_key, "accept": "application/json", "user-agent": "ColtsNBAEdge/1.0"})
+    try:
+        with urlopen(req, timeout=15) as response:
+            payload = json.loads(response.read().decode("utf-8", "replace"))
+        rows = payload.get("offers", []) if isinstance(payload, dict) else []
+        _BP_OFFERS_CACHE[key] = (now, rows)
+        return rows
+    except Exception:
+        return []
+
+def _bp_two_book_market(offers, player_name):
+    """Return a same-line DK/FD no-vig blend and the best price at that exact line."""
+    books = _bp_books()
+    wanted = {books.get("draftkings"), books.get("fanduel")} - {None}
+    if not wanted:
+        return None
+    target = _norm_player_name(player_name)
+    matches = []
+    for offer in offers:
+        participants = offer.get("participants") or []
+        names = [_norm_player_name(p.get("name") or "") for p in participants if isinstance(p, dict)]
+        if not names or max((SequenceMatcher(None, target, n).ratio() for n in names), default=0) < 0.90:
+            continue
+        side_prices = {"over": {}, "under": {}}
+        for selection in offer.get("selections") or []:
+            side = str(selection.get("selection") or "").lower()
+            if side not in side_prices:
+                continue
+            for book in selection.get("books") or []:
+                try:
+                    book_id = int(book.get("id"))
+                except (TypeError, ValueError):
+                    continue
+                if book_id not in wanted:
+                    continue
+                for line_obj in book.get("lines") or []:
+                    if not line_obj.get("active", True) or line_obj.get("is_off"):
+                        continue
+                    try:
+                        line = float(line_obj.get("line"))
+                        odds = float(line_obj.get("cost"))
+                    except (TypeError, ValueError):
+                        continue
+                    if odds == 0:
+                        continue
+                    side_prices[side].setdefault(line, {})[book_id] = {
+                        "odds": odds, "link": line_obj.get("link"), "updated": line_obj.get("updated")
+                    }
+        common = set(side_prices["over"]) & set(side_prices["under"])
+        candidates = []
+        for line in common:
+            covered = [bid for bid in wanted if bid in side_prices["over"][line] and bid in side_prices["under"][line]]
+            if covered:
+                candidates.append((len(covered), line, covered))
+        if candidates:
+            _, line, covered = max(candidates, key=lambda x: (x[0], -x[1]))
+            pairs = []
+            for bid in covered:
+                over = side_prices["over"][line][bid]
+                under = side_prices["under"][line][bid]
+                qo, qu = _american_probability(over["odds"]), _american_probability(under["odds"])
+                if qo is None or qu is None or qo + qu <= 0:
+                    continue
+                pairs.append({"book_id": bid, "over_probability": qo/(qo+qu),
+                              "under_probability": qu/(qo+qu), "over": over, "under": under})
+            if pairs:
+                matches.append((len(pairs), line, pairs))
+    if not matches:
+        return None
+    _, line, pairs = max(matches, key=lambda x: (x[0], len(x[2])))
+    over_prob = sum(x["over_probability"] for x in pairs) / len(pairs)
+    under_prob = sum(x["under_probability"] for x in pairs) / len(pairs)
+    over_best = max((x["over"] for x in pairs), key=lambda x: _american_payout(x["odds"]))
+    under_best = max((x["under"] for x in pairs), key=lambda x: _american_payout(x["odds"]))
+    names = {v: k for k, v in books.items()}
+    return {"line": line, "over_probability": over_prob, "under_probability": under_prob,
+            "over_odds": over_best["odds"], "under_odds": under_best["odds"],
+            "over_book": names.get(next(x["book_id"] for x in pairs if x["over"] is over_best), "sportsbook"),
+            "under_book": names.get(next(x["book_id"] for x in pairs if x["under"] is under_best), "sportsbook"),
+            "books_used": [names.get(x["book_id"], str(x["book_id"])) for x in pairs]}
+
+def _log_pool(model_p, market_p, weight=0.5):
+    eps = 1e-6
+    a = max(eps, min(1-eps, float(model_p)))
+    b = max(eps, min(1-eps, float(market_p)))
+    z = math.exp((1-weight)*math.log(a) + weight*math.log(b))
+    other = math.exp((1-weight)*math.log(1-a) + weight*math.log(1-b))
+    return z / (z + other)
+
+def _score_blended_market(model, market_quote):
+    """Benter-inspired logarithmic opinion pool; equal weights are provisional pending calibration."""
+    model_over = model["over_probability"] / 100.0
+    model_under = model["under_probability"] / 100.0
+    market_over = market_quote["over_probability"]
+    market_under = market_quote["under_probability"]
+    over = _log_pool(model_over, market_over, 0.5)
+    under = _log_pool(model_under, market_under, 0.5)
+    push = model.get("push_probability", 0.0) / 100.0
+    # Keep the model's push mass; normalize the blended win/loss mass around it.
+    mass = max(1e-9, over + under)
+    available = max(0.0, 1.0 - push)
+    over, under = available * over/mass, available * under/mass
+    choices = []
+    for side, prob, loss, odds in (
+        ("OVER", over, under, market_quote["over_odds"]),
+        ("UNDER", under, over, market_quote["under_odds"]),
+    ):
+        ev = _odds_profit(prob, loss, odds)
+        if ev is not None:
+            choices.append((ev, side, prob, odds, loss))
+    best = max(choices, key=lambda x: x[0], default=None)
+    model.update({
+        "model_over_probability": round(model["over_probability"], 2),
+        "model_under_probability": round(model["under_probability"], 2),
+        "market_over_probability": round(market_over*100, 2),
+        "market_under_probability": round(market_under*100, 2),
+        "over_probability": round(over*100, 2),
+        "under_probability": round(under*100, 2),
+        "best_side": best[1] if best else None,
+        "best_probability": round(best[2]*100, 2) if best else None,
+        "best_odds": best[3] if best else None,
+        "expected_value_pct": round(best[0]*100, 2) if best else None,
+        "edge_pp": round((best[2] - _american_probability(best[3]))*100, 2) if best else None,
+        "recommendation": "VALUE CANDIDATE" if best and best[0] > 0.05 else ("LEAN / VERIFY" if best and best[0] > 0 else "PASS"),
+        "kelly_fraction_pct": round(max(0.0, (best[2]*_american_payout(best[3]) - best[4]) /
+            max(1e-9, _american_payout(best[3])*(best[2]+best[4]))) * 100, 2) if best else None,
+        "blend_method": "50/50 logarithmic model-market pool; provisional, not yet outcome-calibrated",
+        "market_books": market_quote["books_used"],
+        "best_over_book": market_quote["over_book"],
+        "best_under_book": market_quote["under_book"],
+    })
+    return model
+
 @app.get("/api/proprietary-market-board")
 def proprietary_market_board(market: str = "rebounds"):
     market = market.lower().strip()
@@ -288,7 +473,6 @@ def proprietary_market_board(market: str = "rebounds"):
     market_id = BP_MARKETS[market]
     bp_url = "https://api.bettingpros.com/v3/props?" + urlencode({"sport": "NBA", "market_id": market_id, "page": 1, "limit": 50})
     try:
-        bp_payload = _get_json(bp_url) if False else None
         req = Request(bp_url, headers={"x-api-key": api_key, "accept": "application/json", "user-agent": "ColtsNBAEdge/1.0"})
         with urlopen(req, timeout=20) as response:
             bp_payload = json.loads(response.read().decode("utf-8", "replace"))
@@ -297,56 +481,52 @@ def proprietary_market_board(market: str = "rebounds"):
     field, label = STAT_FIELDS[market]
     output, failures = [], []
     props = bp_payload.get("props") or [] if isinstance(bp_payload, dict) else []
+    offers_by_event = {}
     for raw in props:
         participant = raw.get("participant") or {}
         player_obj = participant.get("player") or {}
         event = raw.get("event") or {}
+        event_id = event.get("id") or raw.get("event_id")
+        if event_id and str(event_id) not in offers_by_event:
+            offers_by_event[str(event_id)] = _bp_event_offers(event_id, market)
         over, under = raw.get("over") or {}, raw.get("under") or {}
         name = participant.get("name") or raw.get("player_name") or (raw.get("player") if isinstance(raw.get("player"), str) else None) or player_obj.get("name") or player_obj.get("full_name")
         if not name:
             continue
-        line = over.get("line", under.get("line", raw.get("line", raw.get("line_value"))))
+        quote = _bp_two_book_market(offers_by_event.get(str(event_id), []), name) if event_id else None
+        line = quote["line"] if quote else over.get("line", under.get("line", raw.get("line", raw.get("line_value"))))
         try:
             line = float(line)
         except (TypeError, ValueError):
             continue
-        over_odds = over.get("odds", raw.get("over_odds"))
-        under_odds = under.get("odds", raw.get("under_odds"))
+        over_odds = quote["over_odds"] if quote else over.get("odds", raw.get("over_odds"))
+        under_odds = quote["under_odds"] if quote else under.get("odds", raw.get("under_odds"))
         try:
             athlete_id = _espn_player_id(name)
             if not athlete_id:
                 failures.append(name + ": ESPN player match unavailable")
                 continue
             values, sample_label = _player_history(athlete_id, field, label)
-            model = _simulate_market(values, line, over_odds, under_odds, _norm_player_name(name) + market)
+            model = _simulate_market(values, line, None, None, _norm_player_name(name) + market)
             if not model:
                 failures.append(name + ": fewer than five valid game logs")
                 continue
-            implied = None
-            if model["best_side"] == "OVER":
-                chosen_odds = over_odds
-                opposite_odds = under_odds
+            if quote:
+                model = _score_blended_market(model, quote)
             else:
-                chosen_odds = under_odds
-                opposite_odds = over_odds
-            try:
-                price = float(chosen_odds)
-                implied = (abs(price) / (abs(price) + 100) * 100) if price < 0 else (100 / (price + 100) * 100)
-            except (TypeError, ValueError):
-                pass
-            if implied is not None and model["best_probability"] is not None:
-                model["edge_pp"] = round(model["best_probability"] - implied, 2)
+                model["recommendation"] = "PASS"
+                model["expected_value_pct"] = None
+                model["best_side"] = None
+                model["best_probability"] = None
+                model["best_odds"] = None
+                model["edge_pp"] = None
+                model["blend_method"] = "No verified DK/FD two-sided quote at a matching line; no bet rating"
             output.append({
                 "player": name,
                 "team": player_obj.get("team") or participant.get("team_abbreviation") or participant.get("team") or "",
                 "game": event.get("name") or raw.get("event_name") or raw.get("matchup") or "",
-                "market": market,
-                "line": line,
-                "over_odds": over_odds,
-                "under_odds": under_odds,
-                "sample_label": sample_label,
-                "athlete_id": athlete_id,
-                "games_used": len(values),
+                "market": market, "line": line, "over_odds": over_odds, "under_odds": under_odds,
+                "sample_label": sample_label, "athlete_id": athlete_id, "games_used": len(values),
                 **model,
             })
         except Exception as exc:
@@ -354,11 +534,9 @@ def proprietary_market_board(market: str = "rebounds"):
     output.sort(key=lambda x: (x.get("expected_value_pct") is None, -(x.get("expected_value_pct") or -999)))
     return JSONResponse({
         "market": market,
-        "source": "Proprietary ESPN game-log bootstrap model; BettingPros lines and odds only",
-        "simulations_per_prop": 50000,
-        "line_count": len(props),
-        "projected_count": len(output),
-        "props": output,
+        "source": "ESPN game-log distribution + BettingPros DraftKings/FanDuel no-vig market blend",
+        "blend": "50/50 logarithmic opinion pool (provisional pending historical calibration)",
+        "line_count": len(props), "projected_count": len(output), "props": output,
         "unavailable": failures[:20],
     })
 
