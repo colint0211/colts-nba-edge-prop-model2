@@ -195,6 +195,7 @@ function livePace(p){
   return {points,minutes,gameMinutesLeft,remainingPlayerMinutes,projected,margin,verdict};
 }
 function dvpSummary(p){
+  if(String(p.market||'').toLowerCase()!=='points')return '';
   const d=p.defense_vs_position;
   if(!d)return '<div class="card-bottom"><span>Positional defense: unavailable for this player / matchup; no adjustment applied.</span></div>';
   const sign=Number(d.adjustment_pct)>0?'+':'';
