@@ -422,6 +422,45 @@ def metrics(market=None):
     }
 
 
+
+def list_settlement_candidates(limit=500):
+    """Return unsettled snapshots with their saved identity and creation date."""
+    try:
+        requested_limit = int(limit)
+    except (TypeError, ValueError, OverflowError):
+        requested_limit = 500
+    requested_limit = max(1, min(requested_limit, 2000))
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, market, player, created_at, snapshot
+            FROM nba_predictions
+            WHERE settled_at IS NULL
+            ORDER BY created_at ASC, id ASC
+            LIMIT %s
+            """,
+            (requested_limit,),
+        ).fetchall()
+    candidates = []
+    for row in rows:
+        snapshot = row[4]
+        if isinstance(snapshot, str):
+            try:
+                snapshot = json.loads(snapshot)
+            except (TypeError, ValueError):
+                snapshot = {}
+        if not isinstance(snapshot, dict):
+            snapshot = {}
+        candidates.append({
+            "id": row[0],
+            "market": row[1],
+            "player": row[2],
+            "created_date": row[3].date().isoformat() if row[3] else None,
+            "snapshot": snapshot,
+        })
+    return candidates
+
+
 def list_predictions(status="unsettled", market=None, limit=100):
     clauses = []
     args = []
