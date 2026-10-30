@@ -10,6 +10,7 @@
 <div class="sectiontitle">Model tracking</div><div class="sectionhint">Saved outcomes only. Performance is not validated until enough results settle.</div><div class="statrow"><div class="stat"><div class="statlabel">Recorded results</div><div id="btPredictions" class="num">—</div></div><div class="stat"><div class="statlabel">Wins / losses</div><div id="btSettled" class="num">—</div></div><div class="stat"><div class="statlabel">Win rate</div><div id="btWinRate" class="num">—</div></div><div class="stat"><div class="statlabel">Net profit</div><div id="btRoi" class="num">—</div></div></div><div class="bar"><button onclick="loadBacktest()">Refresh tracking</button><span id="btUpdated" class="muted"></span></div><div id="btStatus" class="muted">Loading saved results…</div><div class="footer">Live scores and player points are supplied by ESPN public endpoints. BettingPros supplies the Rebounds, Assists, Steals, and 3-Pointers Made markets. EV plays are shown only when the API response includes the required projection and expected-value fields; lines alone are not treated as picks. Live data refreshes every 15 seconds while this page is open.</div></main>
 <script>
 let data=[],liveData={games:[],players_by_id:{},players_by_name:{}},market='points',bpCache={},bpLoading={};
+let customOverrides={};
 const el=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const num=(n,d=1)=>n==null||!Number.isFinite(Number(n))?'—':Number(n).toFixed(d);
@@ -36,6 +37,25 @@ function isFallback(p){
   const label=String(p.sample_label||p.reason||'').toLowerCase();
   return label.includes('previous-season')||label.includes('previous season')||label.includes('fallback');
 }
+function customLineKey(p,m){
+  return [m||p.market||"points",String(p.player||"").trim().toLowerCase(),String(p.game||"").trim().toLowerCase()].join("|");
+}
+async function loadCustomLines(){
+  try{
+    const r=await fetch('/api/custom-lines?ts='+Date.now(),{cache:'no-store'});
+    if(!r.ok)throw Error('Saved lines unavailable');
+    const d=await r.json();customOverrides={};
+    for(const p of (d.props||[]))customOverrides[customLineKey(p,p.market)]=p;
+  }catch(e){console.warn('Could not load saved custom lines:',e.message||e)}
+}
+function applySavedOverrides(rows,m){
+  return (rows||[]).map(p=>{
+    const saved=customOverrides[customLineKey(p,m)];
+    return saved?{...p,...saved,market:m,custom_line:true,overOdds:saved.over_odds,underOdds:saved.under_odds,
+      expected_profit_per_100:saved.expected_profit_per_100??saved.expected_value_pct,
+      model_status:'projected'}:p;
+  });
+}
 function rankEV(a){
   return a.filter(p=>p.model_status==='projected'&&!isFallback(p)&&p.expected_profit_per_100!=null&&Number(p.expected_profit_per_100)>0&&p.best_side)
     .slice().sort((x,y)=>Number(y.expected_profit_per_100)-Number(x.expected_profit_per_100)
@@ -60,6 +80,7 @@ async function load(refresh=false){
     const r=await fetch('/api/auto-board'+(refresh?'?refresh=true':''),{cache:'no-store'}),d=await r.json();
     if(!r.ok)throw Error(d.detail?.message||d.detail||'Board unavailable');
     data=d.props||[];
+    await loadCustomLines();data=applySavedOverrides(data,'points');
     el('ng').textContent=d.schedule_game_count??'—';
     el('nl').textContent=d.line_count??data.length;
     el('np').textContent=d.projected_count??0;
@@ -175,7 +196,7 @@ async function loadBP(m){
     const r=await fetch('/api/proprietary-market-board?market='+encodeURIComponent(m)+'&ts='+Date.now(),{cache:'no-store'});
     const d=await r.json();
     if(!r.ok)throw Error(d.detail||d.error||'Proprietary model request failed');
-    bpCache[m]=(d.props||[]).map(p=>({...p,overOdds:p.over_odds,underOdds:p.under_odds,ev:p.expected_value_pct==null?null:Number(p.expected_value_pct)/100,expected_profit_per_100:p.expected_value_pct,model_status:'projected',best_side:p.best_side,best_probability:p.best_probability,market:m,simulations:p.simulations})).filter(p=>p.player&&p.line!=null);
+    bpCache[m]=applySavedOverrides((d.props||[]).map(p=>({...p,overOdds:p.over_odds,underOdds:p.under_odds,ev:p.expected_value_pct==null?null:Number(p.expected_value_pct)/100,expected_profit_per_100:p.expected_value_pct,model_status:'projected',best_side:p.best_side,best_probability:p.best_probability,market:m,simulations:p.simulations})).filter(p=>p.player&&p.line!=null),m);
     bpLoading[m]=false;render();renderFull();
   }catch(e){bpLoading[m]=false;bpCache[m]={error:e.message};render();renderFull()}
 }
@@ -200,7 +221,7 @@ async function saveCustomLine(button){
     const body={market:button.dataset.market,player:button.dataset.player,team:button.dataset.team,game:button.dataset.game,athlete_id:button.dataset.athlete,line:Number(line),over_odds:Number(over),under_odds:Number(under)};
     const response=await fetch("/api/model/recalculate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
     const result=await response.json();if(!response.ok)throw Error(result.detail||"Recalculation failed");
-    const statusText="Saved · EV "+Number(result.prop.expected_value_pct).toFixed(2)+"%";updateSharedProp(result.prop);const matching=[...document.querySelectorAll(".custom-line-editor")].find(x=>x.querySelector("button")?.dataset.player===result.prop.player);if(matching)matching.querySelector(".custom-save-status").textContent=statusText;
+    const statusText="Saved permanently · EV "+Number(result.prop.expected_value_pct).toFixed(2)+"%";customOverrides[customLineKey(result.prop,result.prop.market)]=result.prop;updateSharedProp(result.prop);const matching=[...document.querySelectorAll(".custom-line-editor")].find(x=>x.querySelector("button")?.dataset.player===result.prop.player);if(matching)matching.querySelector(".custom-save-status").textContent=statusText;
   }catch(error){status.textContent=error.message;}finally{button.disabled=false;}
 }
 function bpLineCard(p,i){
