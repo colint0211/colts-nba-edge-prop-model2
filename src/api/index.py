@@ -385,6 +385,37 @@ def bettingpros_books():
     return JSONResponse({"books": books, "count": len(books), "source": "BettingPros API"})
 
 
+@app.get("/api/bettingpros-offers")
+def bettingpros_offers(market: str = "rebounds", event_id: int | None = None):
+    """Expose current offers for supported NBA prop markets, preserving per-book prices."""
+    market = market.lower().strip()
+    market_id = BP_MARKETS.get(market)
+    if market_id is None:
+        raise HTTPException(status_code=400, detail="Unsupported NBA prop market.")
+    api_key = os.getenv("BETTINGPROS_API_KEY", "").strip()
+    if not api_key:
+        raise HTTPException(status_code=503, detail="BETTINGPROS_API_KEY is missing.")
+    params = {"sport": "NBA", "market_id": market_id, "page": 1, "limit": 50}
+    if event_id is not None:
+        params["event_id"] = event_id
+    req = Request(
+        "https://api.bettingpros.com/v3/offers?" + urlencode(params),
+        headers={"x-api-key": api_key, "accept": "application/json", "user-agent": "ColtsNBAEdge/1.0"},
+        method="GET",
+    )
+    try:
+        with urlopen(req, timeout=20) as response:
+            payload = json.loads(response.read().decode("utf-8", "replace"))
+    except HTTPError as exc:
+        raise HTTPException(status_code=502, detail="BettingPros offers endpoint returned HTTP " + str(exc.code)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Could not retrieve BettingPros offers.") from exc
+    rows = payload.get("offers", []) if isinstance(payload, dict) else []
+    return JSONResponse({"market": market, "market_id": market_id, "offers": rows,
+                         "pagination": payload.get("_pagination", {}) if isinstance(payload, dict) else {},
+                         "source": "BettingPros API"})
+
+
 @app.get("/api/bettingpros-props")
 def bettingpros_props(market: str = "rebounds"):
     market = market.lower().strip()
