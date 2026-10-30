@@ -310,7 +310,56 @@ _BP_BOARD_CACHE = {}
 _BP_RATE_LIMIT_UNTIL = 0.0
 _BP_CACHE_TTL_SECONDS = 300
 _BP_BOARD_TTL_SECONDS = 180
-_BP_RATE_LIMIT_COOLDOWN_SECONDS = 90
+_BP_RATE_LIMIT_COOLDOWN_SECONDS = 300
+_BP_STALE_CACHE_SECONDS = 3600
+
+def _bp_fetch_props(market, limit=50):
+    """Shared per-market cache; never fan out repeated props requests during a provider cooldown."""
+    global _BP_RATE_LIMIT_UNTIL
+    now = time.time()
+    cached = _BP_PROPS_CACHE.get(market)
+    if cached and now - cached[0] < _BP_CACHE_TTL_SECONDS:
+        return cached[1], "cache"
+    if now < _BP_RATE_LIMIT_UNTIL:
+        if cached and now - cached[0] < _BP_STALE_CACHE_SECONDS:
+            return cached[1], "stale-cache"
+        retry = max(1, int(_BP_RATE_LIMIT_UNTIL - now))
+        raise HTTPException(status_code=503, detail="BettingPros cooldown active. Retry in " + str(retry) + " seconds.")
+    api_key = os.getenv("BETTINGPROS_API_KEY", "").strip()
+    if not api_key:
+        raise HTTPException(status_code=503, detail="BETTINGPROS_API_KEY is missing.")
+    url = "https://api.bettingpros.com/v3/props?" + urlencode({
+        "sport": "NBA", "market_id": BP_MARKETS[market], "page": 1, "limit": limit
+    })
+    req = Request(url, headers={"x-api-key": api_key, "accept": "application/json",
+                                "user-agent": "ColtsNBAEdge/1.0"})
+    try:
+        with urlopen(req, timeout=20) as response:
+            payload = json.loads(response.read().decode("utf-8", "replace"))
+        if not isinstance(payload, dict):
+            raise ValueError("Invalid BettingPros response.")
+        _BP_PROPS_CACHE[market] = (time.time(), payload)
+        return payload, "live"
+    except HTTPError as exc:
+        if exc.code == 429:
+            retry_after = exc.headers.get("Retry-After") if exc.headers else None
+            try:
+                cooldown = max(_BP_RATE_LIMIT_COOLDOWN_SECONDS, min(1800, int(retry_after)))
+            except (TypeError, ValueError):
+                cooldown = _BP_RATE_LIMIT_COOLDOWN_SECONDS
+            _BP_RATE_LIMIT_UNTIL = time.time() + cooldown
+            if cached and time.time() - cached[0] < _BP_STALE_CACHE_SECONDS:
+                return cached[1], "stale-cache"
+            raise HTTPException(status_code=503, detail="BettingPros rate limit reached. Cooling down for " + str(cooldown) + " seconds.") from exc
+        if exc.code in (401, 403):
+            raise HTTPException(status_code=502, detail="BettingPros rejected the API key or this account tier does not allow this endpoint.") from exc
+        raise HTTPException(status_code=502, detail="BettingPros props endpoint returned HTTP " + str(exc.code) + ".") from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        if cached and time.time() - cached[0] < _BP_STALE_CACHE_SECONDS:
+            return cached[1], "stale-cache"
+        raise HTTPException(status_code=502, detail="Could not retrieve " + market + " prop lines from BettingPros.") from exc
 
 def _american_probability(odds):
     try:
@@ -529,30 +578,7 @@ def proprietary_market_board(market: str = "rebounds"):
     if not api_key:
         raise HTTPException(status_code=503, detail="BettingPros lines unavailable: API key missing.")
     market_id = BP_MARKETS[market]
-    props_cached = _BP_PROPS_CACHE.get(market)
-    if props_cached and now - props_cached[0] < _BP_CACHE_TTL_SECONDS:
-        bp_payload = props_cached[1]
-    else:
-        bp_url = "https://api.bettingpros.com/v3/props?" + urlencode({"sport": "NBA", "market_id": market_id, "page": 1, "limit": 50})
-        try:
-            req = Request(bp_url, headers={"x-api-key": api_key, "accept": "application/json", "user-agent": "ColtsNBAEdge/1.0"})
-            with urlopen(req, timeout=20) as response:
-                bp_payload = json.loads(response.read().decode("utf-8", "replace"))
-            _BP_PROPS_CACHE[market] = (time.time(), bp_payload)
-        except HTTPError as exc:
-            if exc.code == 429:
-                retry_after = exc.headers.get("Retry-After")
-                try:
-                    cooldown = max(_BP_RATE_LIMIT_COOLDOWN_SECONDS, min(600, int(retry_after)))
-                except (TypeError, ValueError):
-                    cooldown = _BP_RATE_LIMIT_COOLDOWN_SECONDS
-                _BP_RATE_LIMIT_UNTIL = time.time() + cooldown
-                raise HTTPException(status_code=503, detail="BettingPros rate limit reached. The app has paused retries for " + str(cooldown) + " seconds.") from exc
-            if exc.code in (401, 403):
-                raise HTTPException(status_code=502, detail="BettingPros rejected the API key or this account tier does not allow this endpoint.") from exc
-            raise HTTPException(status_code=502, detail="BettingPros props endpoint returned HTTP " + str(exc.code) + ".") from exc
-        except Exception as exc:
-            raise HTTPException(status_code=502, detail="Could not retrieve " + market + " prop lines from BettingPros.") from exc
+    bp_payload, props_source = _bp_fetch_props(market, 50)
     field, label = STAT_FIELDS[market]
     output, failures = [], []
     props = bp_payload.get("props") or [] if isinstance(bp_payload, dict) else []
@@ -683,25 +709,15 @@ def bettingpros_props(market: str = "rebounds"):
     market_id = BP_MARKETS.get(market)
     if market_id is None:
         raise HTTPException(status_code=400, detail="Unsupported market. Use points, rebounds, assists, steals, or threes.")
-    api_key = os.getenv("BETTINGPROS_API_KEY", "").strip()
-    if not api_key:
-        raise HTTPException(status_code=503, detail="BETTINGPROS_API_KEY is missing from this deployment's environment.")
-    query = urlencode({"sport": "NBA", "market_id": market_id, "page": 1, "limit": 20})
-    req = Request("https://api.bettingpros.com/v3/props?" + query, headers={"x-api-key": api_key, "accept": "application/json", "user-agent": "ColtsNBAEdge/1.0"}, method="GET")
-    try:
-        with urlopen(req, timeout=20) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-    except HTTPError as e:
-        if e.code in (401, 403):
-            detail = "BettingPros rejected the API key or this account tier does not allow this data."
-        elif e.code == 429:
-            detail = "BettingPros API request limit reached. Try again later."
-        else:
-            detail = "BettingPros API returned HTTP " + str(e.code) + "."
-        raise HTTPException(status_code=502, detail=detail) from e
-    except (URLError, TimeoutError, json.JSONDecodeError) as e:
-        raise HTTPException(status_code=502, detail="Could not retrieve valid data from BettingPros.") from e
-    return JSONResponse({"market": market, "market_id": market_id, "props": payload.get("props", []) if isinstance(payload, dict) else [], "pagination": payload.get("_pagination", {}) if isinstance(payload, dict) else {}, "source": "BettingPros API"})
+    payload, cache_status = _bp_fetch_props(market, 50)
+    return JSONResponse({
+        "market": market, "market_id": market_id,
+        "props": payload.get("props", []),
+        "pagination": payload.get("_pagination", {}),
+        "source": "BettingPros API",
+        "cache_status": cache_status,
+        "cache_ttl_seconds": _BP_CACHE_TTL_SECONDS
+    })
 
 def _quarter_name_key(value):
     return "".join(ch.lower() for ch in str(value or "") if ch.isalnum())
