@@ -88,12 +88,25 @@ function isEligibleEV(p){
     &&!p.injury_flag&&!p.injury_status
     &&p.expected_profit_per_100!=null&&Number(p.expected_profit_per_100)>0&&!!p.best_side;
 }
+function evRankValue(p){
+  const raw=p.expected_profit_per_100??p.expected_value_pct;
+  const n=Number(raw);
+  return Number.isFinite(n)?n:null;
+}
+function sortByEV(rows){
+  return (rows||[]).slice().sort((a,b)=>{
+    const av=evRankValue(a),bv=evRankValue(b);
+    if(av===null&&bv===null)return String(a.player||'').localeCompare(String(b.player||''));
+    if(av===null)return 1;
+    if(bv===null)return -1;
+    return bv-av
+      ||Number(b.edge_pp??-999)-Number(a.edge_pp??-999)
+      ||String(a.player||'').localeCompare(String(b.player||''))
+      ||String(a.game||'').localeCompare(String(b.game||''));
+  });
+}
 function rankEV(a){
-  return (a||[]).filter(isEligibleEV)
-    .slice().sort((x,y)=>Number(y.expected_profit_per_100)-Number(x.expected_profit_per_100)
-      ||Number(y.edge_pp||-999)-Number(x.edge_pp||-999)
-      ||String(x.player||'').localeCompare(String(y.player||''))
-      ||String(x.game||'').localeCompare(String(y.game||'')));
+  return sortByEV((a||[]).filter(p=>isEligibleEV(p)&&evRankValue(p)!==null&&evRankValue(p)>0));
 }
 function setMarket(m){
   market=m;
@@ -277,8 +290,7 @@ function allModelEV(){
     const rows=bpCache[m];
     if(Array.isArray(rows))all.push(...rankEV(rows).map(p=>({...p,market:m})));
   }
-  return all.sort((a,b)=>Number(b.expected_profit_per_100)-Number(a.expected_profit_per_100)
-    ||Number(b.edge_pp||-999)-Number(a.edge_pp||-999)||String(a.player).localeCompare(String(b.player)));
+  return sortByEV(all);
 }
 function bpCard(p,i){
   const hasProjection=p.projection!=null&&Number.isFinite(Number(p.projection));
@@ -296,8 +308,9 @@ function bpCard(p,i){
 function render(){
   const q=el('search').value.toLowerCase();let list=[];
   if(market==='ev'){
-    list=allModelEV().slice(0,5);
+    list=allModelEV();
     if(q)list=list.filter(p=>(p.player+' '+(p.team||p.roster_team||'')+' '+(p.game||'')).toLowerCase().includes(q));
+    list=list.slice(0,5);
     el('count').textContent=list.length+' positive-EV plays across all five markets';
     if(!list.length){el('cards').innerHTML='<div class="empty">No verified positive-EV plays across the five model markets right now.</div>';return}
     el('cards').innerHTML=list.map((p,i)=>p.market==='points'?card(p,i):bpLineCard(p,i)).join('');
@@ -328,7 +341,7 @@ function renderFull(){
     return;
   }
   if(market==='ev'){
-    const rows=allModelEV().filter(p=>(p.player+' '+(p.team||'')+' '+(p.game||'')).toLowerCase().includes(q));
+    const rows=sortByEV(allModelEV().filter(p=>(p.player+' '+(p.team||'')+' '+(p.game||'')).toLowerCase().includes(q)));
     el('countFull').textContent=rows.length+' cross-market EV candidates';
     el('fullCards').innerHTML=rows.map((p,i)=>p.market==='points'?card(p,i):bpLineCard(p,i)).join('')||'<div class="empty">No positive-EV plays available.</div>';
     return;
