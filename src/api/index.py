@@ -40,38 +40,92 @@ def _norm_player_name(value):
     return "".join(ch.lower() for ch in str(value or "") if ch.isalnum())
 
 def _espn_player_id(name):
+    """Resolve a player to ESPN's numeric NBA athlete ID.
+
+    ESPN global search can return UUID-style content IDs. The common-v3
+    gamelog endpoint requires the numeric athlete ID used in ESPN profile
+    URLs / athlete UIDs, so never pass an arbitrary search-result UUID.
+    """
     key = _norm_player_name(name)
     if key in _ESPN_ID_CACHE:
         return _ESPN_ID_CACHE[key]
+
     query = urlencode({"query": name, "limit": 20, "sport": "basketball", "league": "nba"})
     payload = _get_json(ESPN_SEARCH + "?" + query)
     candidates = []
+
+    def numeric_id(value):
+        if value is None:
+            return None
+        text = str(value).strip()
+        return text if text.isdigit() else None
+
+    def id_from_uid(value):
+        text = str(value or "")
+        # ESPN athlete UIDs commonly contain an a:<numeric athlete id> segment.
+        for marker in ("~a:", "a:"):
+            pos = text.find(marker)
+            if pos >= 0:
+                tail = text[pos + len(marker):]
+                token = tail.split("~", 1)[0].split(":", 1)[0].split("/", 1)[0]
+                found = numeric_id(token)
+                if found:
+                    return found
+        return None
+
+    def id_from_href(value):
+        text = str(value or "")
+        # ESPN profile URLs commonly contain /id/<numeric-id>/.
+        marker = "/id/"
+        pos = text.find(marker)
+        if pos >= 0:
+            tail = text[pos + len(marker):]
+            token = tail.split("/", 1)[0].split("?", 1)[0]
+            found = numeric_id(token)
+            if found:
+                return found
+        return None
+
     def walk(value):
         if isinstance(value, dict):
-            candidate_type = str(value.get("type") or value.get("uid") or "").lower()
-            href = str(value.get("href") or value.get("link") or "").lower()
             athlete_obj = value.get("athlete") if isinstance(value.get("athlete"), dict) else value
-            candidate_name = (athlete_obj.get("fullName") or athlete_obj.get("displayName")
-                              or athlete_obj.get("name") or value.get("title") or "")
-            candidate_id = athlete_obj.get("id") or value.get("id")
-            # ESPN search result schemas vary and may omit an explicit athlete type.
-            # Similarity scoring below prevents unrelated results from being selected.
+            candidate_name = (
+                athlete_obj.get("fullName") or athlete_obj.get("displayName")
+                or athlete_obj.get("name") or value.get("title") or ""
+            )
+            candidate_id = (
+                numeric_id(athlete_obj.get("id"))
+                or id_from_uid(athlete_obj.get("uid"))
+                or id_from_href(athlete_obj.get("href"))
+                or id_from_href(value.get("href"))
+                or id_from_href(value.get("link"))
+            )
+            links = athlete_obj.get("links") or value.get("links") or []
+            if not candidate_id and isinstance(links, list):
+                for link in links:
+                    if isinstance(link, dict):
+                        candidate_id = id_from_href(link.get("href"))
+                        if candidate_id:
+                            break
             if candidate_id and candidate_name:
-                candidates.append((str(candidate_id), str(candidate_name)))
+                candidates.append((candidate_id, str(candidate_name)))
             for child in value.values():
                 if isinstance(child, (dict, list)):
                     walk(child)
         elif isinstance(value, list):
             for child in value:
                 walk(child)
+
     walk(payload)
     best_id, best_score = None, 0
     for candidate_id, candidate_name in candidates:
         score = SequenceMatcher(None, key, _norm_player_name(candidate_name)).ratio()
         if score > best_score:
             best_id, best_score = candidate_id, score
+
     if best_score < 0.78:
         best_id = None
+
     _ESPN_ID_CACHE[key] = best_id
     return best_id
 
