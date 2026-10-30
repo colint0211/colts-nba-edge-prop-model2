@@ -349,7 +349,7 @@ def _projected_minutes(valid_minutes):
 def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, market=""):
     """Recency-weighted empirical projection with minutes adjustment and discrete outcomes."""
     clean = [float(v) for v in values if v is not None and math.isfinite(float(v)) and float(v) >= 0]
-    if len(clean) < 5:
+    if len(clean) < 4:
         return None
     n = len(clean)
     recent5, recent10 = clean[-5:], clean[-10:]
@@ -1121,12 +1121,24 @@ async def api_proxy(path: str, request: FastRequest):
                             prop["probability_reliability"] = None
                             prop["probability_note"] = "Local empirical game-log simulation; not calibrated until settled predictions are evaluated."
                             prop["model_status"] = "projected"
-                            prop["confidence"] = "provisional"
-                            prop["recommendation"] = (
-                                "VALUE CANDIDATE" if model.get("expected_value_pct") is not None and model["expected_value_pct"] > 0.05
-                                else "LEAN / VERIFY" if model.get("expected_value_pct") is not None and model["expected_value_pct"] > 0
-                                else "PASS"
-                            )
+                            sample_size = int(model.get("sample_size") or 0)
+                            prop["confidence"] = "low" if sample_size < 8 else "provisional"
+                            if sample_size < 8:
+                                # Keep the early-season projection visible, but do
+                                # not promote a 4-7 game sample into an EV wager.
+                                prop["expected_value_pct"] = None
+                                prop["expected_profit_per_100"] = None
+                                prop["recommendation"] = "PASS"
+                                prop["probability_note"] = (
+                                    "Projection only: fewer than 8 verified regular-season games. "
+                                    "EV ranking is disabled until the sample grows."
+                                )
+                            else:
+                                prop["recommendation"] = (
+                                    "VALUE CANDIDATE" if model.get("expected_value_pct") is not None and model["expected_value_pct"] > 0.05
+                                    else "LEAN / VERIFY" if model.get("expected_value_pct") is not None and model["expected_value_pct"] > 0
+                                    else "PASS"
+                                )
                             if prop.get("injury_flag") or prop.get("injury_status"):
                                 prop["recommendation"] = "PASS"
                         except Exception as model_error:
