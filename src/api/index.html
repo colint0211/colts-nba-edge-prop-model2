@@ -155,13 +155,20 @@ async function updateLive(){
     el('liveUpdated').textContent='Scores checked '+new Date(liveData.updated_at||Date.now()).toLocaleTimeString();
   }catch(_){el('liveUpdated').textContent='Live feed temporarily unavailable'}
 }
+function positionDisplayName(position){
+  const p=String(position||'').trim().toUpperCase();
+  const names={PG:'Point Guard',SG:'Shooting Guard',SF:'Small Forward',PF:'Power Forward',C:'Center'};
+  return names[p]||String(position||'').trim()||'this position';
+}
 function reasoning(p){
   const gap=Number(p.projection)-Number(p.line),rows=[];
   rows.push('<div><b>Projection vs line:</b> '+(Number.isFinite(gap)?(gap>=0?'+':'')+num(gap,2)+' points '+(gap>=0?'above':'below')+' the line':'Unavailable')+'.</div>');
   rows.push('<div><b>Recent scoring:</b> '+(p.recent5_avg==null?'Not supplied':num(p.recent5_avg,1)+' PPG')+'.</div>');
   const dvp=p.defense_vs_position;
   if(String(p.market||'points').toLowerCase()==='points'&&dvp&&dvp.allowed_per_game!=null){
-    rows.push('<div><b>Positional defense:</b> '+esc(dvp.opponent_name||dvp.opponent||"Opponent")+' allows '+num(dvp.allowed_per_game,1)+' PPG to '+esc(dvp.position||dvp.position_group||'this position')+'.</div>');
+    const playerPosition=positionDisplayName(dvp.position);
+    const groupLabel=String(dvp.position_group||'').toLowerCase()==='guards'?'guard group':String(dvp.position_group||'').toLowerCase()==='forwards'?'forward group':String(dvp.position_group||'').toLowerCase()==='centers'?'center group':'position group';
+    rows.push('<div><b>Positional defense:</b> '+esc(dvp.opponent_name||dvp.opponent||"Opponent")+' allows '+num(dvp.allowed_per_game,1)+' PPG to '+esc(playerPosition)+'s ('+esc(groupLabel)+' defensive data).</div>');
   }
   rows.push('<div><b>Sample:</b> '+(p.games_used??'—')+' games used ('+esc(p.sample_label||'sample period unavailable')+').</div>');
   rows.push('<div><b>Reliability:</b> '+esc(p.confidence||'not supplied')+' confidence. Probabilities are not calibrated until outcomes are tested.</div>');
