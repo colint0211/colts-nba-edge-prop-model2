@@ -860,8 +860,10 @@ async def api_proxy(path: str, request: FastRequest):
                             prop["games_used"] = model.get("sample_size")
                             prop["recent5_avg"] = model.get("recent5_mean")
                             prop["raw_over_probability"] = model.get("over_probability")
+                            # expected_value_pct is already expressed as percent return.
+                            # For a $100 stake, the dollar EV has the same numeric value.
                             prop["expected_profit_per_100"] = (
-                                round(float(model["expected_value_pct"]) * 100, 2)
+                                round(float(model["expected_value_pct"]), 2)
                                 if model.get("expected_value_pct") is not None else None
                             )
                             prop["implied_probability"] = None
