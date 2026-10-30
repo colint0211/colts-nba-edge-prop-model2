@@ -94,6 +94,36 @@ def save_predictions(rows, market=None):
                 skipped += 1
     return {"saved": saved, "skipped": skipped}
 
+
+def list_custom_lines(limit=500):
+    """Return the latest saved user-entered line/odds snapshot per player, market and event."""
+    with _connect() as conn:
+        rows = conn.execute("""
+          SELECT snapshot FROM nba_predictions
+          WHERE snapshot->>'custom_line' = 'true'
+          ORDER BY created_at DESC
+          LIMIT %s
+        """, (max(1, min(int(limit), 1000)),)).fetchall()
+    latest = {}
+    for row in rows:
+        snapshot = row[0]
+        if isinstance(snapshot, str):
+            try:
+                snapshot = json.loads(snapshot)
+            except Exception:
+                continue
+        if not isinstance(snapshot, dict):
+            continue
+        market = str(snapshot.get("market") or "").lower()
+        player = str(snapshot.get("player") or "").strip().lower()
+        event = str(snapshot.get("game") or "").strip().lower()
+        if not market or not player:
+            continue
+        key = (market, player, event)
+        if key not in latest:
+            latest[key] = snapshot
+    return list(latest.values())
+
 def settle_prediction(prediction_id, actual_value):
     actual = _number(actual_value)
     if actual is None:
