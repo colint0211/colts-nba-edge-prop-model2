@@ -194,8 +194,16 @@ def _gamelog_values(athlete_id, field, label, season):
 def _player_history(athlete_id, field, label):
     current = _gamelog_values(athlete_id, field, label, 2027)
     previous = _gamelog_values(athlete_id, field, label, 2026) if len(current) < 5 else []
-    values = current + previous
-    return values[-25:], ("2026-27 + 2025-26" if previous else "2026-27 regular season")
+    current_minutes = _gamelog_values(athlete_id, "minutes", "MIN", 2027)
+    previous_minutes = _gamelog_values(athlete_id, "minutes", "MIN", 2026) if len(current) < 5 else []
+    values = (current + previous)[-25:]
+    minutes = (current_minutes + previous_minutes)[-25:]
+    paired = [(v, m) for v, m in zip(values, minutes) if m is not None and m > 0]
+    if len(paired) >= 5:
+        values, minutes = [x[0] for x in paired], [x[1] for x in paired]
+    else:
+        minutes = []
+    return values, ("2026-27 + 2025-26" if previous else "2026-27 regular season"), minutes
 
 def _odds_profit(win_probability, loss_probability, odds):
     if odds is None:
@@ -223,101 +231,76 @@ def _projected_minutes(valid_minutes):
     return (ordered[middle - 1] + ordered[middle]) / 2.0
 
 def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, market=""):
-    """
-    Benter-inspired player-prop distribution model.
-    Uses recency-weighted empirical outcomes, shrinkage toward the longer-run
-    baseline, minutes normalization, robust dispersion, and deterministic
-    Monte Carlo. It is not a trained Benter model: calibration weights remain
-    provisional until settled historical predictions are available.
-    """
+    """Recency-weighted empirical projection with minutes adjustment and discrete outcomes."""
     clean = [float(v) for v in values if v is not None and math.isfinite(float(v)) and float(v) >= 0]
     if len(clean) < 5:
         return None
-    recent = clean[-5:]
-    long_mean = sum(clean) / len(clean)
-    recent_mean = sum(recent) / len(recent)
-    # Empirical-Bayes shrinkage: small/recent samples are pulled toward the
-    # player's longer-run level rather than being allowed to dominate.
     n = len(clean)
-    prior_games = 8.0
-    shrunk_mean = (n * long_mean + prior_games * (sum(clean) / n)) / (n + prior_games)
-    recency_weight = min(0.35, len(recent) / (len(recent) + 12.0))
-    target_mean = (1.0 - recency_weight) * shrunk_mean + recency_weight * recent_mean
+    recent5, recent10 = clean[-5:], clean[-10:]
+    long_mean = sum(clean) / n
+    recent5_mean = sum(recent5) / len(recent5)
+    recent10_mean = sum(recent10) / len(recent10)
+    weights = [math.exp(-0.075 * (len(clean)-1-i)) for i in range(len(clean))]
+    weighted_mean = sum(v*w for v,w in zip(clean,weights)) / sum(weights)
+    # Recent form is a capped signal, not a replacement for the season baseline.
+    form_weight = min(0.30, len(recent10)/(len(recent10)+20.0))
+    target_mean = (1.0-form_weight)*long_mean + form_weight*weighted_mean
 
     valid_minutes = []
     for item in (minutes or []):
         try:
-            value = float(item)
-            if math.isfinite(value) and value > 0:
-                valid_minutes.append(value)
-        except (TypeError, ValueError):
+            value=float(item)
+            if math.isfinite(value) and value>0: valid_minutes.append(value)
+        except (TypeError,ValueError):
             continue
     projected_min = _projected_minutes(valid_minutes)
-    baseline_min = sum(valid_minutes) / len(valid_minutes) if valid_minutes else None
+    baseline_min = sum(valid_minutes)/len(valid_minutes) if valid_minutes else None
     minute_factor = 1.0
-    if projected_min and baseline_min and baseline_min > 0:
-        minute_factor = max(0.65, min(1.25, projected_min / baseline_min))
-        target_mean *= minute_factor
+    if projected_min is not None and baseline_min and baseline_min>0:
+        minute_factor=max(0.70,min(1.20,projected_min/baseline_min))
+        target_mean*=minute_factor
 
-    # Rescale each empirical game outcome around the shrunk target mean. This
-    # preserves observed skew/zero-inflation while avoiding raw recent-form chasing.
-    raw_mean = long_mean if long_mean > 0 else 1.0
-    distribution = [max(0.0, v * (target_mean / raw_mean)) for v in clean]
-    # Winsorize only extreme observations for the center estimate; retain the
-    # untrimmed empirical distribution for outcome variance.
-    ordered = sorted(distribution)
-    median = ordered[len(ordered)//2]
-    deviations = sorted(abs(x - median) for x in ordered)
-    mad = deviations[len(deviations)//2] if deviations else 0.0
-    robust_scale = max(0.0, 1.4826 * mad)
-    variance = sum((x - target_mean) ** 2 for x in distribution) / max(1, len(distribution)-1)
-    std_dev = max(math.sqrt(max(0.0, variance)), robust_scale, 0.35)
-
-    rng = random.Random(str(seed) + "|" + str(line) + "|" + str(market))
-    sims = 60000
-    over = under = push = total = 0
-    # A mild normal residual component smooths sparse discrete game-log
-    # distributions without replacing their empirical shape.
+    distribution=[max(0.0,v*(target_mean/long_mean)) if long_mean>0 else v for v in clean]
+    ordered=sorted(distribution)
+    median=ordered[len(ordered)//2]
+    deviations=sorted(abs(x-median) for x in ordered)
+    mad=deviations[len(deviations)//2] if deviations else 0.0
+    variance=sum((x-target_mean)**2 for x in distribution)/max(1,len(distribution)-1)
+    std_dev=max(math.sqrt(max(0.0,variance)),1.4826*mad,0.25)
+    smoothing=0.08 if market in ("steals","threes") else 0.12
+    rng=random.Random(str(seed)+"|"+str(line)+"|"+str(market))
+    sims=60000
+    over=under=push=0
     for _ in range(sims):
-        sample = distribution[rng.randrange(len(distribution))]
-        if rng.random() < 0.20:
-            sample = max(0.0, 0.75 * sample + 0.25 * rng.gauss(target_mean, std_dev))
-        total += sample
-        if abs(sample - line) < 1e-9:
-            push += 1
-        elif sample > line:
-            over += 1
-        else:
-            under += 1
-    over_p, under_p, push_p = over/sims, under/sims, push/sims
-    over_ev = _odds_profit(over_p, under_p, over_odds)
-    under_ev = _odds_profit(under_p, over_p, under_odds)
-    best = max([(v, side, prob, price) for v, side, prob, price in [
-        (over_ev, "OVER", over_p, over_odds), (under_ev, "UNDER", under_p, under_odds)
-    ] if v is not None], key=lambda x: x[0], default=None)
+        sample=distribution[rng.randrange(len(distribution))]
+        if rng.random()<smoothing:
+            sample=max(0.0,0.85*sample+0.15*rng.gauss(target_mean,std_dev))
+        if abs(sample-line)<1e-9: push+=1
+        elif sample>line: over+=1
+        else: under+=1
+    over_p,under_p,push_p=over/sims,under/sims,push/sims
+    over_ev=_odds_profit(over_p,under_p,over_odds)
+    under_ev=_odds_profit(under_p,over_p,under_odds)
+    best=max([(v,side,prob,price) for v,side,prob,price in [
+        (over_ev,"OVER",over_p,over_odds),(under_ev,"UNDER",under_p,under_odds)
+    ] if v is not None],key=lambda x:x[0],default=None)
     return {
-        "projection": round(target_mean, 2),
-        "projected_minutes": round(projected_min, 1) if projected_min else None,
-        "over_probability": round(over_p * 100, 2),
-        "under_probability": round(under_p * 100, 2),
-        "push_probability": round(push_p * 100, 2),
-        "simulations": sims,
-        "best_side": best[1] if best else None,
-        "best_probability": round(best[2] * 100, 2) if best else None,
-        "best_odds": best[3] if best else None,
-        "expected_value_pct": round(best[0] * 100, 2) if best else None,
-        "edge_pp": None,
-        "recommendation": "VALUE CANDIDATE" if best and best[0] > 0.05 else ("LEAN / VERIFY" if best and best[0] > 0 else "PASS"),
-        "model_components": ["empirical outcome distribution", "recency weighting", "long-run shrinkage",
-                             "minutes adjustment", "robust dispersion", "Monte Carlo smoothing"],
-        "model_method": "Benter-inspired empirical-Bayes distribution; provisional, requires out-of-sample calibration",
-        "sample_size": n,
-        "long_run_mean": round(long_mean, 2),
-        "recent5_mean": round(recent_mean, 2),
-        "shrunk_mean": round(target_mean, 2),
-        "distribution_std_dev": round(std_dev, 2),
-        "minute_adjustment_factor": round(minute_factor, 3),
-        "calibration_status": "uncalibrated",
+        "projection":round(target_mean,2),
+        "projected_minutes":round(projected_min,1) if projected_min is not None else None,
+        "over_probability":round(over_p*100,2),"under_probability":round(under_p*100,2),
+        "push_probability":round(push_p*100,2),"simulations":sims,
+        "best_side":best[1] if best else None,
+        "best_probability":round(best[2]*100,2) if best else None,
+        "best_odds":best[3] if best else None,
+        "expected_value_pct":round(best[0]*100,2) if best else None,
+        "edge_pp":None,
+        "recommendation":"VALUE CANDIDATE" if best and best[0]>0.05 else ("LEAN / VERIFY" if best and best[0]>0 else "PASS"),
+        "model_components":["exponentially weighted history","10-game form signal","minutes adjustment" if valid_minutes else "minutes unavailable; no adjustment","market-specific empirical distribution","Monte Carlo probability estimation"],
+        "model_method":"recency-weighted empirical distribution with minutes adjustment; provisional pending out-of-sample calibration",
+        "sample_size":n,"long_run_mean":round(long_mean,2),"recent5_mean":round(recent5_mean,2),
+        "recent10_mean":round(recent10_mean,2),"weighted_mean":round(weighted_mean,2),
+        "distribution_std_dev":round(std_dev,2),"minute_adjustment_factor":round(minute_factor,3),
+        "calibration_status":"uncalibrated"
     }
 
 _BP_OFFERS_CACHE = {}
@@ -561,8 +544,8 @@ def proprietary_market_board(market: str = "rebounds"):
             if not athlete_id:
                 failures.append(name + ": ESPN player match unavailable")
                 continue
-            values, sample_label = _player_history(athlete_id, field, label)
-            model = _simulate_market(values, line, None, None, _norm_player_name(name) + market)
+            values, sample_label, player_minutes = _player_history(athlete_id, field, label)
+            model = _simulate_market(values, line, None, None, _norm_player_name(name) + market, minutes=player_minutes, market=market)
             if not model:
                 failures.append(name + ": fewer than five valid game logs")
                 continue
