@@ -10,6 +10,21 @@ UPSTREAM = "https://colts-nba-edge-prop-model-e2oyr9l03-colin-82ad.vercel.app"
 LIVE_UPSTREAM = "https://colts-nba-edge-prop-model-3xj6ghyhl-colin-82ad.vercel.app"
 app = FastAPI()
 BP_MARKETS = {"rebounds": 157, "assists": 151, "steals": 160, "threes": 162}
+@app.get("/api/bettingpros-market-sample")
+def bettingpros_market_sample(market_id: int):
+    api_key = os.getenv("BETTINGPROS_API_KEY", "").strip()
+    if not api_key:
+        raise HTTPException(status_code=503, detail="BettingPros API key is not configured.")
+    query = urlencode({"sport": "NBA", "market_id": market_id, "page": 1, "limit": 2})
+    req = Request("https://api.bettingpros.com/v3/props?" + query, headers={"x-api-key": api_key, "accept": "application/json", "user-agent": "ColtsNBAEdge/1.0"}, method="GET")
+    try:
+        with urlopen(req, timeout=15) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail="BettingPros sample request failed: " + type(e).__name__) from e
+    rows = payload.get("props", []) if isinstance(payload, dict) else []
+    sample = rows[0] if isinstance(rows, list) and rows else {}
+    return JSONResponse({"market_id": market_id, "count": len(rows) if isinstance(rows, list) else 0, "sample_keys": list(sample.keys()) if isinstance(sample, dict) else [], "sample": sample})
 @app.get("/api/bettingpros-markets")
 def bettingpros_markets():
     api_key = os.getenv("BETTINGPROS_API_KEY", "").strip()
