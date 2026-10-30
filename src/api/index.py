@@ -145,8 +145,31 @@ def _gamelog_records(athlete_id, field, label, season):
     names = payload.get("names") or payload.get("statNames") or []
     default_index = labels.index(label) if isinstance(labels, list) and label in labels else -1
     source_rows = []
-    for season_type in payload.get("seasonTypes") or []:
-        if not isinstance(season_type, dict):
+    season_types = payload.get("seasonTypes") or []
+
+    def is_regular_season(season_type):
+        # ESPN includes preseason, regular-season and postseason categories in
+        # the same athlete gamelog response. Only regular-season rows belong in
+        # the standard player prop baseline.
+        type_info = season_type.get("type") if isinstance(season_type.get("type"), dict) else {}
+        ids = {
+            str(season_type.get("id") or "").strip().lower(),
+            str(type_info.get("id") or "").strip().lower(),
+        }
+        names_to_check = [
+            season_type.get("name"), season_type.get("displayName"),
+            season_type.get("abbreviation"), type_info.get("name"),
+            type_info.get("displayName"), type_info.get("abbreviation"),
+            type_info.get("type"),
+        ]
+        normalized_names = {
+            "".join(ch.lower() for ch in str(value or "") if ch.isalnum())
+            for value in names_to_check
+        }
+        return "2" in ids or "regularseason" in normalized_names or "reg" in normalized_names
+
+    for season_type in season_types:
+        if not isinstance(season_type, dict) or not is_regular_season(season_type):
             continue
         for category in season_type.get("categories") or []:
             if not isinstance(category, dict):
@@ -161,7 +184,10 @@ def _gamelog_records(athlete_id, field, label, season):
                 events = list(events.values())
             if isinstance(events, list):
                 source_rows.extend((row, idx) for row in events if isinstance(row, dict))
-    if not source_rows:
+    # Some ESPN response variants expose a flat gameLog instead of seasonTypes.
+    # Do not fall back to the flat list when seasonTypes exists: it may contain
+    # preseason and postseason games that must not leak into regular-season stats.
+    if not source_rows and not season_types:
         direct = payload.get("gameLog") or payload.get("games") or payload.get("events") or []
         if isinstance(direct, dict):
             direct = list(direct.values())
