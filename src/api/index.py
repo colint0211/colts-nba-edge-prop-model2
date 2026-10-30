@@ -225,7 +225,7 @@ def proprietary_market_board(market: str = "rebounds"):
                 **model,
             })
         except Exception as exc:
-            failures.append(name + ": data retrieval failed")
+            failures.append(name + ": " + type(exc).__name__ + ": " + str(exc)[:180])
     output.sort(key=lambda x: (x.get("expected_value_pct") is None, -(x.get("expected_value_pct") or -999)))
     return JSONResponse({
         "market": market,
