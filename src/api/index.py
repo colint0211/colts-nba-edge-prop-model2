@@ -2142,6 +2142,37 @@ def tank01_dvp_probe():
         }, status_code=502)
 
 
+
+@app.get("/api/tank01-dvp-status")
+def tank01_dvp_status():
+    """Report whether Tank01's current-season positional tables are mature enough to use."""
+    try:
+        tables, meta = _fetch_tank01_dvp_tables()
+        ready = meta.get("min_games_played", 0) >= 10
+        return JSONResponse({
+            "configured": True,
+            "authenticated": True,
+            "source": meta.get("source"),
+            "current_season_ready": ready,
+            "min_games_played_per_team": meta.get("min_games_played"),
+            "max_games_played_per_team": meta.get("max_games_played"),
+            "teams": meta.get("team_count"),
+            "position_rows_by_market": {market: len(table) for market, table in tables.items()},
+            "markets": list(tables.keys()),
+            "fallback_policy": "Use prior-season NBA House DVP until every team has at least 10 current-season games.",
+            "rate_limit_remaining": meta.get("rate_limit_remaining"),
+            "message": "Tank01 positional tables are valid and season sample is mature." if ready
+                else "Tank01 positional tables are valid; early-season sample is not mature, so prior-season DVP remains active."
+        })
+    except Exception as exc:
+        return JSONResponse({
+            "configured": bool(os.getenv("TANK01_API_KEY", "").strip()),
+            "authenticated": False,
+            "error_type": type(exc).__name__,
+            "message": str(exc)[:220],
+        }, status_code=502)
+
+
 @app.get("/api/model/diagnostics")
 def model_diagnostics():
     """Safe database diagnostics; never returns connection strings or credentials."""
