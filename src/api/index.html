@@ -234,11 +234,12 @@ function livePace(p){
   return {points,minutes,gameMinutesLeft,remainingPlayerMinutes,projected,margin,verdict};
 }
 function dvpSummary(p){
-  if(String(p.market||'').toLowerCase()!=='points')return '';
   const d=p.defense_vs_position;
   if(!d)return '<div class="card-bottom"><span>Positional defense: unavailable for this player / matchup; no adjustment applied.</span></div>';
   const sign=Number(d.adjustment_pct)>0?'+':'';
-  return '<div class="card-bottom"><span>Defense vs '+esc(d.position_name||positionDisplayName(d.position))+': '+esc(d.opponent_name||d.opponent)+' allows '+num(d.allowed_per_game,1)+' PPG vs '+num(d.league_position_average,1)+' same-position league avg</span><span>Projection adjustment: '+sign+num(d.adjustment_pct,1)+'%</span></div>';
+  const unit=d.stat_unit||({points:'PPG',rebounds:'RPG',assists:'APG',steals:'SPG',threes:'3PM'}[p.market]||'per game');
+  const label=d.stat_label||({points:'points',rebounds:'rebounds',assists:'assists',steals:'steals',threes:'3-pointers made'}[p.market]||p.market||'stat');
+  return '<div class="card-bottom"><span>Defense vs '+esc(d.position_name||positionDisplayName(d.position))+': '+esc(d.opponent_name||d.opponent)+' allows '+num(d.allowed_per_game,2)+' '+esc(unit)+' ('+esc(label)+') vs '+num(d.league_position_average,2)+' positional league avg</span><span>Projection adjustment: '+sign+num(d.adjustment_pct,1)+'%</span></div>';
 }
 function card(p,i){
   const g=gameFor(p),st=playerLive(p),gr=grade(p),pts=st&&st.points!=null?Number(st.points):null;
