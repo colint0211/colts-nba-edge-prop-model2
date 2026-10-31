@@ -2149,20 +2149,34 @@ def tank01_dvp_status():
     try:
         tables, meta = _fetch_tank01_dvp_tables()
         ready = meta.get("min_games_played", 0) >= 10
+        active_tables = {}
+        active_sources = {}
+        for market in ("PTS", "REB", "AST", "STL", "3PM"):
+            try:
+                table = _fetch_dvp_table(market)
+                active_tables[market] = len(table)
+                active_sources[market] = _DVP_STAT_CACHE.get(market, {}).get("season")
+            except Exception as source_error:
+                active_tables[market] = 0
+                active_sources[market] = "unavailable: " + type(source_error).__name__
+        all_active = all(count >= 120 for count in active_tables.values())
         return JSONResponse({
             "configured": True,
             "authenticated": True,
-            "source": meta.get("source"),
-            "current_season_ready": ready,
-            "min_games_played_per_team": meta.get("min_games_played"),
-            "max_games_played_per_team": meta.get("max_games_played"),
-            "teams": meta.get("team_count"),
-            "position_rows_by_market": {market: len(table) for market, table in tables.items()},
+            "tank01_source": meta.get("source"),
+            "tank01_current_season_ready": ready,
+            "tank01_min_games_played_per_team": meta.get("min_games_played"),
+            "tank01_max_games_played_per_team": meta.get("max_games_played"),
+            "tank01_teams": meta.get("team_count"),
+            "tank01_position_rows_by_market": {market: len(table) for market, table in tables.items()},
+            "active_dvp_tables_ready": all_active,
+            "active_dvp_rows_by_market": active_tables,
+            "active_dvp_source_by_market": active_sources,
             "markets": list(tables.keys()),
             "fallback_policy": "Use prior-season NBA House DVP until every team has at least 10 current-season games.",
             "rate_limit_remaining": meta.get("rate_limit_remaining"),
-            "message": "Tank01 positional tables are valid and season sample is mature." if ready
-                else "Tank01 positional tables are valid; early-season sample is not mature, so prior-season DVP remains active."
+            "message": "Tank01 current-season DVP is active." if ready and all_active
+                else "Tank01 feed is authenticated and parsed; the app uses the verified prior-season table until current-season samples mature."
         })
     except Exception as exc:
         return JSONResponse({
