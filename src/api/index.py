@@ -36,7 +36,7 @@ _ESPN_LOG_CACHE = {}
 _ESPN_ROSTER_CACHE = {}
 
 _ESPN_POSITION_CACHE = {}
-_DVP_CACHE = {"at": 0.0, "data": None}
+_DVP_CACHE = {"at": 0.0, "data": None, "season": None}
 _DVP_CACHE_TTL = 3600
 _TEAM_NAMES = {
  "ATL":"Atlanta Hawks","BOS":"Boston Celtics","BKN":"Brooklyn Nets","CHA":"Charlotte Hornets","CHI":"Chicago Bulls",
@@ -51,14 +51,16 @@ _TEAM_ALIASES.update({"los angeles clippers":"LAC","brooklyn":"BKN","new york":"
  "phoenix":"PHX","new orleans":"NOP","san antonio":"SAS"})
 class _DVPHTMLParser(HTMLParser):
  def __init__(self):
-  super().__init__(); self.rows=[]; self.row=None; self.cell=None
+  super().__init__(); self.rows=[]; self.row=None; self.cell=None; self.text=[]
  def handle_starttag(self,tag,attrs):
   tag=tag.lower()
   if tag=="tr": self.row=[]
   elif tag in ("td","th") and self.row is not None: self.cell=[]
  def handle_data(self,data):
   value=str(data or "").strip()
-  if value and self.cell is not None: self.cell.append(value)
+  if value:
+   self.text.append(value)
+   if self.cell is not None: self.cell.append(value)
  def handle_endtag(self,tag):
   tag=tag.lower()
   if tag in ("td","th") and self.cell is not None and self.row is not None:
@@ -84,22 +86,40 @@ def _team_codes_from_game(game):
 def _fetch_dvp_table():
  now=time.time()
  if _DVP_CACHE["data"] is not None and now-_DVP_CACHE["at"]<_DVP_CACHE_TTL: return _DVP_CACHE["data"]
- request=Request("https://www.nbahouse.net/defense-vs-position?stat=PTS&tf=season",
-  headers={"User-Agent":"Mozilla/5.0 ColtsNBAEdge/1.0","Accept":"text/html"})
- with urlopen(request,timeout=12) as response: html=response.read().decode("utf-8","replace")
- parser=_DVPHTMLParser(); parser.feed(html)
- positions=("PG","SG","SF","PF","C"); parsed={}
- for cells in parser.rows:
-  if len(cells)<6: continue
-  team_text=cells[0].strip().lower()
-  code=_TEAM_ALIASES.get(team_text)
-  if not code: code=_TEAM_ALIASES.get(re.sub(r"^[a-z]{3}","",team_text).strip())
-  if not code: continue
-  for position,cell in zip(positions,cells[1:6]):
-   match=re.search(r"([0-9]+(?:\.[0-9]+)?)",str(cell))
-   if match: parsed[(code,position)]={"points":float(match.group(1))}
- if len(parsed)<120: raise RuntimeError("Individual-position defense-vs-position source returned an incomplete table.")
- _DVP_CACHE.update({"at":now,"data":parsed}); return parsed
+
+ def fetch_and_parse(timeframe):
+  url="https://www.nbahouse.net/defense-vs-position?stat=PTS&tf="+timeframe
+  request=Request(url,headers={"User-Agent":"Mozilla/5.0 ColtsNBAEdge/1.0","Accept":"text/html"})
+  with urlopen(request,timeout=12) as response:
+   html=response.read().decode("utf-8","replace")
+  parser=_DVPHTMLParser(); parser.feed(html)
+  positions=("PG","SG","SF","PF","C"); parsed={}
+  for cells in parser.rows:
+   if len(cells)<6: continue
+   team_text=cells[0].strip().lower()
+   code=_TEAM_ALIASES.get(team_text)
+   if not code: code=_TEAM_ALIASES.get(re.sub(r"^[a-z]{3}","",team_text).strip())
+   if not code: continue
+   for position,cell in zip(positions,cells[1:6]):
+    match=re.search(r"([0-9]+(?:\\.[0-9]+)?)",str(cell))
+    if match: parsed[(code,position)]={"points":float(match.group(1))}
+  if len(parsed)<120:
+   raise RuntimeError("Individual-position defense-vs-position source returned an incomplete table.")
+  return parsed," ".join(parser.text)
+
+ # Avoid overreacting to tiny early-season samples. Use current-season DVP only
+ # after the source reports at least 10 games for every team; otherwise use
+ # the completed previous season as the stable baseline.
+ current_table,current_text=fetch_and_parse("season")
+ sample=re.search(r"\\((\\d+)\\s*[–-]\\s*(\\d+)\\s+games?\\s+a\\s+team\\)",current_text,re.I)
+ if sample and int(sample.group(1))>=10:
+  parsed,season=current_table,"current season"
+ else:
+  parsed,_=fetch_and_parse("prev")
+  season="previous season (current season sample below 10 games or unavailable)"
+ _DVP_CACHE.update({"at":now,"data":parsed,"season":season})
+ return parsed
+
 def _position_group(position):
  if isinstance(position,dict):
   raw=(position.get("abbreviation") or position.get("displayName") or position.get("name") or "")
@@ -178,6 +198,7 @@ def _dvp_matchup_adjustment(athlete_id,player_team,game,market):
    "stat":"points","allowed_per_game":round(allowed,2),"league_position_average":round(league_average,2),
    "league_relative_ratio":round(ratio,3),"adjustment_pct":round((factor-1.0)*100,2),"factor":round(factor,4),
    "source":"NBA House individual-position points allowed table",
+   "source_season":_DVP_CACHE.get("season") or "season not identified",
    "method":"Individual position points allowed per game vs same-position league average; 30% dampening; adjustment capped at +/-8%"}
  except Exception: return None
 
