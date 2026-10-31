@@ -1789,7 +1789,10 @@ async def model_recalculate(request: FastRequest):
                       "expected_profit_per_100": model.get("expected_value_pct"), "custom_line": True,
                       "line_source": "User-entered sportsbook line and odds"})
         prediction_ledger.initialize()
+        # Persist the user's sportsbook line before applying the availability
+        # gate, so an injured player's saved line is never lost.
         saved = prediction_ledger.save_predictions([model], market)
+        _apply_official_injury(model, _load_official_injury_feed(), player, payload.get("team"))
         return JSONResponse({"prop": model, "ledger": saved})
     except HTTPException:
         raise
