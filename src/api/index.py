@@ -15,6 +15,7 @@ from fastapi.responses import HTMLResponse, Response, JSONResponse
 from . import prediction_ledger
 from pathlib import Path
 from html.parser import HTMLParser
+from zoneinfo import ZoneInfo
 HTML = Path(__file__).with_name("index.html").read_text(encoding="utf-8")
 UPSTREAM = "https://colts-nba-edge-prop-model-e2oyr9l03-colin-82ad.vercel.app"
 LIVE_UPSTREAM = "https://colts-nba-edge-prop-model-3xj6ghyhl-colin-82ad.vercel.app"
@@ -64,6 +65,91 @@ def api_sports_status():
         }, status_code=502)
     except Exception as exc:
         return JSONResponse({"configured": True, "valid": False, "message": "Could not reach API-Sports: " + str(exc)[:180]}, status_code=502)
+
+
+_BDL_STATUS_CACHE = {"at": 0.0, "data": None}
+_BDL_STATUS_CACHE_TTL = 900
+
+
+@app.get("/api/balldontlie-status")
+def balldontlie_status():
+    """Check the three BALLDONTLIE endpoints included in the free NBA tier."""
+    now = time.time()
+    cached = _BDL_STATUS_CACHE.get("data")
+    if cached is not None and now - _BDL_STATUS_CACHE.get("at", 0.0) < _BDL_STATUS_CACHE_TTL:
+        return JSONResponse(cached)
+
+    api_key = os.getenv("BALLDONTLIE_API_KEY", "").strip()
+    if not api_key:
+        return JSONResponse({
+            "configured": False,
+            "valid": False,
+            "message": "BALLDONTLIE_API_KEY is not configured in this deployment."
+        }, status_code=503)
+
+    local_date = datetime.now(ZoneInfo("America/New_York")).date().isoformat()
+    probes = [
+        ("teams", "https://api.balldontlie.io/v1/teams?per_page=100"),
+        ("players", "https://api.balldontlie.io/v1/players?search=LeBron&per_page=5"),
+        ("games", "https://api.balldontlie.io/v1/games?" + urlencode({"dates[]": local_date, "per_page": 100})),
+    ]
+    results = {}
+    remaining = None
+
+    for name, url in probes:
+        request = Request(
+            url,
+            headers={
+                "Authorization": api_key,
+                "Accept": "application/json",
+                "User-Agent": "ColtsNBAEdge/1.0",
+            },
+        )
+        try:
+            with urlopen(request, timeout=10) as response:
+                payload = json.loads(response.read().decode("utf-8", "replace"))
+                headers = response.headers
+            rows = payload.get("data") if isinstance(payload, dict) else None
+            if isinstance(rows, dict):
+                count = 1
+            elif isinstance(rows, list):
+                count = len(rows)
+            else:
+                count = 0
+            results[name] = {"ok": isinstance(rows, (list, dict)), "records": count}
+            rate_remaining = headers.get("X-RateLimit-Remaining")
+            if rate_remaining is not None:
+                remaining = rate_remaining
+        except HTTPError as exc:
+            results[name] = {
+                "ok": False,
+                "http_status": exc.code,
+                "error": "Unauthorized or endpoint unavailable for this account tier." if exc.code == 401
+                         else "Rate limit reached." if exc.code == 429
+                         else "BALLDONTLIE returned HTTP " + str(exc.code) + ".",
+            }
+            rate_remaining = exc.headers.get("X-RateLimit-Remaining") if exc.headers else None
+            if rate_remaining is not None:
+                remaining = rate_remaining
+        except Exception as exc:
+            results[name] = {"ok": False, "error": "Request failed: " + type(exc).__name__}
+
+    valid = all(item.get("ok") for item in results.values())
+    output = {
+        "configured": True,
+        "valid": valid,
+        "source": "BALLDONTLIE NBA API",
+        "tier_scope_tested": "free-tier endpoints",
+        "tested_at": datetime.now(timezone.utc).isoformat(),
+        "game_date_et": local_date,
+        "endpoints": results,
+        "rate_limit_remaining": remaining,
+        "cache_ttl_seconds": _BDL_STATUS_CACHE_TTL,
+        "message": "All three free-tier endpoints authenticated successfully." if valid
+                   else "One or more free-tier endpoint checks failed; see endpoint results.",
+    }
+    _BDL_STATUS_CACHE.update({"at": now, "data": output})
+    return JSONResponse(output)
 
 
 @app.get("/api/injury-status")
