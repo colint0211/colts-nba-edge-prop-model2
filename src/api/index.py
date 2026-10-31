@@ -70,7 +70,7 @@ class _DVPHTMLParser(HTMLParser):
    self.row=None; self.cell=None
 def _canonical_team_code(value):
  raw=str(value or "").strip(); upper=raw.upper()
- aliases={"NY":"NYK","GS":"GSW","WSH":"WAS","PHO":"PHX","NO":"NOP"}
+ aliases={"NY":"NYK","GS":"GSW","WSH":"WAS","PHO":"PHX","NO":"NOP","SA":"SAS"}
  if upper in _TEAM_NAMES: return upper
  if upper in aliases: return aliases[upper]
  return _TEAM_ALIASES.get(raw.lower())
