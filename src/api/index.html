@@ -250,7 +250,10 @@ function livePace(p){
 }
 function dvpSummary(p){
   const d=p.defense_vs_position;
-  if(!d)return '<div class="card-bottom"><span>Positional defense: unavailable for this player / matchup; no adjustment applied.</span></div>';
+  if(!d||d.available===false){
+    const reason=d&&d.reason?d.reason:'No positional-defense diagnostic was returned by the model.';
+    return '<div class="card-bottom"><span>Positional defense: not applied · '+esc(reason)+'</span></div>';
+  }
   const sign=Number(d.adjustment_pct)>0?'+':'';
   const unit=d.stat_unit||({points:'PPG',rebounds:'RPG',assists:'APG',steals:'SPG',threes:'3PM'}[p.market]||'per game');
   const label=d.stat_label||({points:'points',rebounds:'rebounds',assists:'assists',steals:'steals',threes:'3-pointers made'}[p.market]||p.market||'stat');
