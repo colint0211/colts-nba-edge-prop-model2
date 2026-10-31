@@ -537,12 +537,21 @@ def _dvp_matchup_adjustment(athlete_id,player_team,game,market,player_name=None)
   if not stat: return unavailable("Unsupported prop category; no positional-defense table is mapped for this market.")
   team_code=_canonical_team_code(player_team)
   game_teams=_team_codes_from_game(game)
-  if not team_code:
-   return unavailable("Player team could not be identified from the prop data.")
   if len(game_teams)!=2:
-   return unavailable("Matchup could not be parsed into two verified NBA teams.", player_team=team_code)
+   return unavailable("Matchup could not be parsed into two verified NBA teams.", player_team=team_code or None)
+  if not team_code and player_name:
+   # PropLine often omits a team suffix. Resolve the exact player name against
+   # only the two verified matchup rosters; never infer from name or position.
+   try:
+    roster_id, roster_team = _espn_roster_player_id(player_name, game_teams)
+    if roster_id and roster_team in game_teams:
+     team_code = roster_team
+   except Exception:
+    team_code = None
+  if not team_code:
+   return unavailable("Player team was absent from the prop quote and could not be uniquely verified on either matchup roster.", matchup_teams=game_teams)
   if team_code not in game_teams:
-   return unavailable("Player team does not match either team in the supplied matchup.", player_team=team_code)
+   return unavailable("Player team does not match either team in the supplied matchup.", player_team=team_code, matchup_teams=game_teams)
   opponent=next((code for code in game_teams if code!=team_code),None)
   if not opponent: return unavailable("Opponent could not be identified from the matchup.")
   espn_position=_espn_player_position(athlete_id,team_code)
