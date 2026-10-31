@@ -70,6 +70,8 @@ class _DVPHTMLParser(HTMLParser):
    if self.row: self.rows.append(list(self.row))
    self.row=None; self.cell=None
 def _canonical_team_code(value):
+ if isinstance(value,dict):
+  value=value.get("abbreviation") or value.get("shortDisplayName") or value.get("displayName") or value.get("name") or ""
  raw=str(value or "").strip(); upper=raw.upper()
  aliases={"NY":"NYK","GS":"GSW","WSH":"WAS","PHO":"PHX","NO":"NOP","SA":"SAS"}
  if upper in _TEAM_NAMES: return upper
