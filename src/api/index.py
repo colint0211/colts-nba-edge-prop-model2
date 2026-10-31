@@ -109,7 +109,7 @@ def _fetch_dvp_table(stat="PTS"):
    if not code: code=_TEAM_ALIASES.get(re.sub(r"^[a-z]{3}","",team_text).strip())
    if not code: continue
    for position,cell in zip(positions,cells[1:6]):
-    match=re.search(r"([0-9]+(?:\\.[0-9]+)?)",str(cell))
+    match=re.search(r"([0-9]+(?:\.[0-9]+)?)",str(cell))
     if match: parsed[(code,position)]={stat:float(match.group(1))}
   if len(parsed)<120:
    raise RuntimeError("Individual-position "+stat+" defense-vs-position source returned an incomplete table.")
@@ -121,7 +121,7 @@ def _fetch_dvp_table(stat="PTS"):
   current_table,current_text=fetch_and_parse("season")
  except Exception:
   current_table,current_text=None,""
- sample=re.search(r"\\((\\d+)\\s*[–-]\\s*(\\d+)\\s+games?\\s+a\\s+team\\)",current_text,re.I)
+ sample=re.search(r"\((\d+)\s*[–-]\s*(\d+)\s+games?\s+a\s+team\)",current_text,re.I)
  if current_table is not None and sample and int(sample.group(1))>=10:
   parsed,season=current_table,"current season"
  else:
