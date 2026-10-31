@@ -308,6 +308,7 @@ def official_injury_status():
 ESPN_BASE = "https://site.web.api.espn.com/apis/common/v3/sports/basketball/nba"
 ESPN_SEARCH = "https://site.web.api.espn.com/apis/search/v2"
 STAT_FIELDS = {
+    "points": ("points", "PTS"),
     "rebounds": ("rebounds", "REB"),
     "assists": ("assists", "AST"),
     "steals": ("steals", "STL"),
@@ -1485,18 +1486,200 @@ def _score_blended_market(model, market_quote):
     })
     return model
 
+_PROPLINE_CACHE = {"at": 0.0, "events": None, "headers": {}}
+_PROPLINE_CACHE_TTL = 60
+_PROPLINE_STALE_TTL = 600
+_PROPLINE_COOLDOWN_UNTIL = 0.0
+_PROPLINE_MARKETS = {
+    "points": "player_points",
+    "rebounds": "player_rebounds",
+    "assists": "player_assists",
+    "steals": "player_steals",
+    "threes": "player_threes",
+}
+
+
+def _propline_fetch_events():
+    """Fetch one cached DraftKings-only NBA slate from PropLine."""
+    global _PROPLINE_COOLDOWN_UNTIL
+    now = time.time()
+    cached_events = _PROPLINE_CACHE.get("events")
+    age = now - float(_PROPLINE_CACHE.get("at") or 0.0)
+    if cached_events is not None and age < _PROPLINE_CACHE_TTL:
+        return cached_events, "cache", _PROPLINE_CACHE.get("headers") or {}
+
+    api_key = os.getenv("PROPLINE_API_KEY", "").strip()
+    if not api_key:
+        raise HTTPException(status_code=503, detail="PROPLINE_API_KEY is missing from this deployment.")
+
+    if now < _PROPLINE_COOLDOWN_UNTIL:
+        if cached_events is not None and age < _PROPLINE_STALE_TTL:
+            return cached_events, "stale-cache", _PROPLINE_CACHE.get("headers") or {}
+        retry = max(1, int(_PROPLINE_COOLDOWN_UNTIL - now))
+        raise HTTPException(status_code=503, detail="PropLine rate-limit cooldown active. Retry in " + str(retry) + " seconds.")
+
+    params = urlencode({
+        "markets": ",".join(_PROPLINE_MARKETS.values()),
+        "bookmakers": "draftkings",
+        "includeLinks": "true",
+    })
+    request = Request(
+        "https://api.prop-line.com/v1/sports/basketball_nba/odds?" + params,
+        headers={
+            "X-API-Key": api_key,
+            "Accept": "application/json",
+            "User-Agent": "ColtsNBAEdge/1.0",
+        },
+    )
+    try:
+        with urlopen(request, timeout=20) as response:
+            payload = json.loads(response.read().decode("utf-8", "replace"))
+            headers = {
+                "daily_limit": response.headers.get("X-Daily-Limit"),
+                "daily_used": response.headers.get("X-Daily-Used"),
+                "daily_remaining": response.headers.get("X-Daily-Remaining"),
+                "fetched_at": datetime.now(timezone.utc).isoformat(),
+            }
+        if isinstance(payload, list):
+            events = payload
+        elif isinstance(payload, dict):
+            events = payload.get("events") or payload.get("data") or payload.get("results")
+            if not isinstance(events, list):
+                events = [payload] if payload.get("bookmakers") else []
+        else:
+            events = []
+        if not isinstance(events, list):
+            raise ValueError("PropLine odds response did not contain an event list.")
+        _PROPLINE_CACHE.update({"at": time.time(), "events": events, "headers": headers})
+        _PROPLINE_COOLDOWN_UNTIL = 0.0
+        return events, "live", headers
+    except HTTPError as exc:
+        if exc.code == 429:
+            retry_after = exc.headers.get("Retry-After") if exc.headers else None
+            try:
+                cooldown = max(1, min(3600, int(retry_after)))
+            except (TypeError, ValueError):
+                cooldown = 60
+            _PROPLINE_COOLDOWN_UNTIL = time.time() + cooldown
+            if cached_events is not None and age < _PROPLINE_STALE_TTL:
+                return cached_events, "stale-cache", _PROPLINE_CACHE.get("headers") or {}
+            raise HTTPException(status_code=503, detail="PropLine request limit reached. Retry in " + str(cooldown) + " seconds.") from exc
+        if exc.code in (401, 403):
+            raise HTTPException(status_code=502, detail="PropLine rejected PROPLINE_API_KEY or this account tier.") from exc
+        raise HTTPException(status_code=502, detail="PropLine NBA odds endpoint returned HTTP " + str(exc.code) + ".") from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        if cached_events is not None and age < _PROPLINE_STALE_TTL:
+            return cached_events, "stale-cache", _PROPLINE_CACHE.get("headers") or {}
+        raise HTTPException(status_code=502, detail="Could not retrieve DraftKings NBA props from PropLine: " + type(exc).__name__ + ".") from exc
+
+
+def _propline_market_props(events, market):
+    """Normalize DraftKings main-line Over/Under outcomes into one row per player."""
+    market_key = _PROPLINE_MARKETS[market]
+    grouped = {}
+    for event in events or []:
+        if not isinstance(event, dict):
+            continue
+        event_id = str(event.get("id") or "")
+        away = str(event.get("away_team") or "")
+        home = str(event.get("home_team") or "")
+        matchup = (away + " @ " + home).strip(" @")
+        for bookmaker in event.get("bookmakers") or []:
+            if not isinstance(bookmaker, dict) or str(bookmaker.get("key") or "").lower() != "draftkings":
+                continue
+            for market_row in bookmaker.get("markets") or []:
+                if not isinstance(market_row, dict) or market_row.get("key") != market_key:
+                    continue
+                if market_row.get("suspended_at"):
+                    continue
+                line_type = str(market_row.get("line_type") or "").lower()
+                if line_type and line_type != "main":
+                    continue
+                updated = market_row.get("last_update")
+                for outcome in market_row.get("outcomes") or []:
+                    if not isinstance(outcome, dict):
+                        continue
+                    side = str(outcome.get("name") or "").strip().lower()
+                    if side not in ("over", "under"):
+                        continue
+                    player_text = str(
+                        outcome.get("description")
+                        or outcome.get("player")
+                        or market_row.get("player")
+                        or ""
+                    ).strip()
+                    if not player_text:
+                        continue
+                    team = ""
+                    team_match = re.search(r"\(([A-Z]{2,3})\)\s*$", player_text)
+                    if team_match:
+                        team = _canonical_team_code(team_match.group(1)) or team_match.group(1)
+                        player_text = player_text[:team_match.start()].strip()
+                    try:
+                        point = float(outcome.get("point"))
+                        price = int(float(outcome.get("price")))
+                    except (TypeError, ValueError, OverflowError):
+                        continue
+                    if not math.isfinite(point) or price == 0 or abs(price) > 10000:
+                        continue
+                    key = (event_id, _norm_player_name(player_text), point)
+                    row = grouped.setdefault(key, {
+                        "player": player_text,
+                        "team": team,
+                        "game": matchup,
+                        "event_id": event_id,
+                        "line": point,
+                        "over_odds": None,
+                        "under_odds": None,
+                        "last_update": updated,
+                        "bookmaker": "DraftKings",
+                        "bookmaker_link": bookmaker.get("link"),
+                    })
+                    if side == "over":
+                        row["over_odds"] = price
+                    else:
+                        row["under_odds"] = price
+    output = []
+    for row in grouped.values():
+        if row.get("over_odds") is None or row.get("under_odds") is None:
+            continue
+        output.append(row)
+    output.sort(key=lambda row: (row.get("game") or "", row.get("player") or ""))
+    return output
+
+
+def _propline_quote(prop):
+    over_odds = prop.get("over_odds")
+    under_odds = prop.get("under_odds")
+    over_probability = _american_probability(over_odds)
+    under_probability = _american_probability(under_odds)
+    if over_probability is None or under_probability is None:
+        return None
+    total = over_probability + under_probability
+    if total <= 0:
+        return None
+    return {
+        "over_probability": over_probability / total,
+        "under_probability": under_probability / total,
+        "over_odds": over_odds,
+        "under_odds": under_odds,
+        "over_book": "DraftKings",
+        "under_book": "DraftKings",
+        "books_used": ["DraftKings"],
+    }
+
+
 @app.get("/api/proprietary-market-board")
 def proprietary_market_board(market: str = "rebounds"):
-    global _BP_RATE_LIMIT_UNTIL
     market = market.lower().strip()
     if market not in STAT_FIELDS:
-        raise HTTPException(status_code=400, detail="Use rebounds, assists, steals, or threes.")
+        raise HTTPException(status_code=400, detail="Use points, rebounds, assists, steals, or threes.")
     now = time.time()
     cached_board = _BP_BOARD_CACHE.get(market)
     injury_feed = _load_official_injury_feed()
-    # The points-board request owns the one-per-cache-window BALLDONTLIE fetch.
-    # Other prop markets reuse that cached schedule instead of consuming more free-tier calls.
-    bdl_games = _load_balldontlie_games(allow_fetch=False)
+    bdl_games = _load_balldontlie_games(allow_fetch=(market == "points"))
     if cached_board and now - cached_board[0] < _BP_BOARD_TTL_SECONDS:
         cached_result = json.loads(json.dumps(cached_board[1]))
         for cached_prop in cached_result.get("props") or []:
@@ -1505,44 +1688,31 @@ def proprietary_market_board(market: str = "rebounds"):
         cached_result["injury_feed"] = injury_feed.get("meta", {})
         cached_result["balldontlie"] = {key: value for key, value in bdl_games.items() if key != "games"}
         return JSONResponse(cached_result)
-    api_key = os.getenv("BETTINGPROS_API_KEY", "").strip()
-    if not api_key:
-        raise HTTPException(status_code=503, detail="BettingPros lines unavailable: API key missing.")
-    market_id = BP_MARKETS[market]
-    bp_payload, props_source = _bp_fetch_props(market, 50)
+
+    events, props_source, quota = _propline_fetch_events()
+    props = _propline_market_props(events, market)
     field, label = STAT_FIELDS[market]
     output, failures = [], []
-    props = bp_payload.get("props") or [] if isinstance(bp_payload, dict) else []
-    offers_by_event = {}
     for raw in props:
-        participant = raw.get("participant") or {}
-        player_obj = participant.get("player") or {}
-        event = raw.get("event") or {}
-        event_id = event.get("id") or raw.get("event_id")
-        if event_id and str(event_id) not in offers_by_event:
-            offers_by_event[str(event_id)] = _bp_event_offers(event_id, market)
-        over, under = raw.get("over") or {}, raw.get("under") or {}
-        name = participant.get("name") or raw.get("player_name") or (raw.get("player") if isinstance(raw.get("player"), str) else None) or player_obj.get("name") or player_obj.get("full_name")
+        name = raw.get("player")
         if not name:
             continue
-        quote = _bp_two_book_market(offers_by_event.get(str(event_id), []), name) if event_id else None
-        line = quote["line"] if quote else over.get("line", under.get("line", raw.get("line", raw.get("line_value"))))
         try:
-            line = float(line)
-        except (TypeError, ValueError):
-            continue
-        over_odds = quote["over_odds"] if quote else over.get("odds", raw.get("over_odds"))
-        under_odds = quote["under_odds"] if quote else under.get("odds", raw.get("under_odds"))
-        try:
+            line = float(raw.get("line"))
+            quote = _propline_quote(raw)
             athlete_id = _espn_player_id(name)
             if not athlete_id:
                 failures.append(name + ": ESPN player match unavailable")
                 continue
             values, sample_label, player_minutes = _player_history(athlete_id, field, label)
-            team_for_dvp = player_obj.get("team") or participant.get("team_abbreviation") or participant.get("team") or ""
-            event_matchup = event.get("name") or raw.get("event_name") or raw.get("matchup") or _bp_event_matchup(event_id)
+            team_for_dvp = raw.get("team") or ""
+            event_matchup = raw.get("game") or ""
             matchup_adjustment = _dvp_matchup_adjustment(athlete_id, team_for_dvp, event_matchup, market, name)
-            model = _simulate_market(values, line, None, None, _norm_player_name(name) + market, minutes=player_minutes, market=market, matchup_adjustment=matchup_adjustment)
+            model = _simulate_market(
+                values, line, None, None, _norm_player_name(name) + market,
+                minutes=player_minutes, market=market,
+                matchup_adjustment=matchup_adjustment,
+            )
             if not model:
                 failures.append(name + ": fewer than five valid game logs")
                 continue
@@ -1555,11 +1725,8 @@ def proprietary_market_board(market: str = "rebounds"):
                 model["best_probability"] = None
                 model["best_odds"] = None
                 model["edge_pp"] = None
-                model["blend_method"] = "No verified DK/FD two-sided quote at a matching line; no bet rating"
+                model["blend_method"] = "No verified two-sided DraftKings quote; no bet rating"
 
-            # Apply the same minimum sample rule used by the points board.
-            # A small sample can still produce a visible projection, but never
-            # a positive-EV recommendation or a Top 5 EV entry.
             sample_size = int(model.get("sample_size") or len(values))
             if sample_size < 8:
                 model["confidence"] = "low"
@@ -1575,12 +1742,23 @@ def proprietary_market_board(market: str = "rebounds"):
                 )
             else:
                 model.setdefault("confidence", "provisional")
+
             market_prop = {
                 "player": name,
-                "team": player_obj.get("team") or participant.get("team_abbreviation") or participant.get("team") or "",
+                "team": raw.get("team") or "",
                 "game": event_matchup,
-                "market": market, "line": line, "over_odds": over_odds, "under_odds": under_odds,
-                "sample_label": sample_label, "athlete_id": athlete_id, "games_used": len(values),
+                "market": market,
+                "line": line,
+                "over_odds": raw.get("over_odds"),
+                "under_odds": raw.get("under_odds"),
+                "sample_label": sample_label,
+                "athlete_id": athlete_id,
+                "games_used": len(values),
+                "event_id": raw.get("event_id"),
+                "line_source": "DraftKings via PropLine",
+                "line_updated_at": raw.get("last_update"),
+                "bookmaker_link": raw.get("bookmaker_link"),
+                "market_books": ["DraftKings"],
                 "position": (matchup_adjustment or {}).get("position"),
                 "defense_vs_position": matchup_adjustment,
                 **model,
@@ -1590,18 +1768,26 @@ def proprietary_market_board(market: str = "rebounds"):
             output.append(market_prop)
         except Exception as exc:
             failures.append(name + ": " + type(exc).__name__ + ": " + str(exc)[:180])
-    output.sort(key=lambda x: (x.get("expected_value_pct") is None, -(x.get("expected_value_pct") or -999)))
+
+    output.sort(key=lambda row: (
+        row.get("expected_value_pct") is None,
+        -(row.get("expected_value_pct") or -999),
+    ))
     try:
         prediction_ledger.initialize()
     except Exception:
         pass
     result = {
         "market": market,
-        "source": "ESPN game-log distribution + BettingPros DraftKings/FanDuel no-vig market blend",
-        "blend": "50/50 logarithmic opinion pool (provisional pending historical calibration)",
-        "line_count": len(props), "projected_count": len(output), "props": output,
+        "source": "ESPN game-log distribution + DraftKings odds via PropLine",
+        "blend": "50/50 logarithmic model/DraftKings market probability pool (provisional pending calibration)",
+        "line_count": len(props),
+        "projected_count": len(output),
+        "props": output,
         "unavailable": failures[:20],
         "cache_ttl_seconds": _BP_BOARD_TTL_SECONDS,
+        "prop_line_cache_source": props_source,
+        "prop_line_quota": quota,
         "injury_feed": injury_feed.get("meta", {}),
         "balldontlie": {key: value for key, value in bdl_games.items() if key != "games"},
     }
