@@ -526,19 +526,25 @@ def _espn_player_position(athlete_id,team_code):
  _ESPN_POSITION_CACHE[key]=found
  return found
 def _dvp_matchup_adjustment(athlete_id,player_team,game,market,player_name=None):
+ def unavailable(reason, **details):
+  result={"available":False,"adjustment_applied":False,"reason":reason}
+  result.update(details)
+  return result
  try:
   market=str(market or "").lower().strip()
   stat_fields={"points":"PTS","rebounds":"REB","assists":"AST","steals":"STL","threes":"3PM"}
   stat=stat_fields.get(market)
-  if not stat: return None
-  team_code=_canonical_team_code(player_team); game_teams=_team_codes_from_game(game)
-  if not team_code or len(game_teams)<2: return None
+  if not stat: return unavailable("Unsupported prop category; no positional-defense table is mapped for this market.")
+  team_code=_canonical_team_code(player_team)
+  game_teams=_team_codes_from_game(game)
+  if not team_code:
+   return unavailable("Player team could not be identified from the prop data.")
+  if len(game_teams)!=2:
+   return unavailable("Matchup could not be parsed into two verified NBA teams.", player_team=team_code)
+  if team_code not in game_teams:
+   return unavailable("Player team does not match either team in the supplied matchup.", player_team=team_code)
   opponent=next((code for code in game_teams if code!=team_code),None)
-  if not opponent: return None
-
-  # ESPN can provide a specific PG/SG/SF/PF/C listing. API-Sports Basketball
-  # supplies broad Guard/Forward/Center labels only, so it is a cross-check or
-  # fallback, never a source of invented sub-positions.
+  if not opponent: return unavailable("Opponent could not be identified from the matchup.")
   espn_position=_espn_player_position(athlete_id,team_code)
   api_position=None
   position_source="ESPN roster/profile"
@@ -548,7 +554,7 @@ def _dvp_matchup_adjustment(athlete_id,player_team,game,market,player_name=None)
    api_position=_api_sports_player_position(player_name)
    if espn_position in ("G","F"):
     if api_position and api_position!=espn_position:
-     return None
+     return unavailable("ESPN and API-Sports broad position labels conflict; adjustment withheld.",player_team=team_code,opponent=opponent,espn_position=espn_position,api_sports_position=api_position)
     position_crosscheck="confirmed" if api_position==espn_position else "unavailable"
     position_source="ESPN broad position"+(" + API-Sports confirmed" if api_position==espn_position else "")
     position_confidence="medium" if api_position==espn_position else "low"
@@ -557,27 +563,32 @@ def _dvp_matchup_adjustment(athlete_id,player_team,game,market,player_name=None)
     position_source="API-Sports Basketball fallback"
     position_confidence="medium"
     position_crosscheck="fallback_used"
-  if not espn_position: return None
-
+  if not espn_position:
+   return unavailable("Player position was not found in ESPN or the exact-name API-Sports lookup.",player_team=team_code,opponent=opponent)
   position_keys={"G":("PG","SG"),"F":("SF","PF")}.get(espn_position,(espn_position,))
-  table=_fetch_dvp_table(stat)
+  try:
+   table=_fetch_dvp_table(stat)
+  except Exception as exc:
+   return unavailable("Positional-defense data source failed: "+type(exc).__name__+".",player_team=team_code,opponent=opponent,position=espn_position,stat=market)
   allowed_values=[table.get((opponent,pos),{}).get(stat) for pos in position_keys]
-  if any(value is None for value in allowed_values): return None
+  if any(value is None for value in allowed_values):
+   return unavailable("The defensive table did not contain the opponent's required position rows.",player_team=team_code,opponent=opponent,position=espn_position,stat=market)
   allowed=sum(allowed_values)/len(allowed_values)
   league_values=[row[stat] for (team,pos),row in table.items() if pos in position_keys and stat in row]
-  if len(league_values)<20: return None
+  if len(league_values)<20:
+   return unavailable("The positional-defense table has too few league comparison rows.",player_team=team_code,opponent=opponent,position=espn_position,stat=market)
   league_average=sum(league_values)/len(league_values)
-  if league_average<=0: return None
+  if league_average<=0:
+   return unavailable("The positional-defense league average is invalid.",player_team=team_code,opponent=opponent,position=espn_position,stat=market)
   ratio=allowed/league_average
   factor=max(0.92,min(1.08,1.0+(ratio-1.0)*0.30))
-  position_names={"PG":"Point Guard","SG":"Shooting Guard","SF":"Small Forward","PF":"Power Forward","C":"Center",
-   "G":"Guard (PG/SG blended)","F":"Forward (SF/PF blended)"}
+  position_names={"PG":"Point Guard","SG":"Shooting Guard","SF":"Small Forward","PF":"Power Forward","C":"Center","G":"Guard (PG/SG blended)","F":"Forward (SF/PF blended)"}
   stat_labels={"points":"points","rebounds":"rebounds","assists":"assists","steals":"steals","threes":"3-pointers made"}
   stat_units={"points":"PPG","rebounds":"RPG","assists":"APG","steals":"SPG","threes":"3PM"}
   season=_DVP_STAT_CACHE.get(stat,{}).get("season") or "season not identified"
   position_method="PG/SG 50/50 blend" if espn_position=="G" else "SF/PF 50/50 blend" if espn_position=="F" else "Individual listed position"
   blend_weights={position_keys[0]:1.0} if len(position_keys)==1 else {position_keys[0]:0.5,position_keys[1]:0.5}
-  return {"position":espn_position,"position_group":espn_position,"position_name":position_names[espn_position],
+  return {"available":True,"adjustment_applied":True,"position":espn_position,"position_group":espn_position,"position_name":position_names[espn_position],
    "position_source":position_source,"position_confidence":position_confidence,"position_crosscheck":position_crosscheck,
    "blend_weights":blend_weights,"opponent":opponent,"opponent_name":_TEAM_NAMES.get(opponent,opponent),
    "stat":market,"stat_label":stat_labels[market],"stat_unit":stat_units[market],
@@ -585,7 +596,8 @@ def _dvp_matchup_adjustment(athlete_id,player_team,game,market,player_name=None)
    "league_relative_ratio":round(ratio,3),"adjustment_pct":round((factor-1.0)*100,2),"factor":round(factor,4),
    "source":"NBA House individual-position "+stat+" allowed table","source_season":season,
    "method":position_method+" "+stat_labels[market]+" allowed per game vs matching-position league average; 30% dampening; adjustment capped at +/-8%"}
- except Exception: return None
+ except Exception as exc:
+  return unavailable("Positional-defense calculation failed: "+type(exc).__name__+".")
 
 def _espn_roster_player_id(name, team_codes):
     """Resolve an exact player identity only from the two teams in the matchup."""
@@ -1115,7 +1127,7 @@ def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, ma
         target_mean *= minute_factor
 
     matchup_factor = 1.0
-    if isinstance(matchup_adjustment, dict):
+    if isinstance(matchup_adjustment, dict) and matchup_adjustment.get("available", True):
         try:
             candidate = float(matchup_adjustment.get("factor", 1.0))
             if math.isfinite(candidate):
@@ -1164,7 +1176,7 @@ def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, ma
         "expected_value_pct":round(best[0]*100,2) if best else None,
         "edge_pp":None,
         "recommendation":"VALUE CANDIDATE" if best and best[0]>0.05 else ("LEAN / VERIFY" if best and best[0]>0 else "PASS"),
-        "model_components":["exponentially weighted history","10-game form signal","minutes adjustment" if valid_minutes else "minutes unavailable; no adjustment","defense-vs-position matchup adjustment" if matchup_adjustment else "defense-vs-position unavailable; no adjustment","empirical/parametric mixture distribution","Monte Carlo probability estimation"],
+        "model_components":["exponentially weighted history","10-game form signal","minutes adjustment" if valid_minutes else "minutes unavailable; no adjustment","defense-vs-position matchup adjustment" if isinstance(matchup_adjustment, dict) and matchup_adjustment.get("available", True) else "defense-vs-position unavailable; no adjustment","empirical/parametric mixture distribution","Monte Carlo probability estimation"],
         "model_method":"recency-weighted empirical/parametric mixture with minutes adjustment; provisional pending out-of-sample calibration",
         "sample_size":n,"long_run_mean":round(long_mean,2),"recent5_mean":round(recent5_mean,2),        "recent10_mean":round(recent10_mean,2),"weighted_mean":round(weighted_mean,2),
         "distribution_std_dev":round(std_dev,2),"minute_adjustment_factor":round(minute_factor,3),
