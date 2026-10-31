@@ -371,6 +371,71 @@ def _team_codes_from_game(game):
  for name,code in _TEAM_ALIASES.items():
   if name in lower: found.add(code)
  return found
+
+_TANK01_DVP_TABLE_CACHE = {"at": 0.0, "tables": None, "meta": None}
+_TANK01_DVP_TABLE_TTL = 21600
+
+
+def _fetch_tank01_dvp_tables():
+ """Fetch all five positional defense markets from one Tank01 request."""
+ now = time.time()
+ cached = _TANK01_DVP_TABLE_CACHE
+ if cached.get("tables") is not None and now - cached.get("at", 0.0) < _TANK01_DVP_TABLE_TTL:
+  return cached["tables"], cached["meta"]
+ payload, headers = _tank01_request("/getNBATeams", {"teamStats": "true"}, timeout=20)
+ body = payload.get("body")
+ if isinstance(body, list):
+  teams = body
+ elif isinstance(body, dict):
+  teams = [value for value in body.values() if isinstance(value, dict)]
+ else:
+  teams = []
+ if len(teams) < 30:
+  raise RuntimeError("Tank01 did not return all 30 NBA teams.")
+ stat_keys = {"PTS": "pts", "REB": "reb", "AST": "ast", "STL": "stl", "3PM": "tptfgm"}
+ positions = ("PG", "SG", "SF", "PF", "C")
+ tables = {stat: {} for stat in stat_keys}
+ game_counts = []
+ for team in teams:
+  if not isinstance(team, dict):
+   continue
+  team_code = _canonical_team_code(team.get("teamAbv"))
+  defense = team.get("defensiveStats")
+  if not team_code or not isinstance(defense, dict):
+   continue
+  try:
+   games = int(float(defense.get("gamesPlayed")))
+  except (TypeError, ValueError, OverflowError):
+   games = 0
+  if games > 0:
+   game_counts.append(games)
+  for stat, field in stat_keys.items():
+   position_values = defense.get(field)
+   if not isinstance(position_values, dict):
+    continue
+   for position in positions:
+    try:
+     value = float(position_values.get(position))
+    except (TypeError, ValueError, OverflowError):
+     continue
+    if math.isfinite(value) and value >= 0:
+     tables[stat][(team_code, position)] = {stat: value}
+ for stat, table in tables.items():
+  if len(table) < 150:
+   raise RuntimeError("Tank01 positional table is incomplete for " + stat + ".")
+ if len(game_counts) < 30:
+  raise RuntimeError("Tank01 did not provide a games-played sample for every team.")
+ meta = {
+  "min_games_played": min(game_counts),
+  "max_games_played": max(game_counts),
+  "team_count": len(game_counts),
+  "source": "Tank01 RapidAPI getNBATeams teamStats=true",
+  "rate_limit_remaining": headers.get("x-ratelimit-requests-remaining"),
+ }
+ _TANK01_DVP_TABLE_CACHE.update({"at": now, "tables": tables, "meta": meta})
+ return tables, meta
+
+
 def _fetch_dvp_table(stat="PTS"):
  stat=str(stat or "PTS").upper().strip()
  stat_aliases={"POINTS":"PTS","REBOUNDS":"REB","ASSISTS":"AST","STEALS":"STL","THREES":"3PM"}
@@ -402,18 +467,20 @@ def _fetch_dvp_table(stat="PTS"):
    raise RuntimeError("Individual-position "+stat+" defense-vs-position source returned an incomplete table.")
   return parsed," ".join(parser.text)
 
- # Use current-season positional data only once the source reports at least
- # 10 games for every team. Until then, use the completed prior season.
+ # Tank01 supplies one current-season positional defense table for all
+ # 30 teams in a single request. Do not trust tiny opening-week samples.
  try:
-  current_table,current_text=fetch_and_parse("season")
+  tank_tables,tank_meta=_fetch_tank01_dvp_tables()
+  tank_table=tank_tables.get(stat) or {}
+  if tank_meta.get("min_games_played",0)>=10 and len(tank_table)>=150:
+   parsed=tank_table
+   season="Tank01 current season ("+str(tank_meta["min_games_played"])+" games minimum per team)"
+  else:
+   parsed,_=fetch_and_parse("prev")
+   season="previous season (Tank01 current-season sample below 10 games per team)"
  except Exception:
-  current_table,current_text=None,""
- sample=re.search(r"\((\d+)\s*[–-]\s*(\d+)\s+games?\s+a\s+team\)",current_text,re.I)
- if current_table is not None and sample and int(sample.group(1))>=10:
-  parsed,season=current_table,"current season"
- else:
   parsed,_=fetch_and_parse("prev")
-  season="previous season (current season sample below 10 games or unavailable)"
+  season="previous season (Tank01 current-season data unavailable)"
  _DVP_STAT_CACHE[stat]={"at":now,"data":parsed,"season":season}
  if stat=="PTS":
   _DVP_CACHE.update({"at":now,"data":parsed,"season":season})
