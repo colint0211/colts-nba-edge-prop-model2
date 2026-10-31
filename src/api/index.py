@@ -1,6 +1,6 @@
 import os
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import json
 import math
 import random
@@ -64,6 +64,21 @@ def api_sports_status():
         }, status_code=502)
     except Exception as exc:
         return JSONResponse({"configured": True, "valid": False, "message": "Could not reach API-Sports: " + str(exc)[:180]}, status_code=502)
+
+
+@app.get("/api/injury-status")
+def official_injury_status():
+    feed = _load_official_injury_feed()
+    return JSONResponse({
+        "source": feed.get("meta", {}).get("source"),
+        "status": feed.get("meta", {}).get("status"),
+        "report_timestamp_et": feed.get("meta", {}).get("report_timestamp_et"),
+        "fetched_at_utc": feed.get("meta", {}).get("fetched_at_utc"),
+        "age_minutes": feed.get("meta", {}).get("age_minutes"),
+        "record_count": feed.get("meta", {}).get("record_count", 0),
+        "season": feed.get("meta", {}).get("season"),
+        "injuries": feed.get("records", []),
+    })
 
 ESPN_BASE = "https://site.web.api.espn.com/apis/common/v3/sports/basketball/nba"
 ESPN_SEARCH = "https://site.web.api.espn.com/apis/search/v2"
@@ -404,6 +419,135 @@ def _get_json(url, timeout=12):
 
 def _norm_player_name(value):
     return "".join(ch.lower() for ch in str(value or "") if ch.isalnum())
+
+_INJURY_FEED_URL = "https://raw.githubusercontent.com/colint0211/colts-nba-edge-prop-model2/injury-feed/data/nba_injuries_latest.json"
+_INJURY_FEED_CACHE = {"at": 0.0, "data": None}
+_INJURY_FEED_TTL_SECONDS = 120
+_INJURY_SOURCE_LABEL = "NBA official team injury report (nbainjuries)"
+_INJURY_BLOCK_STATUSES = {"out", "doubtful", "questionable", "suspended", "suspension", "not with team", "inactive"}
+
+def _injury_name_key(value):
+    raw = str(value or "").strip()
+    if "," in raw:
+        parts = [part.strip() for part in raw.split(",", 1)]
+        if len(parts) == 2 and parts[0] and parts[1]:
+            raw = parts[1] + " " + parts[0]
+    return _norm_player_name(raw)
+
+def _load_official_injury_feed():
+    now = time.time()
+    cached = _INJURY_FEED_CACHE.get("data")
+    if cached is not None and now - _INJURY_FEED_CACHE.get("at", 0) < _INJURY_FEED_TTL_SECONDS:
+        return cached
+    try:
+        request = Request(
+            _INJURY_FEED_URL + "?v=" + str(int(now // 60)),
+            headers={"User-Agent": "ColtsNBAEdge/1.0", "Accept": "application/json", "Cache-Control": "no-cache"},
+        )
+        with urlopen(request, timeout=4) as response:
+            payload = json.loads(response.read().decode("utf-8", "replace"))
+        if not isinstance(payload, dict) or not isinstance(payload.get("records"), list):
+            raise ValueError("Injury feed JSON has an invalid schema.")
+        fetched_raw = str(payload.get("fetched_at_utc") or "").strip()
+        if not fetched_raw:
+            raise ValueError("Injury feed has not published its first successful report.")
+        fetched_dt = datetime.fromisoformat(fetched_raw.replace("Z", "+00:00"))
+        if fetched_dt.tzinfo is None:
+            fetched_dt = fetched_dt.replace(tzinfo=timezone.utc)
+        age_seconds = max(0.0, (datetime.now(timezone.utc) - fetched_dt.astimezone(timezone.utc)).total_seconds())
+        stale = age_seconds > 36 * 60 * 60
+        lookup, display_rows = {}, []
+        for row in payload.get("records") or []:
+            if not isinstance(row, dict):
+                continue
+            player = str(row.get("player_name") or row.get("Player Name") or "").strip()
+            team_raw = str(row.get("team") or row.get("Team") or "").strip()
+            status = str(row.get("status") or row.get("Current Status") or "").strip()
+            if not player or not team_raw or not status:
+                continue
+            team_code = _canonical_team_code(team_raw)
+            player_key = _injury_name_key(player)
+            if not team_code or not player_key:
+                continue
+            normalized = {
+                "player": player,
+                "team": team_code,
+                "status": status,
+                "reason": str(row.get("reason") or row.get("Reason") or "").strip(),
+                "game_date": str(row.get("game_date") or row.get("Game Date") or "").strip(),
+                "game_time": str(row.get("game_time") or row.get("Game Time") or "").strip(),
+                "matchup": str(row.get("matchup") or row.get("Matchup") or "").strip(),
+            }
+            lookup[(player_key, team_code)] = normalized
+            display_rows.append(normalized)
+        data = {
+            "lookup": {} if stale else lookup,
+            "records": display_rows,
+            "meta": {
+                "source": _INJURY_SOURCE_LABEL,
+                "status": "stale" if stale else "fresh",
+                "report_timestamp_et": payload.get("report_timestamp_et"),
+                "fetched_at_utc": fetched_raw,
+                "age_minutes": round(age_seconds / 60, 1),
+                "record_count": len(display_rows),
+                "season": payload.get("season"),
+            },
+        }
+        _INJURY_FEED_CACHE.update({"at": now, "data": data})
+        return data
+    except Exception as exc:
+        if cached is not None:
+            return cached
+        return {
+            "lookup": {},
+            "records": [],
+            "meta": {"source": _INJURY_SOURCE_LABEL, "status": "unavailable", "record_count": 0,
+                     "error": type(exc).__name__},
+        }
+
+def _clear_official_injury_fields(prop):
+    if prop.get("injury_source") == _INJURY_SOURCE_LABEL:
+        for key in ("injury_status", "injury_reason", "injury_report_time", "injury_updated_at",
+                    "injury_source", "injury_flag", "injury_blocked", "injury_risk"):
+            prop.pop(key, None)
+
+def _apply_official_injury(prop, feed, player_name=None, team_value=None):
+    if not isinstance(prop, dict):
+        return
+    _clear_official_injury_fields(prop)
+    if not isinstance(feed, dict) or feed.get("meta", {}).get("status") != "fresh":
+        return
+    player_key = _injury_name_key(player_name or prop.get("player") or prop.get("player_name"))
+    team_code = _canonical_team_code(team_value or prop.get("roster_team") or prop.get("team"))
+    if not player_key or not team_code:
+        return
+    record = feed.get("lookup", {}).get((player_key, team_code))
+    if not record:
+        return
+    status = str(record.get("status") or "").strip()
+    status_key = status.casefold()
+    blocked = status_key in _INJURY_BLOCK_STATUSES
+    prop.update({
+        "injury_status": status,
+        "injury_reason": record.get("reason") or "",
+        "injury_report_time": feed.get("meta", {}).get("report_timestamp_et"),
+        "injury_updated_at": feed.get("meta", {}).get("fetched_at_utc"),
+        "injury_source": _INJURY_SOURCE_LABEL,
+        "injury_flag": blocked,
+        "injury_blocked": blocked,
+        "injury_risk": status_key not in ("", "available"),
+    })
+    if blocked:
+        prop["recommendation"] = "PASS"
+        for key in ("expected_value_pct", "expected_profit_per_100", "edge_pp",
+                    "best_side", "best_odds", "best_probability"):
+            if key in prop:
+                prop[key] = None
+        prop["probability_note"] = (
+            "No bet: official NBA injury report lists this player as " + status +
+            ". Verify the latest availability before betting."
+        )
+
 
 def _espn_player_id(name):
     """Resolve a player to ESPN's numeric NBA athlete ID.
@@ -1124,8 +1268,13 @@ def proprietary_market_board(market: str = "rebounds"):
         raise HTTPException(status_code=400, detail="Use rebounds, assists, steals, or threes.")
     now = time.time()
     cached_board = _BP_BOARD_CACHE.get(market)
+    injury_feed = _load_official_injury_feed()
     if cached_board and now - cached_board[0] < _BP_BOARD_TTL_SECONDS:
-        return JSONResponse(cached_board[1])
+        cached_result = json.loads(json.dumps(cached_board[1]))
+        for cached_prop in cached_result.get("props") or []:
+            _apply_official_injury(cached_prop, injury_feed)
+        cached_result["injury_feed"] = injury_feed.get("meta", {})
+        return JSONResponse(cached_result)
     api_key = os.getenv("BETTINGPROS_API_KEY", "").strip()
     if not api_key:
         raise HTTPException(status_code=503, detail="BettingPros lines unavailable: API key missing.")
@@ -1196,7 +1345,7 @@ def proprietary_market_board(market: str = "rebounds"):
                 )
             else:
                 model.setdefault("confidence", "provisional")
-            output.append({
+            market_prop = {
                 "player": name,
                 "team": player_obj.get("team") or participant.get("team_abbreviation") or participant.get("team") or "",
                 "game": event_matchup,
@@ -1205,7 +1354,9 @@ def proprietary_market_board(market: str = "rebounds"):
                 "position": (matchup_adjustment or {}).get("position"),
                 "defense_vs_position": matchup_adjustment,
                 **model,
-            })
+            }
+            _apply_official_injury(market_prop, injury_feed, name, market_prop.get("team"))
+            output.append(market_prop)
         except Exception as exc:
             failures.append(name + ": " + type(exc).__name__ + ": " + str(exc)[:180])
     output.sort(key=lambda x: (x.get("expected_value_pct") is None, -(x.get("expected_value_pct") or -999)))
@@ -1220,6 +1371,7 @@ def proprietary_market_board(market: str = "rebounds"):
         "line_count": len(props), "projected_count": len(output), "props": output,
         "unavailable": failures[:20],
         "cache_ttl_seconds": _BP_BOARD_TTL_SECONDS,
+        "injury_feed": injury_feed.get("meta", {}),
     }
     _BP_BOARD_CACHE[market] = (time.time(), result)
     return JSONResponse(result)
@@ -1692,9 +1844,14 @@ async def api_proxy(path: str, request: FastRequest):
                         "baseline_minutes", "minutes_method", "calibration_status",
                     )
 
+                    injury_feed = _load_official_injury_feed()
                     for prop in props:
                         if not isinstance(prop, dict):
                             continue
+                        _apply_official_injury(
+                            prop, injury_feed, prop.get("player"),
+                            prop.get("roster_team") or prop.get("team")
+                        )
 
                         # The upstream feed can return a name that appears on
                         # multiple team rosters. Never guess which athlete row
@@ -1816,7 +1973,7 @@ async def api_proxy(path: str, request: FastRequest):
                                     else "LEAN / VERIFY" if model.get("expected_value_pct") is not None and model["expected_value_pct"] > 0
                                     else "PASS"
                                 )
-                            if prop.get("injury_flag") or prop.get("injury_status"):
+                            if prop.get("injury_blocked") or prop.get("injury_flag"):
                                 prop["recommendation"] = "PASS"
                                 # Availability overrides the mathematical edge:
                                 # retain the projection for reference, but never
@@ -1834,6 +1991,7 @@ async def api_proxy(path: str, request: FastRequest):
                         except Exception as model_error:
                             prop["model_status"] = "unprojected"
                             prop["reason"] = "Local points model could not verify player history: " + type(model_error).__name__
+                    board_payload["injury_feed"] = injury_feed.get("meta", {})
                     board_payload["props"] = props
                     board_payload["projected_count"] = sum(1 for p in props if isinstance(p, dict) and p.get("model_status") == "projected")
                     board_payload["unprojected_count"] = sum(1 for p in props if isinstance(p, dict) and p.get("model_status") != "projected")
