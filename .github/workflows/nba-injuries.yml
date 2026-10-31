@@ -1,0 +1,63 @@
+name: Refresh official NBA injury report
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: nba-injury-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Check out main branch
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Set up Java for tabula-py
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install official injury report parser
+        run: python -m pip install --upgrade pip && python -m pip install "nbainjuries==1.1.1"
+
+      - name: Fetch newest parseable NBA injury report
+        run: python scripts/update_nba_injuries.py "$RUNNER_TEMP/nba_injuries_latest.json"
+
+      - name: Publish snapshot to the injury-feed branch
+        shell: bash
+        run: |
+          if [ ! -s "$RUNNER_TEMP/nba_injuries_latest.json" ]; then
+            echo "No fresh report was parsed. Existing injury snapshot is preserved."
+            exit 0
+          fi
+          git fetch origin injury-feed
+          git checkout injury-feed
+          mkdir -p data
+          cp "$RUNNER_TEMP/nba_injuries_latest.json" data/nba_injuries_latest.json
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/nba_injuries_latest.json
+          if git diff --cached --quiet; then
+            echo "Injury snapshot unchanged; no commit needed."
+            exit 0
+          fi
+          git commit -m "Refresh official NBA injury report"
+          git push origin injury-feed
