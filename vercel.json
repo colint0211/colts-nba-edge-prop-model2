@@ -4,5 +4,10 @@
       "path": "/api/cron/settle-pending",
       "schedule": "0 12 * * *"
     }
-  ]
+  ],
+  "git": {
+    "deploymentEnabled": {
+      "injury-feed": false
+    }
+  }
 }
