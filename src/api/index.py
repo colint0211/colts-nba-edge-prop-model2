@@ -23,6 +23,40 @@ BP_MARKETS = {"points": 156, "rebounds": 157, "assists": 151, "steals": 160, "th
 @app.get("/", response_class=HTMLResponse)
 async def home():
     return HTMLResponse(HTML)
+
+@app.get("/api/api-sports-status")
+def api_sports_status():
+    """Safe credential check; never returns or logs the API key."""
+    api_key = os.getenv("API_SPORTS_KEY", "").strip()
+    if not api_key:
+        return JSONResponse({"configured": False, "valid": False, "message": "API_SPORTS_KEY is not configured."}, status_code=503)
+    request = Request(
+        "https://v1.basketball.api-sports.io/status",
+        headers={"User-Agent": "Mozilla/5.0 ColtsNBAEdge/1.0", "Accept": "application/json", "x-apisports-key": api_key}
+    )
+    try:
+        with urlopen(request, timeout=8) as response:
+            payload = json.loads(response.read().decode("utf-8", "replace"))
+        errors = payload.get("errors") or []
+        response_data = payload.get("response") or {}
+        account = response_data.get("account") or {}
+        subscription = response_data.get("subscription") or {}
+        requests_info = response_data.get("requests") or {}
+        active = bool(subscription.get("active"))
+        return {
+            "configured": True,
+            "valid": not bool(errors) and bool(subscription),
+            "active": active,
+            "plan": subscription.get("plan"),
+            "requests_used_today": requests_info.get("current"),
+            "daily_request_limit": requests_info.get("limit_day"),
+            "account_email_present": bool(account.get("email")),
+            "message": "API-Sports Basketball authentication successful." if not errors else "API-Sports returned an authentication or account error."
+        }
+    except HTTPError as exc:
+        return JSONResponse({"configured": True, "valid": False, "http_status": exc.code, "message": "API-Sports rejected the status request."}, status_code=502)
+    except Exception as exc:
+        return JSONResponse({"configured": True, "valid": False, "message": "Could not reach API-Sports status endpoint: " + str(exc)[:180]}, status_code=502)
 ESPN_BASE = "https://site.web.api.espn.com/apis/common/v3/sports/basketball/nba"
 ESPN_SEARCH = "https://site.web.api.espn.com/apis/search/v2"
 STAT_FIELDS = {
