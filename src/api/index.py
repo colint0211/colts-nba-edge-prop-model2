@@ -1971,6 +1971,104 @@ def _enrich_live_quarters(payload):
                 player["points_by_quarter"] = qpoints
     return payload
 
+
+
+_TANK01_DVP_PROBE_CACHE = {"at": 0.0, "data": None}
+_TANK01_CACHE_TTL = 21600
+_TANK01_HOST = "tank01-fantasy-stats.p.rapidapi.com"
+
+
+def _tank01_request(path, params=None, timeout=15):
+    """Call Tank01 through RapidAPI without ever exposing credentials."""
+    api_key = os.getenv("TANK01_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError("TANK01_API_KEY is not configured.")
+    query = urlencode(params or {})
+    url = "https://" + _TANK01_HOST + path + (("?" + query) if query else "")
+    request = Request(url, headers={
+        "X-RapidAPI-Key": api_key,
+        "X-RapidAPI-Host": _TANK01_HOST,
+        "Accept": "application/json",
+        "User-Agent": "ColtsNBAEdge/1.0",
+    })
+    with urlopen(request, timeout=timeout) as response:
+        payload = json.loads(response.read().decode("utf-8", "replace"))
+        headers = response.headers
+    if not isinstance(payload, dict):
+        raise ValueError("Tank01 returned an unexpected response type.")
+    status_code = payload.get("statusCode")
+    if status_code not in (None, 200, "200"):
+        raise RuntimeError("Tank01 endpoint returned status " + str(status_code) + ".")
+    if payload.get("error"):
+        raise RuntimeError("Tank01 endpoint error: " + str(payload.get("error"))[:160])
+    return payload, headers
+
+
+@app.get("/api/tank01-dvp-probe")
+def tank01_dvp_probe():
+    """Safe first-call diagnostic: validates Tank01 and reports schema keys only."""
+    now = time.time()
+    cached = _TANK01_DVP_PROBE_CACHE.get("data")
+    if cached and now - _TANK01_DVP_PROBE_CACHE.get("at", 0.0) < 900:
+        return JSONResponse(cached)
+    if not os.getenv("TANK01_API_KEY", "").strip():
+        return JSONResponse({
+            "configured": False, "authenticated": False,
+            "message": "TANK01_API_KEY is not configured in this deployment."
+        }, status_code=503)
+    try:
+        payload, headers = _tank01_request(
+            "/getNBATeams", {"teamStats": "true"}, timeout=20
+        )
+        body = payload.get("body")
+        if isinstance(body, dict):
+            teams = list(body.values()) if body and all(isinstance(v, dict) for v in body.values()) else []
+        elif isinstance(body, list):
+            teams = body
+        else:
+            teams = []
+        sample = next((team for team in teams if isinstance(team, dict) and team.get("defensiveStats")), None)
+        defensive = sample.get("defensiveStats") if sample else None
+        schema = {
+            "team_keys": sorted(sample.keys()) if sample else [],
+            "defensive_stats_type": type(defensive).__name__ if defensive is not None else None,
+            "defensive_stats_keys": sorted(defensive.keys()) if isinstance(defensive, dict) else [],
+            "defensive_stats_sample_keys": {
+                str(key): sorted(value.keys()) if isinstance(value, dict) else type(value).__name__
+                for key, value in list((defensive or {}).items())[:8]
+            } if isinstance(defensive, dict) else {},
+        }
+        output = {
+            "configured": True,
+            "authenticated": bool(teams),
+            "source": "Tank01 RapidAPI",
+            "endpoint_tested": "/getNBATeams?teamStats=true",
+            "team_count": len(teams),
+            "teams_with_defensive_stats": sum(
+                1 for team in teams if isinstance(team, dict) and team.get("defensiveStats")
+            ),
+            "schema": schema,
+            "rate_limit_remaining": headers.get("x-ratelimit-requests-remaining"),
+            "tested_at": datetime.now(timezone.utc).isoformat(),
+            "message": "Tank01 authentication succeeded; schema inspection completed."
+                if sample else "Tank01 responded, but no team defensiveStats object was found.",
+        }
+        _TANK01_DVP_PROBE_CACHE.update({"at": now, "data": output})
+        return JSONResponse(output)
+    except HTTPError as exc:
+        message = "RapidAPI rejected the Tank01 request." if exc.code in (401, 403) else "Tank01 returned HTTP " + str(exc.code) + "."
+        return JSONResponse({
+            "configured": True, "authenticated": False, "http_status": exc.code,
+            "endpoint_tested": "/getNBATeams?teamStats=true", "message": message,
+        }, status_code=502)
+    except Exception as exc:
+        return JSONResponse({
+            "configured": True, "authenticated": False,
+            "error_type": type(exc).__name__,
+            "message": str(exc)[:220],
+        }, status_code=502)
+
+
 @app.get("/api/model/diagnostics")
 def model_diagnostics():
     """Safe database diagnostics; never returns connection strings or credentials."""
