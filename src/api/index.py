@@ -82,7 +82,12 @@ def _load_balldontlie_games():
     """
     now = time.time()
     cached = _BDL_GAMES_CACHE.get("data")
-    if cached is not None and now - _BDL_GAMES_CACHE.get("at", 0.0) < _BDL_GAMES_CACHE_TTL:
+    cached_ttl = (
+        _BDL_GAMES_CACHE_TTL
+        if isinstance(cached, dict) and cached.get("status") == "ok"
+        else 60
+    )
+    if cached is not None and now - _BDL_GAMES_CACHE.get("at", 0.0) < cached_ttl:
         return cached
 
     api_key = os.getenv("BALLDONTLIE_API_KEY", "").strip()
