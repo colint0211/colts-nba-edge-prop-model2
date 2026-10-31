@@ -1202,8 +1202,9 @@ def _run_pending_settlements():
 
     try:
         prediction_ledger.initialize()
-        candidates = prediction_ledger.list_settlement_candidates(150)
+        candidates = prediction_ledger.list_settlement_candidates(2000)
         result["checked"] = len(candidates)
+        game_log_cache = {}
         for candidate in candidates:
             snap = candidate.get("snapshot") or {}
             athlete_id = str(snap.get("athlete_id") or "").strip()
@@ -1225,7 +1226,10 @@ def _run_pending_settlements():
                 continue
             field, label = mapping
             try:
-                records = _gamelog_records(athlete_id, field, label, 2027)
+                log_key = (athlete_id, field, label, 2027)
+                if log_key not in game_log_cache:
+                    game_log_cache[log_key] = _gamelog_records(athlete_id, field, label, 2027)
+                records = game_log_cache[log_key]
                 possible = []
                 created = datetime.fromisoformat(created_date).date()
                 for row in records:
