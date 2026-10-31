@@ -100,42 +100,72 @@ def _fetch_dvp_table():
    if match: parsed[(code,position)]={"points":float(match.group(1))}
  if len(parsed)<120: raise RuntimeError("Individual-position defense-vs-position source returned an incomplete table.")
  _DVP_CACHE.update({"at":now,"data":parsed}); return parsed
+def _position_group(position):
+ if isinstance(position,dict):
+  raw=(position.get("abbreviation") or position.get("displayName") or position.get("name") or "")
+ else:
+  raw=position or ""
+ p=str(raw).strip().upper()
+ aliases={
+  "POINT GUARD":"PG","POINT-GUARD":"PG","PG":"PG",
+  "SHOOTING GUARD":"SG","SG":"SG",
+  "SMALL FORWARD":"SF","SF":"SF",
+  "POWER FORWARD":"PF","PF":"PF",
+  "CENTER":"C","C":"C",
+ }
+ return aliases.get(p)
+
+
 def _espn_player_position(athlete_id,team_code):
+ """Resolve a specific PG/SG/SF/PF/C role; generic G/F roster labels are not enough."""
  key=(str(athlete_id),str(team_code or "").upper())
  if key in _ESPN_POSITION_CACHE: return _ESPN_POSITION_CACHE[key]
  code=_canonical_team_code(team_code)
  if not code: return None
+ found=None
  try:
   payload=_get_json("https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/"+code.lower()+"/roster",timeout=8)
+  def walk(value):
+   nonlocal found
+   if found: return
+   if isinstance(value,dict):
+    athlete=value.get("athlete") if isinstance(value.get("athlete"),dict) else value
+    if str(athlete.get("id") or "").strip()==str(athlete_id):
+     position=athlete.get("position") or value.get("position") or {}
+     found=_position_group(position)
+     return
+    for child in value.values():
+     if isinstance(child,(dict,list)): walk(child)
+   elif isinstance(value,list):
+    for child in value: walk(child)
+  walk(payload)
  except Exception:
-  _ESPN_POSITION_CACHE[key]=None; return None
- found=None
- def walk(value):
-  nonlocal found
-  if found: return
-  if isinstance(value,dict):
-   athlete=value.get("athlete") if isinstance(value.get("athlete"),dict) else value
-   if str(athlete.get("id") or "").strip()==str(athlete_id):
-    position=athlete.get("position") or value.get("position") or {}
-    found=(position.get("abbreviation") or position.get("displayName") or position.get("name")) if isinstance(position,dict) else position
-    return
-   for child in value.values():
-    if isinstance(child,(dict,list)): walk(child)
-  elif isinstance(value,list):
-   for child in value: walk(child)
- walk(payload); _ESPN_POSITION_CACHE[key]=str(found).upper() if found else None
- return _ESPN_POSITION_CACHE[key]
-def _position_group(position):
- p=str(position or "").strip().upper()
- return p if p in ("PG","SG","SF","PF","C") else None
+  pass
+
+ # ESPN's public roster endpoint often exposes only G/F/C. Its Core API
+ # athlete record carries the more specific position abbreviation where available.
+ if not found:
+  try:
+   athlete=_get_json(
+    "https://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/athletes/"+str(athlete_id),
+    timeout=8
+   )
+   found=_position_group(athlete.get("position") if isinstance(athlete,dict) else None)
+  except Exception:
+   pass
+ _ESPN_POSITION_CACHE[key]=found
+ return found
 def _dvp_matchup_adjustment(athlete_id,player_team,game,market):
  try:
+  # Positional defense is intentionally a points-only model input.
+  if str(market or "").lower().strip()!="points": return None
   team_code=_canonical_team_code(player_team); game_teams=_team_codes_from_game(game)
   if not team_code or len(game_teams)<2: return None
   opponent=next((code for code in game_teams if code!=team_code),None)
-  if not opponent or market not in ("points","rebounds","assists","steals","threes"): return None
-  position=_espn_player_position(athlete_id,team_code); position_key=_position_group(position)
+  if not opponent: return None
+  position_key=_espn_player_position(athlete_id,team_code)
   if not position_key: return None
+  position=position_key
   table=_fetch_dvp_table(); allowed=table.get((opponent,position_key),{}).get("points")
   league_values=[row["points"] for (team,pos),row in table.items() if pos==position_key and "points" in row]
   if allowed is None or len(league_values)<20: return None
