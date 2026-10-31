@@ -136,8 +136,8 @@ function setMarket(m){
   document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('active',b.dataset.market===m));
   const labels={ev:'Top 5 EV Plays',points:'Top 5 Points',rebounds:'Top 5 Rebounds',assists:'Top 5 Assists',steals:'Top 5 Steals',threes:'Top 5 3-Pointers Made'};
   el('topTitle').textContent=labels[m]||'Top 5 Plays';
-  el('topHint').textContent=m==='points'?'Top five proprietary points projections.':m==='ev'?'Top five positive-EV plays ranked across points, rebounds, assists, steals and three-pointers made.':'Proprietary '+bpMarketLabel(m)+' projections, probabilities and EV. BettingPros supplies lines and odds only.';
-  el('fullHint').textContent=m==='ev'?'All positive-EV candidates across all five markets.':m==='points'?'All proprietary points props.':'All proprietary '+bpMarketLabel(m)+' projections using BettingPros lines and odds only.';
+  el('topHint').textContent=m==='points'?'Top five proprietary points projections.':m==='ev'?'Top five positive-EV plays ranked across points, rebounds, assists, steals and three-pointers made.':'Proprietary '+bpMarketLabel(m)+' projections, probabilities and EV. DraftKings lines via PropLine; projections remain model-generated.';
+  el('fullHint').textContent=m==='ev'?'All positive-EV candidates across all five markets.':m==='points'?'All proprietary points props.':'All proprietary '+bpMarketLabel(m)+' projections using DraftKings lines via PropLine.';
   render();renderFull();
   if(m==='ev')['rebounds','assists','steals','threes'].forEach(loadBP);
   else if(['rebounds','assists','steals','threes'].includes(m))loadBP(m);
@@ -145,17 +145,32 @@ function setMarket(m){
 async function load(refresh=false){
   el('status').textContent='CALCULATING';
   try{
-    const r=await fetch('/api/auto-board'+(refresh?'?refresh=true':''),{cache:'no-store'}),d=await r.json();
-    if(!r.ok)throw Error(d.detail?.message||d.detail||'Board unavailable');
-    data=d.props||[];
+    const [scheduleResult,boardResult]=await Promise.all([
+      fetch('/api/auto-board'+(refresh?'?refresh=true':''),{cache:'no-store'})
+        .then(async r=>({ok:r.ok,data:await r.json()}))
+        .catch(()=>({ok:false,data:{}})),
+      fetch('/api/proprietary-market-board?market=points&ts='+Date.now(),{cache:'no-store'})
+        .then(async r=>({ok:r.ok,data:await r.json()}))
+        .catch(e=>({ok:false,data:{detail:String(e.message||e)}}))
+    ]);
+    const schedule=scheduleResult.data||{},board=boardResult.data||{};
+    if(!boardResult.ok)throw Error(board.detail||board.error||'DraftKings points board unavailable');
+    data=(board.props||[]).map(p=>({...p,
+      overOdds:p.over_odds,underOdds:p.under_odds,
+      ev:p.expected_value_pct==null?null:Number(p.expected_value_pct)/100,
+      expected_profit_per_100:p.expected_value_pct,
+      model_status:'projected',best_side:p.best_side,
+      best_probability:p.best_probability,market:'points',
+      simulations:p.simulations
+    })).filter(p=>p.player&&p.line!=null);
     await loadCustomLines();data=await applySavedOverrides(data,'points');
     await recordDailyTopFive('points',rankEV(data).slice(0,5));
-    el('ng').textContent=d.schedule_game_count??'—';
-    el('nl').textContent=d.line_count??data.length;
-    el('np').textContent=d.projected_count??0;
+    el('ng').textContent=schedule.schedule_game_count??'—';
+    el('nl').textContent=board.line_count??data.length;
+    el('np').textContent=board.projected_count??data.length;
     el('nv').textContent=data.filter(x=>x.recommendation==='VALUE CANDIDATE'&&!isFallback(x)&&Number(x.expected_profit_per_100)>0).length;
-    el('updated').textContent='Board updated '+new Date(d.calculated_at||Date.now()).toLocaleTimeString();
-    el('status').textContent=d.status==='ready'?'BOARD READY':'DATA LIMITED';
+    el('updated').textContent='Board updated '+new Date(board.calculated_at||Date.now()).toLocaleTimeString();
+    el('status').textContent=board.projected_count>0?'BOARD READY':'DATA LIMITED';
     await updateLive();render();renderFull();
   }catch(e){
     el('status').textContent='BOARD UNAVAILABLE';
@@ -346,13 +361,13 @@ function bpLineCard(p,i){
   const stake=bankroll>0&&qualifies?bankroll*0.05:null;
   const cls=p.recommendation==='VALUE CANDIDATE'?'value':p.recommendation==='LEAN / VERIFY'?'lean':'pass';
   const label=bpMarketLabel(p.market);
-  return '<article class="player-card '+cls+'"><div class="player-top"><div><div class="player-name">'+esc((i+1)+'. '+p.player+(p.team?' ('+p.team+')':''))+'</div><div class="matchup">'+esc(p.game||'NBA player prop')+' · Proprietary ESPN game-log model</div></div><span class="decision '+cls+'">'+esc(p.recommendation||'PASS')+'</span></div>'+
+  return '<article class="player-card '+cls+'"><div class="player-top"><div><div class="player-name">'+esc((i+1)+'. '+p.player+(p.team?' ('+p.team+')':''))+'</div><div class="matchup">'+esc(p.game||'NBA player prop')+' · Proprietary ESPN game-log model · DraftKings odds</div></div><span class="decision '+cls+'">'+esc(p.recommendation||'PASS')+'</span></div>'+
     '<div class="scorebox"><div><div class="score-label">'+esc(label)+' line</div><div class="score">'+esc(p.line)+'</div></div><div class="game-status">Over '+esc(odds(p.overOdds??p.over_odds))+'<br>Under '+esc(odds(p.underOdds??p.under_odds))+'</div></div>'+
     '<div class="statline"><div class="mini"><div class="mini-label">Our projection</div><div class="mini-value">'+num(p.projection,2)+'</div><div class="mini-label">'+esc(p.sample_label||'Game-log sample')+'</div></div><div class="mini"><div class="mini-label">Over / Under / Push</div><div class="mini-value">'+num(p.over_probability,1)+'% / '+num(p.under_probability,1)+'%</div><div class="mini-label">Push '+num(p.push_probability,1)+'%</div></div></div>'+
     '<div class="card-bottom"><span>Model pick: <b>'+esc(p.best_side||'—')+'</b> · '+num(p.edge_pp)+' pp edge</span><span class="ev">'+(p.expected_value_pct==null?'—':(Number(p.expected_value_pct)>0?'+':'')+num(p.expected_value_pct,2)+'% EV')+'</span></div>'+
     '<div class="card-bottom"><span>Simulations: '+esc(p.simulations||50000).toLocaleString()+'</span><span>Odds O '+esc(odds(p.overOdds??p.over_odds))+' / U '+esc(odds(p.underOdds??p.under_odds))+'</span></div>'+
-    '<div class="card-bottom"><span>DK/FD market: '+esc((p.market_books||[]).join(', ')||'No verified pair')+'</span><span>Stake: '+(stake==null?'Enter bankroll / no qualifying bet':'$'+num(stake,2)+' (5%)')+'</span></div>'+
-    '<div class="card-bottom"><span>Kelly diagnostic: '+(p.kelly_fraction_pct==null?'—':num(p.kelly_fraction_pct,2)+'%')+'</span><span>50/50 model-market blend</span></div>'+injurySummary(p)+balldontlieSummary(p)+dvpSummary(p)+lineEditor(p)+'</article>';
+    '<div class="card-bottom"><span>Sportsbook: '+esc((p.market_books||[]).join(', ')||'DraftKings')+'</span><span>Stake: '+(stake==null?'Enter bankroll / no qualifying bet':'$'+num(stake,2)+' (5%)')+'</span></div>'+
+    '<div class="card-bottom"><span>Kelly diagnostic: '+(p.kelly_fraction_pct==null?'—':num(p.kelly_fraction_pct,2)+'%')+'</span><span>50/50 model/DraftKings blend</span></div>'+injurySummary(p)+balldontlieSummary(p)+dvpSummary(p)+lineEditor(p)+'</article>';
 }
 function allModelEV(){
   const all=rankEV(data).map(p=>({...p,market:'points'}));
