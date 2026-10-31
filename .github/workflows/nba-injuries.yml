@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: "*/15 * * * *"
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/update_nba_injuries.py"
+      - ".github/workflows/nba-injuries.yml"
 
 permissions:
   contents: write
