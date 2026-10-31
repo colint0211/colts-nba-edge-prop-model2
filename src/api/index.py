@@ -1285,6 +1285,7 @@ async def cron_settle_pending(request: FastRequest):
 async def save_daily_top5(request: FastRequest):
     try:
         payload = await request.json()
+        prediction_ledger.initialize()
         result = prediction_ledger.save_daily_top_five(
             payload.get("props") or [], payload.get("market"), payload.get("slate_date")
         )
