@@ -3,28 +3,34 @@
 .reasoning{margin-top:12px;border:1px solid #2a4058;border-radius:11px;background:#0b1727;padding:10px 12px}.reasoning summary{cursor:pointer;font-weight:800;color:#cde3ff}.reasoning-body{padding-top:9px;color:var(--muted);font-size:12px}.reasoning-body div{margin:5px 0}.reasoning-body b{color:var(--text)}.reason-warning{color:var(--gold)!important}.history-table-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:13px;margin-top:12px}.history-table{width:100%;border-collapse:collapse;min-width:760px;font-size:12px}.history-table th,.history-table td{padding:10px 11px;text-align:left;border-bottom:1px solid #243850;white-space:nowrap}.history-table th{color:var(--muted);font-weight:800;background:#0b1727}.history-table tr:last-child td{border-bottom:0}.history-status{font-weight:900}.history-status.win{color:var(--green)}.history-status.loss{color:var(--red)}.history-status.push{color:var(--gold)}.history-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px;margin:12px 0}.history-summary .stat{padding:11px}.history-summary .num{font-size:21px}.history-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.history-actions input,.history-actions select{min-width:130px}@media(max-width:650px){.history-summary{grid-template-columns:repeat(2,minmax(0,1fr))}}</style></head><body><header><div class="headrow"><div><h1><span class="brand">COLT'S</span> NBA EDGE</h1><p style="margin:6px 0 0">NBA player prop value board · live game scores · live player points</p></div><span class="statuspill" id="status">LOADING SLATE</span></div><div class="bar"><button onclick="load(true)">↻ Refresh board</button><label style="display:flex;gap:7px;align-items:center;color:var(--muted);font-size:12px">Bankroll ($)<input id="bankroll" type="number" min="0" step="1" placeholder="Enter bankroll" style="width:145px" oninput="render();renderFull()"></label><span id="updated" class="muted">Loading today's games…</span><span id="liveUpdated" class="muted"></span></div></header><main>
 <div class="statrow"><div class="stat"><div class="statlabel">Today's games</div><div id="ng" class="num">—</div></div><div class="stat"><div class="statlabel">Prop lines loaded</div><div id="nl" class="num">—</div></div><div class="stat"><div class="statlabel">Projections calculated</div><div id="np" class="num">—</div></div><div class="stat"><div class="statlabel">Positive EV candidates</div><div id="nv" class="num">—</div></div></div>
 
-<div class="sectiontitle" id="pastPlays">Past plays & results</div>
-<div class="sectionhint">Your saved predictions stay here when today's matchups refresh. Results are graded automatically after games finish and the daily settlement check runs.</div>
+<div class="sectiontitle" id="pastPlays">Daily Top 5 results</div>
+<div class="sectionhint">Only the five official picks from each category are tracked: Points, Rebounds, Assists, Steals and 3-Pointers Made. Each category is locked once per slate day.</div>
 <div class="history-actions">
-<label class="muted">Play date <input class="pill" id="historyDate" type="date"></label>
-<select class="pill" id="historyMarket" onchange="renderPastPlays()"><option value="all">All markets</option><option value="points">Points</option><option value="rebounds">Rebounds</option><option value="assists">Assists</option><option value="steals">Steals</option><option value="threes">3-pointers made</option></select>
-<select class="pill" id="historyStatus" onchange="renderPastPlays()"><option value="all">All results</option><option value="settled">Settled only</option><option value="pending">Pending only</option></select>
-<button onclick="loadPastPlays()">↻ Refresh past plays</button>
+<label class="muted">Slate date <input class="pill" id="historyDate" type="date"></label>
+<select class="pill" id="historyMarket" onchange="renderPastPlays()"><option value="all">All five categories</option><option value="points">Points</option><option value="rebounds">Rebounds</option><option value="assists">Assists</option><option value="steals">Steals</option><option value="threes">3-pointers made</option></select>
+<button onclick="loadPastPlays()">↻ Refresh results</button>
 </div>
 <div class="history-summary">
-<div class="stat"><div class="statlabel">Picks that day</div><div id="histCount" class="num">—</div></div>
+<div class="stat"><div class="statlabel">Top 5 picks</div><div id="histCount" class="num">—</div></div>
 <div class="stat"><div class="statlabel">Wins / losses</div><div id="histRecord" class="num">—</div></div>
 <div class="stat"><div class="statlabel">Win rate</div><div id="histWinRate" class="num">—</div></div>
 <div class="stat"><div class="statlabel">Net units</div><div id="histProfit" class="num">—</div></div>
 </div>
-<div id="historyStatusText" class="muted">Loading saved plays…</div>
-<div class="history-table-wrap"><table class="history-table"><thead><tr><th>Saved</th><th>Player</th><th>Market</th><th>Matchup</th><th>Pick</th><th>Line</th><th>Odds</th><th>Projection</th><th>Actual</th><th>Result</th><th>Net units</th></tr></thead><tbody id="historyRows"><tr><td colspan="11">Loading saved plays…</td></tr></tbody></table></div>
+<div class="sectionhint">All-time record from these saved Top 5 selections</div>
+<div class="history-summary">
+<div class="stat"><div class="statlabel">Settled picks</div><div id="allHistCount" class="num">—</div></div>
+<div class="stat"><div class="statlabel">Wins / losses</div><div id="allHistRecord" class="num">—</div></div>
+<div class="stat"><div class="statlabel">Win rate</div><div id="allHistWinRate" class="num">—</div></div>
+<div class="stat"><div class="statlabel">Net units</div><div id="allHistProfit" class="num">—</div></div>
+</div>
+<div id="historyStatusText" class="muted">Loading Top 5 results…</div>
+<div class="history-table-wrap"><table class="history-table"><thead><tr><th>Market</th><th>Player</th><th>Team</th><th>Matchup</th><th>Pick</th><th>Line</th><th>Odds</th><th>Projection</th><th>Actual</th><th>Result</th><th>Net units</th></tr></thead><tbody id="historyRows"><tr><td colspan="11">Loading Top 5 results…</td></tr></tbody></table></div>
 <div class="sectiontitle">Today's scoreboard</div><div id="games" class="games"><span class="muted">Loading games…</span></div>
 <div class="sectiontitle" id="topTitle">Top 5 Points</div><div class="sectionhint" id="topHint">Top five points projections ranked by expected value when available.</div>
 <div class="tabs" id="tabs"><button data-market="ev" onclick="setMarket('ev')">Top 5 EV</button><button class="active" data-market="points" onclick="setMarket('points')">Top 5 Points</button><button data-market="rebounds" onclick="setMarket('rebounds')">Top 5 Rebounds</button><button data-market="steals" onclick="setMarket('steals')">Top 5 Steals</button><button data-market="assists" onclick="setMarket('assists')">Top 5 Assists</button><button data-market="threes" onclick="setMarket('threes')">Top 5 3-Pointers Made</button></div>
 <div class="controls"><input class="pill" id="search" placeholder="Search player or matchup" oninput="render()"><span id="count" class="muted"></span></div><div id="cards" class="cards"><div class="empty">Calculating today's best plays…</div></div>
 <div class="sectiontitle">Full player prop board</div><div class="sectionhint" id="fullHint">All currently sourced points props, including leans and passes.</div><div class="controls"><select class="pill" id="filter" onchange="renderFull()"><option value="all">All picks</option><option value="value">Value candidates</option><option value="lean">Leans / verify</option><option value="pass">Pass</option></select><input class="pill" id="searchFull" placeholder="Search full board" oninput="renderFull()"><span id="countFull" class="muted"></span></div><div id="fullCards" class="cards"></div>
-<div class="sectiontitle">Model tracking</div><div class="sectionhint">Saved outcomes only. Performance is not validated until enough results settle.</div><div class="statrow"><div class="stat"><div class="statlabel">Recorded results</div><div id="btPredictions" class="num">—</div></div><div class="stat"><div class="statlabel">Wins / losses</div><div id="btSettled" class="num">—</div></div><div class="stat"><div class="statlabel">Win rate</div><div id="btWinRate" class="num">—</div></div><div class="stat"><div class="statlabel">Net profit</div><div id="btRoi" class="num">—</div></div></div><div class="bar"><button onclick="loadBacktest()">Refresh tracking</button><span id="btUpdated" class="muted"></span></div><div id="btStatus" class="muted">Loading saved results…</div><div class="footer">Live scores and player points are supplied by ESPN public endpoints. BettingPros supplies the Rebounds, Assists, Steals, and 3-Pointers Made markets. EV plays are shown only when the API response includes the required projection and expected-value fields; lines alone are not treated as picks. Live data refreshes every 15 seconds while this page is open.</div></main>
+<div class="footer">Live scores and player points are supplied by ESPN public endpoints. BettingPros supplies the Rebounds, Assists, Steals, and 3-Pointers Made markets. EV plays are shown only when the API response includes the required projection and expected-value fields; lines alone are not treated as picks. Live data refreshes every 15 seconds while this page is open.</div></main>
 <script>
 let data=[],liveData={games:[],players_by_id:{},players_by_name:{}},market='points',bpCache={},bpLoading={};
 let customOverrides={};
@@ -143,6 +149,7 @@ async function load(refresh=false){
     if(!r.ok)throw Error(d.detail?.message||d.detail||'Board unavailable');
     data=d.props||[];
     await loadCustomLines();data=await applySavedOverrides(data,'points');
+    await recordDailyTopFive('points',rankEV(data).slice(0,5));
     el('ng').textContent=d.schedule_game_count??'—';
     el('nl').textContent=d.line_count??data.length;
     el('np').textContent=d.projected_count??0;
@@ -276,6 +283,8 @@ async function loadBP(m){
     const d=await r.json();
     if(!r.ok)throw Error(d.detail||d.error||'Proprietary model request failed');
     bpCache[m]=await applySavedOverrides((d.props||[]).map(p=>({...p,overOdds:p.over_odds,underOdds:p.under_odds,ev:p.expected_value_pct==null?null:Number(p.expected_value_pct)/100,expected_profit_per_100:p.expected_value_pct,model_status:'projected',best_side:p.best_side,best_probability:p.best_probability,market:m,simulations:p.simulations})).filter(p=>p.player&&p.line!=null),m);
+    const dailyPicks=bpCache[m].slice().sort((x,y)=>Number(y.expected_profit_per_100??-999)-Number(x.expected_profit_per_100??-999)).slice(0,5);
+    await recordDailyTopFive(m,dailyPicks);
     bpLoading[m]=false;render();renderFull();
   }catch(e){bpLoading[m]=false;bpCache[m]={error:e.message};render();renderFull()}
 }
@@ -387,18 +396,29 @@ function renderFull(){
   el('countFull').textContent=rows.length+' / '+a.length+' model projections';
   el('fullCards').innerHTML=rows.map((p,i)=>bpLineCard(p,i)).join('')||'<div class="empty">No verified '+esc(bpMarketLabel(market))+' projections available.</div>';
 }
-let pastPlayRows=[];
+let pastPlayRows=[],dailyTop5Metrics={};
 function localDateKey(date){
   const y=date.getFullYear(),m=String(date.getMonth()+1).padStart(2,'0'),d=String(date.getDate()).padStart(2,'0');
   return y+'-'+m+'-'+d;
 }
 function historyMarketName(m){return ({points:'Points',rebounds:'Rebounds',assists:'Assists',steals:'Steals',threes:'3-pointers made'})[m]||m||'—'}
+async function recordDailyTopFive(m,rows){
+  const picks=(rows||[]).slice(0,5);if(!picks.length)return;
+  try{
+    await fetch('/api/model/daily-top5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({market:m,slate_date:localDateKey(new Date()),props:picks}),cache:'no-store'});
+  }catch(e){console.warn('Daily Top 5 snapshot could not be saved:',e)}
+}
+function renderAllTimeTopFive(){
+  const a=dailyTop5Metrics||{},wins=Number(a.wins||0),losses=Number(a.losses||0),settled=Number(a.settled||0);
+  el('allHistCount').textContent=settled;
+  el('allHistRecord').textContent=wins+' / '+losses+(a.pushes?' / '+a.pushes+'P':'');
+  el('allHistWinRate').textContent=a.win_rate_pct==null?'—':num(a.win_rate_pct,1)+'%';
+  el('allHistProfit').textContent=(Number(a.net_units)>0?'+':'')+num(a.net_units||0,2)+'u';
+}
 function renderPastPlays(){
-  const day=el('historyDate').value,marketFilter=el('historyMarket').value,statusFilter=el('historyStatus').value;
-  let rows=pastPlayRows.filter(p=>p.created_at&&localDateKey(new Date(p.created_at))===day);
+  const day=el('historyDate').value,marketFilter=el('historyMarket').value;
+  let rows=pastPlayRows.filter(p=>p.slate_date===day);
   if(marketFilter!=='all')rows=rows.filter(p=>p.market===marketFilter);
-  if(statusFilter==='settled')rows=rows.filter(p=>!!p.outcome);
-  if(statusFilter==='pending')rows=rows.filter(p=>!p.outcome);
   const wins=rows.filter(p=>p.outcome==='WIN').length,losses=rows.filter(p=>p.outcome==='LOSS').length,pushes=rows.filter(p=>p.outcome==='PUSH').length;
   const decided=wins+losses,profit=rows.reduce((sum,p)=>sum+Number(p.profit_units||0),0);
   el('histCount').textContent=rows.length;
@@ -407,33 +427,24 @@ function renderPastPlays(){
   el('histProfit').textContent=(profit>0?'+':'')+num(profit,2)+'u';
   el('historyRows').innerHTML=rows.length?rows.map(p=>{
     const result=p.outcome||'PENDING',cls=result==='WIN'?'win':result==='LOSS'?'loss':result==='PUSH'?'push':'';
-    const saved=new Date(p.created_at).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'});
-    return '<tr><td>'+esc(saved)+'</td><td><b>'+esc(p.player)+'</b>'+(p.team?' ('+esc(p.team)+')':'')+'</td><td>'+esc(historyMarketName(p.market))+'</td><td>'+esc(p.game||'—')+'</td><td>'+esc(p.side||'—')+'</td><td>'+num(p.line,1)+'</td><td>'+(p.odds>0?'+':'')+esc(p.odds??'—')+'</td><td>'+num(p.projection,1)+'</td><td>'+num(p.actual_value,1)+'</td><td class="history-status '+cls+'">'+result+'</td><td>'+(p.profit_units==null?'—':(p.profit_units>0?'+':'')+num(p.profit_units,2)+'u')+'</td></tr>';
-  }).join(''):'<tr><td colspan="11">No saved plays found for this date and filter.</td></tr>';
+    return '<tr><td>'+esc(historyMarketName(p.market))+'</td><td><b>'+esc(p.player)+'</b></td><td>'+esc(p.team||'—')+'</td><td>'+esc(p.game||'—')+'</td><td>'+esc(p.side||'—')+'</td><td>'+num(p.line,1)+'</td><td>'+(p.odds>0?'+':'')+esc(p.odds??'—')+'</td><td>'+num(p.projection,1)+'</td><td>'+num(p.actual_value,1)+'</td><td class="history-status '+cls+'">'+result+'</td><td>'+(p.profit_units==null?'—':(p.profit_units>0?'+':'')+num(p.profit_units,2)+'u')+'</td></tr>';
+  }).join(''):'<tr><td colspan="11">No Top 5 picks saved for this slate date yet.</td></tr>';
   const pending=rows.filter(p=>!p.outcome).length;
-  el('historyStatusText').textContent=rows.length+' saved plays · '+(rows.length-pending)+' settled · '+pending+' pending. Net units assume one unit risk per pick; pushes return zero.';
+  el('historyStatusText').textContent=rows.length+' official Top 5 picks · '+(rows.length-pending)+' settled · '+pending+' pending. Maximum 25 picks per slate.';
 }
 async function loadPastPlays(){
-  el('historyStatusText').textContent='Loading saved plays…';
+  el('historyStatusText').textContent='Loading Top 5 results…';
   try{
-    const r=await fetch('/api/model/ledger?status=all&market=all&limit=500&ts='+Date.now(),{cache:'no-store'});
-    const d=await r.json();if(!r.ok)throw Error(d.detail||'Saved plays unavailable');
+    const date=el('historyDate').value||localDateKey(new Date());
+    const r=await fetch('/api/model/daily-top5?slate_date='+encodeURIComponent(date)+'&market=all&ts='+Date.now(),{cache:'no-store'});
+    const d=await r.json();if(!r.ok)throw Error(d.detail||'Top 5 results unavailable');
     pastPlayRows=Array.isArray(d.predictions)?d.predictions:[];
-    renderPastPlays();
+    dailyTop5Metrics=d.all_time||{};
+    renderPastPlays();renderAllTimeTopFive();
   }catch(e){
-    el('historyStatusText').textContent='Could not load past plays: '+String(e.message||e);
-    el('historyRows').innerHTML='<tr><td colspan="11">Past plays are temporarily unavailable.</td></tr>';
+    el('historyStatusText').textContent='Could not load Top 5 results: '+String(e.message||e);
+    el('historyRows').innerHTML='<tr><td colspan="11">Top 5 results are temporarily unavailable.</td></tr>';
   }
-}
-async function loadBacktest(){
-  try{
-    const r=await fetch('/api/tracking?ts='+Date.now(),{cache:'no-store'}),d=await r.json();
-    if(!r.ok)throw Error(d.detail?.message||d.detail||'Tracking unavailable');
-    el('btPredictions').textContent=d.count??0;el('btSettled').textContent=(d.wins??0)+' / '+(d.losses??0);
-    el('btWinRate').textContent=d.win_rate_pct==null?'—':num(d.win_rate_pct,1)+'%';
-    el('btRoi').textContent='$'+num(d.net_profit_units,2);el('btUpdated').textContent='Updated '+new Date().toLocaleTimeString();
-    el('btStatus').textContent=(d.pushes??0)+' pushes. Net assumes $100 risk per recorded result; this is tracking, not a historical backtest.';
-  }catch(e){el('btStatus').textContent='Tracking unavailable: '+String(e.message||e)}
 }
 async function recordResult(btn){
   const actual=prompt('Enter FINAL POINTS for '+btn.dataset.player+' ('+btn.dataset.game+').');
@@ -445,8 +456,9 @@ async function recordResult(btn){
     alert('Saved result: '+d.record.result+'. Net '+num(d.record.profit,2)+' per $100 risked.');await loadBacktest();
   }catch(e){alert('Could not save result: '+String(e.message||e))}
 }
-const yesterday=new Date();yesterday.setDate(yesterday.getDate()-1);el('historyDate').value=localDateKey(yesterday);el('historyDate').addEventListener('change',renderPastPlays);
-load();loadBacktest();loadPastPlays();
+const yesterday=new Date();yesterday.setDate(yesterday.getDate()-1);el('historyDate').value=localDateKey(yesterday);el('historyDate').addEventListener('change',loadPastPlays);
+load();loadPastPlays();
+['rebounds','assists','steals','threes'].forEach(loadBP);
 setInterval(async()=>{await updateLive();render();renderFull()},15000);
 setInterval(()=>load(false),300000);
 setInterval(()=>loadPastPlays(),60000);
