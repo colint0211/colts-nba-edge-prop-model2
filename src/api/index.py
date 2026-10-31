@@ -23,7 +23,6 @@ BP_MARKETS = {"points": 156, "rebounds": 157, "assists": 151, "steals": 160, "th
 @app.get("/", response_class=HTMLResponse)
 async def home():
     return HTMLResponse(HTML)
-
 @app.get("/api/api-sports-status")
 def api_sports_status():
     """Validate the Basketball API key using its documented no-parameter timezone endpoint."""
@@ -65,6 +64,1057 @@ def api_sports_status():
         }, status_code=502)
     except Exception as exc:
         return JSONResponse({"configured": True, "valid": False, "message": "Could not reach API-Sports: " + str(exc)[:180]}, status_code=502)
+
+ESPN_BASE = "https://site.web.api.espn.com/apis/common/v3/sports/basketball/nba"
+ESPN_SEARCH = "https://site.web.api.espn.com/apis/search/v2"
+STAT_FIELDS = {
+    "rebounds": ("rebounds", "REB"),
+    "assists": ("assists", "AST"),
+    "steals": ("steals", "STL"),
+    "threes": ("threePointsMade", "3PT"),
+}
+_ESPN_ID_CACHE = {}
+_ESPN_LOG_CACHE = {}
+_ESPN_ROSTER_CACHE = {}
+
+_ESPN_POSITION_CACHE = {}
+_API_SPORTS_POSITION_CACHE = {}
+_API_SPORTS_POSITION_CACHE_TTL = 86400
+_DVP_CACHE = {"at": 0.0, "data": None, "season": None}
+_DVP_STAT_CACHE = {}
+_DVP_CACHE_TTL = 3600
+_TEAM_NAMES = {
+ "ATL":"Atlanta Hawks","BOS":"Boston Celtics","BKN":"Brooklyn Nets","CHA":"Charlotte Hornets","CHI":"Chicago Bulls",
+ "CLE":"Cleveland Cavaliers","DAL":"Dallas Mavericks","DEN":"Denver Nuggets","DET":"Detroit Pistons","GSW":"Golden State Warriors",
+ "HOU":"Houston Rockets","IND":"Indiana Pacers","LAC":"LA Clippers","LAL":"Los Angeles Lakers","MEM":"Memphis Grizzlies",
+ "MIA":"Miami Heat","MIL":"Milwaukee Bucks","MIN":"Minnesota Timberwolves","NOP":"New Orleans Pelicans","NYK":"New York Knicks",
+ "OKC":"Oklahoma City Thunder","ORL":"Orlando Magic","PHI":"Philadelphia 76ers","PHX":"Phoenix Suns","POR":"Portland Trail Blazers",
+ "SAC":"Sacramento Kings","SAS":"San Antonio Spurs","TOR":"Toronto Raptors","UTA":"Utah Jazz","WAS":"Washington Wizards"
+}
+_TEAM_ALIASES = {name.lower(): code for code, name in _TEAM_NAMES.items()}
+_TEAM_ALIASES.update({"los angeles clippers":"LAC","brooklyn":"BKN","new york":"NYK","golden state":"GSW",
+ "phoenix":"PHX","new orleans":"NOP","san antonio":"SAS"})
+class _DVPHTMLParser(HTMLParser):
+ def __init__(self):
+  super().__init__(); self.rows=[]; self.row=None; self.cell=None; self.text=[]
+ def handle_starttag(self,tag,attrs):
+  tag=tag.lower()
+  if tag=="tr": self.row=[]
+  elif tag in ("td","th") and self.row is not None: self.cell=[]
+ def handle_data(self,data):
+  value=str(data or "").strip()
+  if value:
+   self.text.append(value)
+   if self.cell is not None: self.cell.append(value)
+ def handle_endtag(self,tag):
+  tag=tag.lower()
+  if tag in ("td","th") and self.cell is not None and self.row is not None:
+   self.row.append(" ".join(self.cell).strip()); self.cell=None
+  elif tag=="tr" and self.row is not None:
+   if self.row: self.rows.append(list(self.row))
+   self.row=None; self.cell=None
+def _canonical_team_code(value):
+ if isinstance(value,dict):
+  value=value.get("abbreviation") or value.get("shortDisplayName") or value.get("displayName") or value.get("name") or ""
+ raw=str(value or "").strip(); upper=raw.upper()
+ aliases={"NY":"NYK","GS":"GSW","WSH":"WAS","PHO":"PHX","NO":"NOP","SA":"SAS"}
+ if upper in _TEAM_NAMES: return upper
+ if upper in aliases: return aliases[upper]
+ return _TEAM_ALIASES.get(raw.lower())
+def _team_codes_from_game(game):
+ text=str(game or "").upper()
+ match=re.search(r"\b([A-Z]{2,3})\s*(?:@|VS\.?|V)\s*([A-Z]{2,3})\b",text)
+ if match:
+  return {x for x in (_canonical_team_code(match.group(1)),_canonical_team_code(match.group(2))) if x}
+ lower=str(game or "").lower(); found=set()
+ for name,code in _TEAM_ALIASES.items():
+  if name in lower: found.add(code)
+ return found
+def _fetch_dvp_table(stat="PTS"):
+ stat=str(stat or "PTS").upper().strip()
+ stat_aliases={"POINTS":"PTS","REBOUNDS":"REB","ASSISTS":"AST","STEALS":"STL","THREES":"3PM"}
+ stat=stat_aliases.get(stat,stat)
+ if stat not in ("PTS","REB","AST","STL","3PM"):
+  raise ValueError("Unsupported DVP statistic: "+stat)
+ now=time.time()
+ cached=_DVP_STAT_CACHE.get(stat)
+ if cached and now-cached["at"]<_DVP_CACHE_TTL:
+  return cached["data"]
+
+ def fetch_and_parse(timeframe):
+  url="https://www.nbahouse.net/defense-vs-position?stat="+stat+"&tf="+timeframe
+  request=Request(url,headers={"User-Agent":"Mozilla/5.0 ColtsNBAEdge/1.0","Accept":"text/html"})
+  with urlopen(request,timeout=12) as response:
+   html=response.read().decode("utf-8","replace")
+  parser=_DVPHTMLParser(); parser.feed(html)
+  positions=("PG","SG","SF","PF","C"); parsed={}
+  for cells in parser.rows:
+   if len(cells)<6: continue
+   team_text=cells[0].strip().lower()
+   code=_TEAM_ALIASES.get(team_text)
+   if not code: code=_TEAM_ALIASES.get(re.sub(r"^[a-z]{3}","",team_text).strip())
+   if not code: continue
+   for position,cell in zip(positions,cells[1:6]):
+    match=re.search(r"([0-9]+(?:\.[0-9]+)?)",str(cell))
+    if match: parsed[(code,position)]={stat:float(match.group(1))}
+  if len(parsed)<120:
+   raise RuntimeError("Individual-position "+stat+" defense-vs-position source returned an incomplete table.")
+  return parsed," ".join(parser.text)
+
+ # Use current-season positional data only once the source reports at least
+ # 10 games for every team. Until then, use the completed prior season.
+ try:
+  current_table,current_text=fetch_and_parse("season")
+ except Exception:
+  current_table,current_text=None,""
+ sample=re.search(r"\((\d+)\s*[–-]\s*(\d+)\s+games?\s+a\s+team\)",current_text,re.I)
+ if current_table is not None and sample and int(sample.group(1))>=10:
+  parsed,season=current_table,"current season"
+ else:
+  parsed,_=fetch_and_parse("prev")
+  season="previous season (current season sample below 10 games or unavailable)"
+ _DVP_STAT_CACHE[stat]={"at":now,"data":parsed,"season":season}
+ if stat=="PTS":
+  _DVP_CACHE.update({"at":now,"data":parsed,"season":season})
+ return parsed
+
+def _position_group(position):
+ if isinstance(position,dict):
+  raw=(position.get("abbreviation") or position.get("displayName") or position.get("name") or "")
+ else:
+  raw=position or ""
+ p=str(raw).strip().upper()
+ aliases={
+  "POINT GUARD":"PG","POINT-GUARD":"PG","PG":"PG",
+  "SHOOTING GUARD":"SG","SG":"SG",
+  "SMALL FORWARD":"SF","SF":"SF",
+  "POWER FORWARD":"PF","PF":"PF",
+  "CENTER":"C","C":"C",
+  "GUARD":"G","G":"G","FORWARD":"F","F":"F",
+ }
+ return aliases.get(p)
+
+
+
+def _api_sports_player_position(player_name):
+ """Return API-Sports Basketball's listed broad position (Guard/Forward/Center).
+ This source does not distinguish PG/SG or SF/PF; ESPN remains the finer-position source.
+ """
+ name=str(player_name or "").strip()
+ normalized=_norm_player_name(name)
+ if len(normalized)<3:
+  return None
+ now=time.time()
+ cached=_API_SPORTS_POSITION_CACHE.get(normalized)
+ if cached and now-cached.get("at",0)<_API_SPORTS_POSITION_CACHE_TTL:
+  return cached.get("data")
+ api_key=os.getenv("API_SPORTS_KEY","").strip()
+ if not api_key:
+  _API_SPORTS_POSITION_CACHE[normalized]={"at":now,"data":None}
+  return None
+ try:
+  query=urlencode({"search":name})
+  request=Request(
+   "https://v1.basketball.api-sports.io/players?"+query,
+   headers={"User-Agent":"Mozilla/5.0 ColtsNBAEdge/1.0","Accept":"application/json","x-apisports-key":api_key}
+  )
+  with urlopen(request,timeout=8) as response:
+   payload=json.loads(response.read().decode("utf-8","replace"))
+  rows=payload.get("response") or [] if isinstance(payload,dict) else []
+  exact=[]
+  for row in rows:
+   if not isinstance(row,dict):
+    continue
+   candidate=row.get("name") or row.get("player",{}).get("name") if isinstance(row.get("player"),dict) else row.get("name")
+   if _norm_player_name(candidate)==normalized:
+    position=_position_group(row.get("position"))
+    if position:
+     exact.append(position)
+  # Require an exact, unambiguous player-name match. Never guess from fuzzy search results.
+  unique=set(exact)
+  result=next(iter(unique)) if len(unique)==1 else None
+  _API_SPORTS_POSITION_CACHE[normalized]={"at":now,"data":result}
+  return result
+ except Exception:
+  _API_SPORTS_POSITION_CACHE[normalized]={"at":now,"data":None}
+  return None
+
+def _espn_player_position(athlete_id,team_code):
+ """Resolve a specific PG/SG/SF/PF/C role; generic G/F roster labels are not enough."""
+ key=(str(athlete_id),str(team_code or "").upper())
+ if key in _ESPN_POSITION_CACHE: return _ESPN_POSITION_CACHE[key]
+ code=_canonical_team_code(team_code)
+ if not code: return None
+ found=None
+ generic_position=None
+ try:
+  payload=_get_json("https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/"+code.lower()+"/roster",timeout=8)
+  def walk(value):
+   nonlocal found,generic_position
+   if found not in (None,"G","F"): return
+   if isinstance(value,dict):
+    athlete=value.get("athlete") if isinstance(value.get("athlete"),dict) else value
+    if str(athlete.get("id") or "").strip()==str(athlete_id):
+     position=athlete.get("position") or value.get("position") or {}
+     resolved=_position_group(position)
+     if resolved in ("G","F"): generic_position=resolved
+     elif resolved: found=resolved
+     return
+    for child in value.values():
+     if isinstance(child,(dict,list)): walk(child)
+   elif isinstance(value,list):
+    for child in value: walk(child)
+  walk(payload)
+ except Exception:
+  pass
+
+ # ESPN's roster can expose only G/F. Check its athlete profile for a
+ # specific PG/SG/SF/PF/C role before falling back to a blended group.
+ if found in (None,"G","F"):
+  try:
+   athlete=_get_json(
+    "https://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/athletes/"+str(athlete_id),
+    timeout=8
+   )
+   specific=_position_group(athlete.get("position") if isinstance(athlete,dict) else None)
+   if specific and specific not in ("G","F"): found=specific
+   elif specific in ("G","F"): generic_position=specific
+  except Exception:
+   pass
+ if not found: found=generic_position
+ _ESPN_POSITION_CACHE[key]=found
+ return found
+def _dvp_matchup_adjustment(athlete_id,player_team,game,market,player_name=None):
+ try:
+  market=str(market or "").lower().strip()
+  stat_fields={"points":"PTS","rebounds":"REB","assists":"AST","steals":"STL","threes":"3PM"}
+  stat=stat_fields.get(market)
+  if not stat: return None
+  team_code=_canonical_team_code(player_team); game_teams=_team_codes_from_game(game)
+  if not team_code or len(game_teams)<2: return None
+  opponent=next((code for code in game_teams if code!=team_code),None)
+  if not opponent: return None
+
+  # ESPN can provide a specific PG/SG/SF/PF/C listing. API-Sports Basketball
+  # supplies broad Guard/Forward/Center labels only, so it is a cross-check or
+  # fallback, never a source of invented sub-positions.
+  espn_position=_espn_player_position(athlete_id,team_code)
+  api_position=None
+  position_source="ESPN roster/profile"
+  position_confidence="high" if espn_position not in (None,"G","F") else "medium"
+  position_crosscheck="not_needed_for_specific_position"
+  if espn_position in ("G","F") or espn_position is None:
+   api_position=_api_sports_player_position(player_name)
+   if espn_position in ("G","F"):
+    if api_position and api_position!=espn_position:
+     return None
+    position_crosscheck="confirmed" if api_position==espn_position else "unavailable"
+    position_source="ESPN broad position"+(" + API-Sports confirmed" if api_position==espn_position else "")
+    position_confidence="medium" if api_position==espn_position else "low"
+   elif api_position:
+    espn_position=api_position
+    position_source="API-Sports Basketball fallback"
+    position_confidence="medium"
+    position_crosscheck="fallback_used"
+  if not espn_position: return None
+
+  position_keys={"G":("PG","SG"),"F":("SF","PF")}.get(espn_position,(espn_position,))
+  table=_fetch_dvp_table(stat)
+  allowed_values=[table.get((opponent,pos),{}).get(stat) for pos in position_keys]
+  if any(value is None for value in allowed_values): return None
+  allowed=sum(allowed_values)/len(allowed_values)
+  league_values=[row[stat] for (team,pos),row in table.items() if pos in position_keys and stat in row]
+  if len(league_values)<20: return None
+  league_average=sum(league_values)/len(league_values)
+  if league_average<=0: return None
+  ratio=allowed/league_average
+  factor=max(0.92,min(1.08,1.0+(ratio-1.0)*0.30))
+  position_names={"PG":"Point Guard","SG":"Shooting Guard","SF":"Small Forward","PF":"Power Forward","C":"Center",
+   "G":"Guard (PG/SG blended)","F":"Forward (SF/PF blended)"}
+  stat_labels={"points":"points","rebounds":"rebounds","assists":"assists","steals":"steals","threes":"3-pointers made"}
+  stat_units={"points":"PPG","rebounds":"RPG","assists":"APG","steals":"SPG","threes":"3PM"}
+  season=_DVP_STAT_CACHE.get(stat,{}).get("season") or "season not identified"
+  position_method="PG/SG 50/50 blend" if espn_position=="G" else "SF/PF 50/50 blend" if espn_position=="F" else "Individual listed position"
+  blend_weights={position_keys[0]:1.0} if len(position_keys)==1 else {position_keys[0]:0.5,position_keys[1]:0.5}
+  return {"position":espn_position,"position_group":espn_position,"position_name":position_names[espn_position],
+   "position_source":position_source,"position_confidence":position_confidence,"position_crosscheck":position_crosscheck,
+   "blend_weights":blend_weights,"opponent":opponent,"opponent_name":_TEAM_NAMES.get(opponent,opponent),
+   "stat":market,"stat_label":stat_labels[market],"stat_unit":stat_units[market],
+   "allowed_per_game":round(allowed,2),"league_position_average":round(league_average,2),
+   "league_relative_ratio":round(ratio,3),"adjustment_pct":round((factor-1.0)*100,2),"factor":round(factor,4),
+   "source":"NBA House individual-position "+stat+" allowed table","source_season":season,
+   "method":position_method+" "+stat_labels[market]+" allowed per game vs matching-position league average; 30% dampening; adjustment capped at +/-8%"}
+ except Exception: return None
+
+def _espn_roster_player_id(name, team_codes):
+    """Resolve an exact player identity only from the two teams in the matchup."""
+    normalized_name = _norm_player_name(name)
+    matches = {}
+
+    for team_code in sorted(set(team_codes or [])):
+        team_code = str(team_code or "").strip().lower()
+        if not team_code:
+            continue
+        if team_code not in _ESPN_ROSTER_CACHE:
+            url = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/" + team_code + "/roster"
+            try:
+                payload = _get_json(url, timeout=8)
+            except Exception:
+                payload = {}
+            found = {}
+
+            def walk_roster(value):
+                if isinstance(value, dict):
+                    athlete = value.get("athlete") if isinstance(value.get("athlete"), dict) else value
+                    athlete_id = str(athlete.get("id") or "").strip()
+                    athlete_name = (
+                        athlete.get("fullName") or athlete.get("displayName")
+                        or athlete.get("name") or ""
+                    )
+                    if athlete_id.isdigit() and athlete_name:
+                        found[athlete_id] = str(athlete_name)
+                    for child in value.values():
+                        if isinstance(child, (dict, list)):
+                            walk_roster(child)
+                elif isinstance(value, list):
+                    for child in value:
+                        walk_roster(child)
+
+            walk_roster(payload)
+            _ESPN_ROSTER_CACHE[team_code] = found
+
+        for athlete_id, athlete_name in _ESPN_ROSTER_CACHE[team_code].items():
+            if _norm_player_name(athlete_name) == normalized_name:
+                matches[(athlete_id, team_code.upper())] = athlete_name
+
+    if len(matches) == 1:
+        athlete_id, team_code = next(iter(matches))
+        canonical = {"NYK": "NYK", "GSW": "GSW"}.get(team_code, team_code)
+        return athlete_id, canonical
+    return None, None
+
+def _get_json(url, timeout=12):
+    req = Request(url, headers={"User-Agent": "Mozilla/5.0 ColtsNBAEdge/1.0", "Accept": "application/json"})
+    try:
+        with urlopen(req, timeout=timeout) as response:
+            return json.loads(response.read().decode("utf-8", "replace"))
+    except HTTPError as exc:
+        detail = exc.read(500).decode("utf-8", "replace").replace("\\n", " ")
+        raise RuntimeError("ESPN HTTP " + str(exc.code) + ": " + detail[:220]) from exc
+
+def _norm_player_name(value):
+    return "".join(ch.lower() for ch in str(value or "") if ch.isalnum())
+
+def _espn_player_id(name):
+    """Resolve a player to ESPN's numeric NBA athlete ID.
+
+    ESPN global search can return UUID-style content IDs. The common-v3
+    gamelog endpoint requires the numeric athlete ID used in ESPN profile
+    URLs / athlete UIDs, so never pass an arbitrary search-result UUID.
+    """
+    key = _norm_player_name(name)
+    if key in _ESPN_ID_CACHE:
+        return _ESPN_ID_CACHE[key]
+
+    query = urlencode({"query": name, "limit": 20, "sport": "basketball", "league": "nba"})
+    payload = _get_json(ESPN_SEARCH + "?" + query)
+    candidates = []
+
+    def numeric_id(value):
+        if value is None:
+            return None
+        text = str(value).strip()
+        return text if text.isdigit() else None
+
+    def id_from_uid(value):
+        text = str(value or "")
+        # ESPN athlete UIDs commonly contain an a:<numeric athlete id> segment.
+        for marker in ("~a:", "a:"):
+            pos = text.find(marker)
+            if pos >= 0:
+                tail = text[pos + len(marker):]
+                token = tail.split("~", 1)[0].split(":", 1)[0].split("/", 1)[0]
+                found = numeric_id(token)
+                if found:
+                    return found
+        return None
+
+    def id_from_href(value):
+        text = str(value or "")
+        # ESPN profile URLs commonly contain /id/<numeric-id>/.
+        marker = "/id/"
+        pos = text.find(marker)
+        if pos >= 0:
+            tail = text[pos + len(marker):]
+            token = tail.split("/", 1)[0].split("?", 1)[0]
+            found = numeric_id(token)
+            if found:
+                return found
+        return None
+
+    def walk(value):
+        if isinstance(value, dict):
+            athlete_obj = value.get("athlete") if isinstance(value.get("athlete"), dict) else value
+            candidate_name = (
+                athlete_obj.get("fullName") or athlete_obj.get("displayName")
+                or athlete_obj.get("name") or value.get("title") or ""
+            )
+            candidate_id = (
+                numeric_id(athlete_obj.get("id"))
+                or id_from_uid(athlete_obj.get("uid"))
+                or id_from_href(athlete_obj.get("href"))                or id_from_href(value.get("href"))
+                or id_from_href(value.get("link"))
+            )
+            links = athlete_obj.get("links") or value.get("links") or []
+            if not candidate_id and isinstance(links, list):
+                for link in links:
+                    if isinstance(link, dict):
+                        candidate_id = id_from_href(link.get("href"))
+                        if candidate_id:
+                            break
+            if candidate_id and candidate_name:
+                candidates.append((candidate_id, str(candidate_name)))
+            for child in value.values():
+                if isinstance(child, (dict, list)):
+                    walk(child)
+        elif isinstance(value, list):
+            for child in value:
+                walk(child)
+
+    walk(payload)
+    best_id, best_score = None, 0
+    for candidate_id, candidate_name in candidates:
+        score = SequenceMatcher(None, key, _norm_player_name(candidate_name)).ratio()
+        if score > best_score:
+            best_id, best_score = candidate_id, score
+
+    if best_score < 0.78:
+        best_id = None
+
+    _ESPN_ID_CACHE[key] = best_id
+    return best_id
+
+def _gamelog_records(athlete_id, field, label, season):
+    """Return stat values with their ESPN event identifiers so stats and minutes align."""
+    cache_key = (str(athlete_id), field, season, "records")
+    if cache_key in _ESPN_LOG_CACHE:
+        return _ESPN_LOG_CACHE[cache_key]
+    url = ESPN_BASE + "/athletes/" + str(athlete_id) + "/gamelog?" + urlencode({"season": season})
+    payload = _get_json(url)
+    if not isinstance(payload, dict):
+        _ESPN_LOG_CACHE[cache_key] = []
+        return []
+    labels = payload.get("labels") or []
+    names = payload.get("names") or payload.get("statNames") or []
+    default_index = labels.index(label) if isinstance(labels, list) and label in labels else -1
+    source_rows = []
+    season_types = payload.get("seasonTypes") or []
+
+    def is_regular_season(season_type):
+        # ESPN includes preseason, regular-season and postseason categories in
+        # the same athlete gamelog response. Only regular-season rows belong in
+        # the standard player prop baseline.
+        type_info = season_type.get("type") if isinstance(season_type.get("type"), dict) else {}
+        ids = {
+            str(season_type.get("id") or "").strip().lower(),
+            str(type_info.get("id") or "").strip().lower(),
+        }
+        names_to_check = [
+            season_type.get("name"), season_type.get("displayName"),
+            season_type.get("abbreviation"), type_info.get("name"),
+            type_info.get("displayName"), type_info.get("abbreviation"),
+            type_info.get("type"),
+        ]
+        normalized_names = {
+            "".join(ch.lower() for ch in str(value or "") if ch.isalnum())
+            for value in names_to_check
+        }
+        return "2" in ids or any(
+            "regularseason" in name and "playin" not in name
+            for name in normalized_names
+        ) or "reg" in normalized_names
+
+    for season_type in season_types:
+        if not isinstance(season_type, dict) or not is_regular_season(season_type):
+            continue
+        for category in season_type.get("categories") or []:
+            if not isinstance(category, dict):
+                continue
+            cat_labels = category.get("labels") or labels
+            cat_names = category.get("names") or names
+            idx = cat_labels.index(label) if isinstance(cat_labels, list) and label in cat_labels else -1
+            if idx < 0 and isinstance(cat_names, list) and field in cat_names:
+                idx = cat_names.index(field)
+            events = category.get("events") or []
+            if isinstance(events, dict):
+                events = list(events.values())
+            if isinstance(events, list):
+                source_rows.extend((row, idx) for row in events if isinstance(row, dict))
+    # Some ESPN response variants expose a flat gameLog instead of seasonTypes.
+    # Do not fall back to the flat list when seasonTypes exists: it may contain
+    # preseason and postseason games that must not leak into regular-season stats.
+    if not source_rows and not season_types:
+        direct = payload.get("gameLog") or payload.get("games") or payload.get("events") or []
+        if isinstance(direct, dict):
+            direct = list(direct.values())
+        if isinstance(direct, list):
+            source_rows = [(row, default_index) for row in direct if isinstance(row, dict) and isinstance(row.get("stats"), list)]
+    records = []
+    for row, row_index in source_rows:
+        stats = row.get("stats") or []
+        if not isinstance(stats, list):
+            continue
+        idx = row_index if row_index >= 0 else default_index
+        if idx < 0 and isinstance(names, list) and len(names) == len(stats) and field in names:
+            idx = names.index(field)
+        if idx < 0 or idx >= len(stats):
+            continue
+        raw = str(stats[idx]).replace(",", "").strip()
+        if field == "threePointsMade" and "-" in raw:
+            raw = raw.split("-", 1)[0].strip()
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(value) or value < 0:
+            continue
+        event = row.get("event") if isinstance(row.get("event"), dict) else {}
+        event_id = row.get("eventId") or row.get("event_id") or event.get("id") or row.get("id")
+        date = row.get("date") or row.get("gameDate") or event.get("date") or ""
+        records.append({"event_id": str(event_id) if event_id is not None else None,
+                        "date": str(date), "value": value})
+    _ESPN_LOG_CACHE[cache_key] = records
+    return records
+
+
+def _gamelog_values(athlete_id, field, label, season):
+    """Compatibility helper returning values in the ESPN gamelog order."""
+    return [row["value"] for row in _gamelog_records(athlete_id, field, label, season)]
+
+
+def _player_history(athlete_id, field, label):
+    """Align stat and minutes by game ID; use prior season only as limited fallback."""
+    current_stats = _gamelog_records(athlete_id, field, label, 2027)
+    current_minutes = _gamelog_records(athlete_id, "minutes", "MIN", 2027)
+    prior_stats = []
+    prior_minutes = []
+    if len(current_stats) < 5:
+        prior_stats = _gamelog_records(athlete_id, field, label, 2026)
+        prior_minutes = _gamelog_records(athlete_id, "minutes", "MIN", 2026)
+
+    def pair_records(stats, mins):
+        minute_by_event = {r["event_id"]: r for r in mins if r.get("event_id")}
+        paired = []
+        used_minutes = set()
+        unmatched_stats = []
+        for stat in stats:
+            event_id = stat.get("event_id")
+            minute = minute_by_event.get(event_id) if event_id else None
+            if minute and minute["value"] > 0:
+                paired.append((stat, minute))
+                used_minutes.add(id(minute))
+            else:
+                unmatched_stats.append(stat)
+
+        # ESPN can expose different event-ID formats across season/category
+        # payloads. Exact game-date matching is a safe secondary key and avoids
+        # discarding an otherwise valid prior-season fallback.
+        minute_by_date = {}
+        for minute in mins:
+            date_key = str(minute.get("date") or "")[:10]
+            if date_key and minute["value"] > 0:
+                minute_by_date.setdefault(date_key, []).append(minute)
+        for stat in unmatched_stats:
+            date_key = str(stat.get("date") or "")[:10]
+            candidates = minute_by_date.get(date_key, []) if date_key else []
+            minute = next((item for item in candidates if id(item) not in used_minutes), None)
+            if minute:
+                paired.append((stat, minute))
+                used_minutes.add(id(minute))
+
+        # Positional matching is only safe when neither feed has event IDs and
+        # both arrays have identical lengths.
+        has_any_event_ids = any(r.get("event_id") for r in stats) or any(r.get("event_id") for r in mins)
+        if not paired and not has_any_event_ids and len(stats) == len(mins):
+            paired = [(a, b) for a, b in zip(stats, mins) if b["value"] > 0]
+        return paired
+
+    paired = pair_records(current_stats, current_minutes)
+    used_prior = False
+    history_stats = list(current_stats)
+    if len(current_stats) < 5 and prior_stats:
+        # Prior-season scoring records remain valid even if ESPN's separate
+        # stat/minute categories cannot be joined. Minutes are optional; never
+        # throw away verified scoring history solely because that join failed.
+        history_stats = list(prior_stats) + history_stats
+        prior_pairs = pair_records(prior_stats, prior_minutes)
+        paired = prior_pairs + paired
+        used_prior = True
+
+    history_stats = [
+        row for row in history_stats
+        if math.isfinite(row.get("value", float("nan"))) and row.get("value", -1) >= 0
+    ]
+    if any(row.get("date") for row in history_stats):
+        history_stats.sort(key=lambda row: row.get("date") or "")
+    history_stats = history_stats[-25:]
+
+    # Minutes are used only when verified by event ID or exact game date.
+    paired = [(a, b) for a, b in paired if math.isfinite(a["value"]) and math.isfinite(b["value"]) and 0 < b["value"] <= 60]
+    if any(a.get("date") for a, _ in paired):
+        paired.sort(key=lambda item: item[0].get("date") or "")
+    paired = paired[-25:]
+    values = [row["value"] for row in history_stats]
+    minutes = [b["value"] for _, b in paired]
+    sample_label = "2026-27 + 2025-26 limited fallback" if used_prior else "2026-27 regular season"
+    return values, sample_label, minutes
+
+def _odds_profit(win_probability, loss_probability, odds):
+    if odds is None:
+        return None
+    try:
+        price = float(odds)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(price) or price == 0:
+        return None
+    payout = 100.0 / abs(price) if price < 0 else price / 100.0
+    return win_probability * payout - loss_probability
+
+def _median(values):
+    ordered = sorted(float(value) for value in values)
+    if not ordered:
+        return None
+    middle = len(ordered) // 2
+    if len(ordered) % 2:
+        return ordered[middle]
+    return (ordered[middle - 1] + ordered[middle]) / 2.0
+
+
+def _projected_minutes(valid_minutes):
+    """Blend recent and established playing time so one short stretch cannot dominate."""
+    clean = []
+    for item in valid_minutes or []:
+        try:
+            value = float(item)
+            if math.isfinite(value) and 0 < value <= 60:
+                clean.append(value)
+        except (TypeError, ValueError):
+            continue
+    if not clean:
+        return None
+    recent5 = _median(clean[-5:])
+    recent10 = _median(clean[-10:])
+    established = _median(clean[-20:])
+    if len(clean) < 5:
+        return recent5
+    # Give recent role changes weight without allowing a handful of games to
+    # erase the player's established rotation baseline.
+    return 0.55 * recent5 + 0.30 * recent10 + 0.15 * established
+
+def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, market="", matchup_adjustment=None):
+    """Recency-weighted empirical projection with minutes adjustment and discrete outcomes."""
+    clean = [float(v) for v in values if v is not None and math.isfinite(float(v)) and float(v) >= 0]
+    if len(clean) < 4:
+        return None
+    n = len(clean)
+    recent5, recent10 = clean[-5:], clean[-10:]
+    long_mean = sum(clean) / n
+    recent5_mean = sum(recent5) / len(recent5)
+    recent10_mean = sum(recent10) / len(recent10)
+    weights = [math.exp(-0.075 * (len(clean)-1-i)) for i in range(len(clean))]
+    weighted_mean = sum(v*w for v,w in zip(clean,weights)) / sum(weights)
+    # Recent form is a capped signal, not a replacement for the season baseline.
+    form_weight = min(0.30, len(recent10)/(len(recent10)+20.0))
+    target_mean = (1.0-form_weight)*long_mean + form_weight*weighted_mean
+
+    valid_minutes = []
+    for item in (minutes or []):
+        try:
+            value=float(item)
+            if math.isfinite(value) and value>0: valid_minutes.append(value)
+        except (TypeError,ValueError):
+            continue
+    projected_min = _projected_minutes(valid_minutes)
+    baseline_min = _median(valid_minutes[-20:]) if valid_minutes else None
+    minute_factor = 1.0
+    if projected_min is not None and baseline_min and baseline_min > 0 and len(valid_minutes) >= 8:
+        # Minutes are a projection adjustment, not a second full projection.
+        # Tight bounds reduce false swings caused by short-term rotations/noise.
+        minute_factor = max(0.85, min(1.15, projected_min / baseline_min))
+        target_mean *= minute_factor
+
+    matchup_factor = 1.0
+    if isinstance(matchup_adjustment, dict):
+        try:
+            candidate = float(matchup_adjustment.get("factor", 1.0))
+            if math.isfinite(candidate):
+                matchup_factor = max(0.92, min(1.08, candidate))
+                target_mean *= matchup_factor
+        except (TypeError, ValueError):
+            matchup_factor = 1.0
+
+    distribution=[max(0.0,v*(target_mean/long_mean)) if long_mean>0 else v for v in clean]
+    ordered=sorted(distribution)
+    median=ordered[len(ordered)//2]
+    deviations=sorted(abs(x-median) for x in ordered)
+    mad=deviations[len(deviations)//2] if deviations else 0.0
+    variance=sum((x-target_mean)**2 for x in distribution)/max(1,len(distribution)-1)
+    std_dev=max(math.sqrt(max(0.0,variance)),1.4826*mad,0.25)
+    # A pure empirical bootstrap assigns zero probability to outcomes beyond
+    # the observed sample. Blend it with a wider parametric component so small
+    # samples do not create false near-certainty (for example, 99.9% unders).
+    parametric_weight=0.25 if market in ("steals","threes") else 0.35
+    uncertainty_factor=min(1.25,1.0+0.50/math.sqrt(n))
+    rng=random.Random(str(seed)+"|"+str(line)+"|"+str(market))
+    sims=60000
+    over=under=push=0
+    for _ in range(sims):
+        if rng.random()<parametric_weight:
+            sample=max(0.0,rng.gauss(target_mean,std_dev*uncertainty_factor))
+        else:
+            sample=distribution[rng.randrange(len(distribution))]
+        if abs(sample-line)<1e-9: push+=1
+        elif sample>line: over+=1
+        else: under+=1
+    over_p,under_p,push_p=over/sims,under/sims,push/sims
+    over_ev=_odds_profit(over_p,under_p,over_odds)
+    under_ev=_odds_profit(under_p,over_p,under_odds)
+    best=max([(v,side,prob,price) for v,side,prob,price in [
+        (over_ev,"OVER",over_p,over_odds),(under_ev,"UNDER",under_p,under_odds)
+    ] if v is not None],key=lambda x:x[0],default=None)
+    return {
+        "projection":round(target_mean,2),
+        "projected_minutes":round(projected_min,1) if projected_min is not None else None,
+        "over_probability":round(over_p*100,2),"under_probability":round(under_p*100,2),
+        "push_probability":round(push_p*100,2),"simulations":sims,
+        "best_side":best[1] if best else None,
+        "best_probability":round(best[2]*100,2) if best else None,
+        "best_odds":best[3] if best else None,
+        "expected_value_pct":round(best[0]*100,2) if best else None,
+        "edge_pp":None,
+        "recommendation":"VALUE CANDIDATE" if best and best[0]>0.05 else ("LEAN / VERIFY" if best and best[0]>0 else "PASS"),
+        "model_components":["exponentially weighted history","10-game form signal","minutes adjustment" if valid_minutes else "minutes unavailable; no adjustment","defense-vs-position matchup adjustment" if matchup_adjustment else "defense-vs-position unavailable; no adjustment","empirical/parametric mixture distribution","Monte Carlo probability estimation"],
+        "model_method":"recency-weighted empirical/parametric mixture with minutes adjustment; provisional pending out-of-sample calibration",
+        "sample_size":n,"long_run_mean":round(long_mean,2),"recent5_mean":round(recent5_mean,2),        "recent10_mean":round(recent10_mean,2),"weighted_mean":round(weighted_mean,2),
+        "distribution_std_dev":round(std_dev,2),"minute_adjustment_factor":round(minute_factor,3),
+        "minutes_sample_size":len(valid_minutes),
+        "matchup_adjustment_pct":round((matchup_factor - 1.0) * 100, 2),
+        "defense_vs_position":matchup_adjustment,
+        "baseline_minutes":round(baseline_min,1) if baseline_min is not None else None,
+        "minutes_method":"55% recent-5 median / 30% recent-10 median / 15% recent-20 median; adjustment capped at +/-15%",
+        "calibration_status":"uncalibrated"
+    }
+
+_BP_OFFERS_CACHE = {}
+_BP_BOOKS_CACHE = {"at": 0, "ids": {}}
+_BP_PROPS_CACHE = {}
+_BP_BOARD_CACHE = {}
+_BP_RATE_LIMIT_UNTIL = 0.0
+_BP_MARKET_RATE_LIMIT_UNTIL = {}
+_BP_CACHE_TTL_SECONDS = 300
+_BP_BOARD_TTL_SECONDS = 180
+_BP_RATE_LIMIT_COOLDOWN_SECONDS = 300
+_BP_STALE_CACHE_SECONDS = 3600
+_BP_EVENT_MATCHUP_CACHE = {}
+
+def _bp_event_matchup(event_id):
+    """Resolve BettingPros event IDs to an away-at-home matchup for DVP."""
+    key=str(event_id or "").strip()
+    if not key:
+        return ""
+    cached=_BP_EVENT_MATCHUP_CACHE.get(key)
+    if cached and time.time()-cached["at"]<3600:
+        return cached["matchup"]
+    api_key=os.getenv("BETTINGPROS_API_KEY","").strip()
+    if not api_key:
+        return ""
+    headers={"x-api-key":api_key,"accept":"application/json","user-agent":"ColtsNBAEdge/1.0"}
+    urls=[
+        "https://api.bettingpros.com/v3/events?"+urlencode({"sport":"NBA","event_id":key}),
+        "https://api.bettingpros.com/v3/events/"+key+"?"+urlencode({"sport":"NBA"}),
+    ]
+    payload=None
+    for url in urls:
+        try:
+            req=Request(url,headers=headers)
+            with urlopen(req,timeout=10) as response:
+                candidate=json.loads(response.read().decode("utf-8","replace"))
+            if isinstance(candidate,dict):
+                payload=candidate
+                break
+        except Exception:
+            continue
+    matchup=""
+    def walk(value):
+        if isinstance(value,dict):
+            home=value.get("home_team") or value.get("homeTeam") or value.get("home")
+            away=value.get("away_team") or value.get("awayTeam") or value.get("away")
+            if isinstance(home,dict): home=home.get("abbreviation") or home.get("short_name") or home.get("name") or home.get("display_name")
+            if isinstance(away,dict): away=away.get("abbreviation") or away.get("short_name") or away.get("name") or away.get("display_name")
+            if home and away:
+                return str(away)+" @ "+str(home)
+            for child in value.values():
+                found=walk(child)
+                if found: return found
+        elif isinstance(value,list):
+            for child in value:
+                found=walk(child)
+                if found: return found
+        return ""
+    if payload:
+        matchup=walk(payload)
+    _BP_EVENT_MATCHUP_CACHE[key]={"at":time.time(),"matchup":matchup}
+    return matchup
+
+def _bp_fetch_props(market, limit=50):
+    """Shared per-market cache; never fan out repeated props requests during a provider cooldown."""
+    now = time.time()
+    cached = _BP_PROPS_CACHE.get(market)
+    if cached and now - cached[0] < _BP_CACHE_TTL_SECONDS:
+        return cached[1], "cache"
+    market_cooldown_until = _BP_MARKET_RATE_LIMIT_UNTIL.get(market, 0.0)
+    if now < market_cooldown_until:
+        if cached and now - cached[0] < _BP_STALE_CACHE_SECONDS:
+            return cached[1], "stale-cache"
+        retry = max(1, int(market_cooldown_until - now))
+        raise HTTPException(status_code=503, detail="BettingPros cooldown active. Retry in " + str(retry) + " seconds.")
+    api_key = os.getenv("BETTINGPROS_API_KEY", "").strip()
+    if not api_key:
+        raise HTTPException(status_code=503, detail="BETTINGPROS_API_KEY is missing.")
+    url = "https://api.bettingpros.com/v3/props?" + urlencode({
+        "sport": "NBA", "market_id": BP_MARKETS[market], "page": 1, "limit": limit
+    })
+    req = Request(url, headers={"x-api-key": api_key, "accept": "application/json",
+                                "user-agent": "ColtsNBAEdge/1.0"})
+    try:
+        with urlopen(req, timeout=20) as response:
+            payload = json.loads(response.read().decode("utf-8", "replace"))
+        if not isinstance(payload, dict):
+            raise ValueError("Invalid BettingPros response.")
+        _BP_PROPS_CACHE[market] = (time.time(), payload)
+        return payload, "live"
+    except HTTPError as exc:
+        if exc.code == 429:
+            retry_after = exc.headers.get("Retry-After") if exc.headers else None
+            try:
+                cooldown = max(_BP_RATE_LIMIT_COOLDOWN_SECONDS, min(1800, int(retry_after)))
+            except (TypeError, ValueError):
+                cooldown = _BP_RATE_LIMIT_COOLDOWN_SECONDS
+            _BP_MARKET_RATE_LIMIT_UNTIL[market] = time.time() + cooldown
+            if cached and time.time() - cached[0] < _BP_STALE_CACHE_SECONDS:
+                return cached[1], "stale-cache"
+            raise HTTPException(status_code=503, detail="BettingPros rate limit reached. Cooling down for " + str(cooldown) + " seconds.") from exc
+        if exc.code in (401, 403):
+            raise HTTPException(status_code=502, detail="BettingPros rejected the API key or this account tier does not allow this endpoint.") from exc
+        raise HTTPException(status_code=502, detail="BettingPros props endpoint returned HTTP " + str(exc.code) + ".") from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        if cached and time.time() - cached[0] < _BP_STALE_CACHE_SECONDS:
+            return cached[1], "stale-cache"
+        raise HTTPException(status_code=502, detail="Could not retrieve " + market + " prop lines from BettingPros.") from exc
+
+def _american_probability(odds):
+    try:
+        value = float(odds)
+        if not math.isfinite(value) or value == 0:
+            return None
+        return abs(value) / (abs(value) + 100.0) if value < 0 else 100.0 / (value + 100.0)
+    except (TypeError, ValueError):
+        return None
+
+def _american_payout(odds):
+    value = float(odds)
+    return 100.0 / abs(value) if value < 0 else value / 100.0
+
+def _bp_books():
+    now = __import__("time").time()
+    if now - _BP_BOOKS_CACHE["at"] < 3600 and _BP_BOOKS_CACHE["ids"]:
+        return _BP_BOOKS_CACHE["ids"]
+    api_key = os.getenv("BETTINGPROS_API_KEY", "").strip()
+    if not api_key:
+        return {}
+    req = Request("https://api.bettingpros.com/v3/books?sport=NBA",
+        headers={"x-api-key": api_key, "accept": "application/json", "user-agent": "ColtsNBAEdge/1.0"})
+    try:
+        with urlopen(req, timeout=12) as response:
+            payload = json.loads(response.read().decode("utf-8", "replace"))
+        rows = payload.get("books", []) if isinstance(payload, dict) else []
+        ids = {}
+        for row in rows:
+            name = str(row.get("name") or row.get("title") or "").lower()
+            if "draftkings" in name or "draft kings" in name:
+                ids["draftkings"] = int(row["id"])
+            elif "fanduel" in name or "fan duel" in name:
+                ids["fanduel"] = int(row["id"])
+        _BP_BOOKS_CACHE.update({"at": now, "ids": ids})
+        return ids
+    except Exception:
+        return {}
+
+def _bp_event_offers(event_id, market):
+    global _BP_RATE_LIMIT_UNTIL
+    key = (str(event_id), market)
+    now = time.time()
+    cached = _BP_OFFERS_CACHE.get(key)
+    if cached and now - cached[0] < 600:
+        return cached[1]
+    if now < _BP_RATE_LIMIT_UNTIL:
+        return []
+    api_key = os.getenv("BETTINGPROS_API_KEY", "").strip()
+    if not api_key:
+        return []
+    params = urlencode({"sport": "NBA", "market_id": BP_MARKETS[market], "event_id": event_id, "page": 1, "limit": 50})
+    req = Request("https://api.bettingpros.com/v3/offers?" + params,
+        headers={"x-api-key": api_key, "accept": "application/json", "user-agent": "ColtsNBAEdge/1.0"})
+    try:
+        with urlopen(req, timeout=15) as response:
+            payload = json.loads(response.read().decode("utf-8", "replace"))
+        rows = payload.get("offers", []) if isinstance(payload, dict) else []
+        _BP_OFFERS_CACHE[key] = (now, rows)
+        return rows
+    except HTTPError as exc:
+        if exc.code == 429:
+            _BP_RATE_LIMIT_UNTIL = time.time() + _BP_RATE_LIMIT_COOLDOWN_SECONDS
+        return []
+    except Exception:
+        return []
+
+def _bp_two_book_market(offers, player_name):
+    """Return a same-line DK/FD no-vig blend and the best price at that exact line."""
+    books = _bp_books()
+    wanted = {books.get("draftkings"), books.get("fanduel")} - {None}
+    if not wanted:
+        return None
+    target = _norm_player_name(player_name)
+    matches = []
+    for offer in offers:
+        participants = offer.get("participants") or []
+        names = [_norm_player_name(p.get("name") or "") for p in participants if isinstance(p, dict)]
+        if not names or max((SequenceMatcher(None, target, n).ratio() for n in names), default=0) < 0.90:
+            continue
+        side_prices = {"over": {}, "under": {}}
+        for selection in offer.get("selections") or []:
+            side = str(selection.get("selection") or "").lower()
+            if side not in side_prices:
+                continue
+            for book in selection.get("books") or []:
+                try:
+                    book_id = int(book.get("id"))
+                except (TypeError, ValueError):
+                    continue
+                if book_id not in wanted:
+                    continue
+                for line_obj in book.get("lines") or []:
+                    if not line_obj.get("active", True) or line_obj.get("is_off"):
+                        continue
+                    try:
+                        line = float(line_obj.get("line"))
+                        odds = float(line_obj.get("cost"))
+                    except (TypeError, ValueError):
+                        continue
+                    if odds == 0:
+                        continue
+                    side_prices[side].setdefault(line, {})[book_id] = {
+                        "odds": odds, "link": line_obj.get("link"), "updated": line_obj.get("updated")
+                    }
+        common = set(side_prices["over"]) & set(side_prices["under"])
+        candidates = []
+        for line in common:
+            covered = [bid for bid in wanted if bid in side_prices["over"][line] and bid in side_prices["under"][line]]
+            if covered:
+                candidates.append((len(covered), line, covered))
+        if candidates:
+            _, line, covered = max(candidates, key=lambda x: (x[0], -x[1]))
+            pairs = []
+            for bid in covered:
+                over = side_prices["over"][line][bid]
+                under = side_prices["under"][line][bid]
+                qo, qu = _american_probability(over["odds"]), _american_probability(under["odds"])
+                if qo is None or qu is None or qo + qu <= 0:
+                    continue
+                pairs.append({"book_id": bid, "over_probability": qo/(qo+qu),
+                              "under_probability": qu/(qo+qu), "over": over, "under": under})
+            if pairs:
+                matches.append((len(pairs), line, pairs))
+    if not matches:
+        return None
+    _, line, pairs = max(matches, key=lambda x: (x[0], len(x[2])))
+    over_prob = sum(x["over_probability"] for x in pairs) / len(pairs)
+    under_prob = sum(x["under_probability"] for x in pairs) / len(pairs)
+    over_best = max((x["over"] for x in pairs), key=lambda x: _american_payout(x["odds"]))
+    under_best = max((x["under"] for x in pairs), key=lambda x: _american_payout(x["odds"]))
+    names = {v: k for k, v in books.items()}
+    return {"line": line, "over_probability": over_prob, "under_probability": under_prob,
+            "over_odds": over_best["odds"], "under_odds": under_best["odds"],
+            "over_book": names.get(next(x["book_id"] for x in pairs if x["over"] is over_best), "sportsbook"),
+            "under_book": names.get(next(x["book_id"] for x in pairs if x["under"] is under_best), "sportsbook"),
+            "books_used": [names.get(x["book_id"], str(x["book_id"])) for x in pairs]}
+
+def _log_pool(model_p, market_p, weight=0.5):
+    eps = 1e-6
+    a = max(eps, min(1-eps, float(model_p)))
+    b = max(eps, min(1-eps, float(market_p)))
+    z = math.exp((1-weight)*math.log(a) + weight*math.log(b))
+    other = math.exp((1-weight)*math.log(1-a) + weight*math.log(1-b))
+    return z / (z + other)
+
+def _score_blended_market(model, market_quote):
+    """
+    Logarithmic opinion pool on the conditional Over/Under probabilities.
+    Push probability remains a separate model outcome, avoiding the previous
+    distortion from independently pooling two non-complementary probabilities.
+    """
+    model_over = model["over_probability"] / 100.0
+    model_under = model["under_probability"] / 100.0
+    model_push = max(0.0, min(0.25, model.get("push_probability", 0.0) / 100.0))
+    model_decision_mass = max(1e-9, model_over + model_under)
+    model_over_cond = model_over / model_decision_mass
+    market_over = market_quote["over_probability"]
+    market_under = market_quote["under_probability"]
+    market_mass = max(1e-9, market_over + market_under)
+    market_over_cond = market_over / market_mass
+    # Fixed 50% market weight is a transparent starting point, not a learned
+    # optimum. The response exposes this so calibration can replace it later.
+    market_weight = 0.50
+    blended_over_cond = _log_pool(model_over_cond, market_over_cond, market_weight)
+    blended_under_cond = 1.0 - blended_over_cond
+    over = (1.0 - model_push) * blended_over_cond
+    under = (1.0 - model_push) * blended_under_cond
+    choices = []
+    for side, prob, loss, odds in (
+        ("OVER", over, under, market_quote["over_odds"]),
+        ("UNDER", under, over, market_quote["under_odds"]),
+    ):
+        ev = _odds_profit(prob, loss, odds)
+        if ev is not None:
+            choices.append((ev, side, prob, odds, loss))
+    best = max(choices, key=lambda x: x[0], default=None)
+    model.update({
+        "model_over_probability": round(model_over * 100, 2),
+        "model_under_probability": round(model_under * 100, 2),
+        "market_over_probability": round(market_over * 100, 2),
+        "market_under_probability": round(market_under * 100, 2),
+        "over_probability": round(over * 100, 2),
+        "under_probability": round(under * 100, 2),
+        "push_probability": round(model_push * 100, 2),
+        "best_side": best[1] if best else None,
+        "best_probability": round(best[2] * 100, 2) if best else None,
+        "best_odds": best[3] if best else None,
+        "expected_value_pct": round(best[0] * 100, 2) if best else None,
+        "edge_pp": round((best[2] - _american_probability(best[3])) * 100, 2) if best else None,
+        "recommendation": "VALUE CANDIDATE" if best and best[0] > 0.05 else ("LEAN / VERIFY" if best and best[0] > 0 else "PASS"),
+        "kelly_fraction_pct": round(max(0.0, (best[2] * _american_payout(best[3]) - best[4]) /
+            max(1e-9, _american_payout(best[3]) * (best[2] + best[4]))) * 100, 2) if best else None,
+        "blend_method": "50/50 conditional logarithmic pool; market weight awaits out-of-sample optimization",
+        "market_weight": market_weight,
+        "market_books": market_quote["books_used"],
+        "best_over_book": market_quote["over_book"],
+        "best_under_book": market_quote["under_book"],
+        "calibration_status": "uncalibrated",
+    })
+    return model
 
 @app.get("/api/proprietary-market-board")
 def proprietary_market_board(market: str = "rebounds"):
