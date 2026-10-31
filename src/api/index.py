@@ -101,7 +101,7 @@ def _fetch_dvp_table():
    if not code: code=_TEAM_ALIASES.get(re.sub(r"^[a-z]{3}","",team_text).strip())
    if not code: continue
    for position,cell in zip(positions,cells[1:6]):
-    match=re.search(r"([0-9]+(?:\\.[0-9]+)?)",str(cell))
+    match=re.search(r"([0-9]+(?:\.[0-9]+)?)",str(cell))
     if match: parsed[(code,position)]={"points":float(match.group(1))}
   if len(parsed)<120:
    raise RuntimeError("Individual-position defense-vs-position source returned an incomplete table.")
@@ -110,9 +110,12 @@ def _fetch_dvp_table():
  # Avoid overreacting to tiny early-season samples. Use current-season DVP only
  # after the source reports at least 10 games for every team; otherwise use
  # the completed previous season as the stable baseline.
- current_table,current_text=fetch_and_parse("season")
- sample=re.search(r"\\((\\d+)\\s*[–-]\\s*(\\d+)\\s+games?\\s+a\\s+team\\)",current_text,re.I)
- if sample and int(sample.group(1))>=10:
+ try:
+  current_table,current_text=fetch_and_parse("season")
+ except Exception:
+  current_table,current_text=None,""
+ sample=re.search(r"\((\d+)\s*[–-]\s*(\d+)\s+games?\s+a\s+team\)",current_text,re.I)
+ if current_table is not None and sample and int(sample.group(1))>=10:
   parsed,season=current_table,"current season"
  else:
   parsed,_=fetch_and_parse("prev")
