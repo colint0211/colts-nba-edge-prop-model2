@@ -964,7 +964,6 @@ def proprietary_market_board(market: str = "rebounds"):
     output.sort(key=lambda x: (x.get("expected_value_pct") is None, -(x.get("expected_value_pct") or -999)))
     try:
         prediction_ledger.initialize()
-        prediction_ledger.save_predictions(output, market)
     except Exception:
         pass
     result = {
@@ -1281,6 +1280,33 @@ async def cron_settle_pending(request: FastRequest):
         raise HTTPException(status_code=401, detail="Unauthorized")
     return _run_pending_settlements()
 
+
+@app.post("/api/model/daily-top5")
+async def save_daily_top5(request: FastRequest):
+    try:
+        payload = await request.json()
+        result = prediction_ledger.save_daily_top_five(
+            payload.get("props") or [], payload.get("market"), payload.get("slate_date")
+        )
+        return JSONResponse(result)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Could not save daily Top 5 picks.") from exc
+
+
+@app.get("/api/model/daily-top5")
+def get_daily_top5(slate_date: str, market: str = "all"):
+    try:
+        prediction_ledger.initialize()
+        return JSONResponse({
+            "predictions": prediction_ledger.list_daily_top_five(slate_date, market),
+            "all_time": prediction_ledger.daily_top_five_metrics(),
+        })
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Daily Top 5 history is temporarily unavailable.") from exc
+
+
 @app.get("/api/model/ledger")
 def model_ledger(status: str = "unsettled", market: str = "all", limit: int = 100):
     try:
@@ -1570,7 +1596,7 @@ async def api_proxy(path: str, request: FastRequest):
                     board_payload["model"] = "Local recency-weighted empirical distribution; ESPN game logs; minutes adjustment when available; roster identity validation"
                     response_body = json.dumps(board_payload, separators=(",", ":")).encode("utf-8")
                     prediction_ledger.initialize()
-                    prediction_ledger.save_predictions(props, "points")
+                    # The dashboard records only its official Top 5 selections.
                 except Exception:
                     pass
             if path == "live-stats" and "json" in media_type.lower():
