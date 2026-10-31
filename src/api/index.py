@@ -70,6 +70,138 @@ def api_sports_status():
 _BDL_STATUS_CACHE = {"at": 0.0, "data": None}
 _BDL_STATUS_CACHE_TTL = 900
 
+_BDL_GAMES_CACHE = {"at": 0.0, "data": None}
+_BDL_GAMES_CACHE_TTL = 600
+
+
+def _load_balldontlie_games():
+    """Load today's and tomorrow's NBA games once per cache window.
+
+    BALLDONTLIE free tier is used only as a secondary schedule/status source;
+    it never supplies player projections or changes a betting probability.
+    """
+    now = time.time()
+    cached = _BDL_GAMES_CACHE.get("data")
+    if cached is not None and now - _BDL_GAMES_CACHE.get("at", 0.0) < _BDL_GAMES_CACHE_TTL:
+        return cached
+
+    api_key = os.getenv("BALLDONTLIE_API_KEY", "").strip()
+    if not api_key:
+        data = {"status": "not_configured", "source": "BALLDONTLIE", "games": [], "count": 0}
+        _BDL_GAMES_CACHE.update({"at": now, "data": data})
+        return data
+
+    today = datetime.now(ZoneInfo("America/New_York")).date()
+    dates = [today.isoformat(), (today + timedelta(days=1)).isoformat()]
+    params = [("dates[]", day) for day in dates] + [("per_page", 100)]
+    request = Request(
+        "https://api.balldontlie.io/v1/games?" + urlencode(params),
+        headers={
+            "Authorization": api_key,
+            "Accept": "application/json",
+            "User-Agent": "ColtsNBAEdge/1.0",
+        },
+    )
+    try:
+        with urlopen(request, timeout=10) as response:
+            payload = json.loads(response.read().decode("utf-8", "replace"))
+            remaining = response.headers.get("X-RateLimit-Remaining")
+        rows = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(rows, list):
+            raise ValueError("BALLDONTLIE games response did not contain a data list.")
+
+        games = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            home = row.get("home_team") or {}
+            visitor = row.get("visitor_team") or {}
+            home_code = _canonical_team_code(home.get("abbreviation"))
+            visitor_code = _canonical_team_code(visitor.get("abbreviation"))
+            if not home_code or not visitor_code:
+                continue
+            games.append({
+                "id": row.get("id"),
+                "date": row.get("date"),
+                "datetime": row.get("datetime"),
+                "status": row.get("status"),
+                "period": row.get("period"),
+                "time": row.get("time"),
+                "home_team": home_code,
+                "visitor_team": visitor_code,
+                "home_team_score": row.get("home_team_score"),
+                "visitor_team_score": row.get("visitor_team_score"),
+                "postseason": bool(row.get("postseason")),
+            })
+        data = {
+            "status": "ok",
+            "source": "BALLDONTLIE NBA API",
+            "dates_checked": dates,
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+            "count": len(games),
+            "rate_limit_remaining": remaining,
+            "games": games,
+        }
+    except HTTPError as exc:
+        data = {
+            "status": "rate_limited" if exc.code == 429 else "unavailable",
+            "source": "BALLDONTLIE NBA API",
+            "dates_checked": dates,
+            "count": 0,
+            "error": "Rate limit reached." if exc.code == 429 else "BALLDONTLIE returned HTTP " + str(exc.code) + ".",
+            "games": [],
+        }
+    except Exception as exc:
+        data = {
+            "status": "unavailable",
+            "source": "BALLDONTLIE NBA API",
+            "dates_checked": dates,
+            "count": 0,
+            "error": type(exc).__name__,
+            "games": [],
+        }
+
+    _BDL_GAMES_CACHE.update({"at": now, "data": data})
+    return data
+
+
+def _apply_balldontlie_game(prop, feed):
+    """Attach a verified matchup's schedule/status without changing model output."""
+    if not isinstance(prop, dict) or not isinstance(feed, dict) or feed.get("status") != "ok":
+        return
+    matchup_codes = _team_codes_from_game(prop.get("game"))
+    if len(matchup_codes) != 2:
+        return
+    match = None
+    for game in feed.get("games") or []:
+        if {game.get("home_team"), game.get("visitor_team")} == matchup_codes:
+            match = game
+            break
+    if not match:
+        return
+    prop["balldontlie_game"] = {
+        "source": "BALLDONTLIE",
+        "game_id": match.get("id"),
+        "date": match.get("date"),
+        "datetime": match.get("datetime"),
+        "status": match.get("status"),
+        "period": match.get("period"),
+        "clock": match.get("time"),
+        "home_team": match.get("home_team"),
+        "visitor_team": match.get("visitor_team"),
+        "home_score": match.get("home_team_score"),
+        "visitor_score": match.get("visitor_team_score"),
+    }
+
+
+@app.get("/api/balldontlie-games")
+def balldontlie_games():
+    """Diagnostic view of cached BALLDONTLIE schedule/status data."""
+    feed = _load_balldontlie_games()
+    return JSONResponse({key: value for key, value in feed.items() if key != "games"} | {"games": feed.get("games", [])})
+
+
+
 
 @app.get("/api/balldontlie-status")
 def balldontlie_status():
@@ -1355,11 +1487,14 @@ def proprietary_market_board(market: str = "rebounds"):
     now = time.time()
     cached_board = _BP_BOARD_CACHE.get(market)
     injury_feed = _load_official_injury_feed()
+    bdl_games = _load_balldontlie_games()
     if cached_board and now - cached_board[0] < _BP_BOARD_TTL_SECONDS:
         cached_result = json.loads(json.dumps(cached_board[1]))
         for cached_prop in cached_result.get("props") or []:
             _apply_official_injury(cached_prop, injury_feed)
+            _apply_balldontlie_game(cached_prop, bdl_games)
         cached_result["injury_feed"] = injury_feed.get("meta", {})
+        cached_result["balldontlie"] = {key: value for key, value in bdl_games.items() if key != "games"}
         return JSONResponse(cached_result)
     api_key = os.getenv("BETTINGPROS_API_KEY", "").strip()
     if not api_key:
@@ -1442,6 +1577,7 @@ def proprietary_market_board(market: str = "rebounds"):
                 **model,
             }
             _apply_official_injury(market_prop, injury_feed, name, market_prop.get("team"))
+            _apply_balldontlie_game(market_prop, bdl_games)
             output.append(market_prop)
         except Exception as exc:
             failures.append(name + ": " + type(exc).__name__ + ": " + str(exc)[:180])
@@ -1458,6 +1594,7 @@ def proprietary_market_board(market: str = "rebounds"):
         "unavailable": failures[:20],
         "cache_ttl_seconds": _BP_BOARD_TTL_SECONDS,
         "injury_feed": injury_feed.get("meta", {}),
+        "balldontlie": {key: value for key, value in bdl_games.items() if key != "games"},
     }
     _BP_BOARD_CACHE[market] = (time.time(), result)
     return JSONResponse(result)
@@ -1934,6 +2071,7 @@ async def api_proxy(path: str, request: FastRequest):
                     )
 
                     injury_feed = _load_official_injury_feed()
+                    bdl_games = _load_balldontlie_games()
                     for prop in props:
                         if not isinstance(prop, dict):
                             continue
@@ -2080,7 +2218,10 @@ async def api_proxy(path: str, request: FastRequest):
                         except Exception as model_error:
                             prop["model_status"] = "unprojected"
                             prop["reason"] = "Local points model could not verify player history: " + type(model_error).__name__
+                    for prop in props:
+                        _apply_balldontlie_game(prop, bdl_games)
                     board_payload["injury_feed"] = injury_feed.get("meta", {})
+                    board_payload["balldontlie"] = {key: value for key, value in bdl_games.items() if key != "games"}
                     board_payload["props"] = props
                     board_payload["projected_count"] = sum(1 for p in props if isinstance(p, dict) and p.get("model_status") == "projected")
                     board_payload["unprojected_count"] = sum(1 for p in props if isinstance(p, dict) and p.get("model_status") != "projected")
