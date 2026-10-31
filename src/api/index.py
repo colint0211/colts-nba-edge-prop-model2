@@ -2037,6 +2037,12 @@ def tank01_dvp_probe():
                 str(key): sorted(value.keys()) if isinstance(value, dict) else type(value).__name__
                 for key, value in list((defensive or {}).items())[:8]
             } if isinstance(defensive, dict) else {},
+            "defensive_stats_sample_values": {
+                str(key): {str(pos): value for pos, value in list(item.items())[:6]}
+                for key, item in list((defensive or {}).items())[:8]
+                if isinstance(item, dict)
+            } if isinstance(defensive, dict) else {},
+            "games_played": defensive.get("gamesPlayed") if isinstance(defensive, dict) else None,
         }
         output = {
             "configured": True,
