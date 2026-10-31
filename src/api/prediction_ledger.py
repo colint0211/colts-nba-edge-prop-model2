@@ -139,17 +139,15 @@ def save_predictions(rows, market=None):
             event_id = str(
                 prediction.get("event_id") or prediction.get("game_id") or ""
             )
-            identity = "|".join(
-                (
-                    market_name,
-                    player.casefold(),
-                    event_id.casefold() or event.casefold(),
-                    format(line, ".4f"),
-                    side,
-                    str(odds),
-                    format(probability, ".3f"),
-                )
-            )
+            identity_parts = [
+                market_name, player.casefold(),
+                event_id.casefold() or event.casefold(),
+                format(line, ".4f"), side, str(odds),
+                format(probability, ".3f"),
+            ]
+            if prediction.get("daily_top5"):
+                identity_parts.extend(["daily_top5", str(prediction.get("slate_date") or "")])
+            identity = "|".join(identity_parts)
             fingerprint = hashlib.sha256(identity.encode("utf-8")).hexdigest()
             snapshot = json.dumps(
                 prediction, default=str, separators=(",", ":"), allow_nan=False
@@ -459,6 +457,109 @@ def list_settlement_candidates(limit=500):
             "snapshot": snapshot,
         })
     return candidates
+
+
+
+def save_daily_top_five(rows, market, slate_date):
+    """Save the first official Top 5 set for a market and slate date."""
+    import re
+    market = str(market or "").strip().lower()
+    slate_date = str(slate_date or "").strip()
+    if market not in ("points", "rebounds", "assists", "steals", "threes"):
+        raise ValueError("Unsupported market")
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", slate_date):
+        raise ValueError("Invalid slate date")
+    with _connect() as conn:
+        existing = conn.execute(
+            "SELECT COUNT(*) FROM nba_predictions WHERE market=%s AND snapshot->>'daily_top5'='true' AND snapshot->>'slate_date'=%s",
+            (market, slate_date),
+        ).fetchone()[0]
+    if existing:
+        return {"saved": 0, "skipped": len(rows or []), "already_saved": True}
+    selected = []
+    for row in (rows or [])[:5]:
+        if isinstance(row, dict):
+            item = dict(row)
+            item["market"] = market
+            item["daily_top5"] = True
+            item["slate_date"] = slate_date
+            selected.append(item)
+    result = save_predictions(selected, market)
+    result["already_saved"] = False
+    return result
+
+
+def list_daily_top_five(slate_date, market="all"):
+    clauses = ["snapshot->>'daily_top5'='true'", "snapshot->>'slate_date'=%s"]
+    args = [str(slate_date)]
+    if market and market != "all":
+        clauses.append("market=%s")
+        args.append(market)
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, market, player, team, event, line, side, odds,
+                   blended_probability, projection, created_at,
+                   outcome, actual_value, profit_units
+            FROM nba_predictions
+            WHERE """ + " AND ".join(clauses) + """
+            ORDER BY CASE market
+              WHEN 'points' THEN 1 WHEN 'rebounds' THEN 2 WHEN 'assists' THEN 3
+              WHEN 'steals' THEN 4 WHEN 'threes' THEN 5 ELSE 6 END, id
+            """,
+            args,
+        ).fetchall()
+    return [
+        {
+            "id": row[0], "market": row[1], "player": row[2], "team": row[3],
+            "game": row[4], "line": row[5], "side": row[6], "odds": row[7],
+            "probability_pct": round(row[8] * 100, 2), "projection": row[9],
+            "created_at": row[10].isoformat() if row[10] else None,
+            "outcome": row[11], "actual_value": row[12], "profit_units": row[13],
+            "slate_date": str(slate_date),
+        }
+        for row in rows
+    ]
+
+
+def daily_top_five_metrics():
+    with _connect() as conn:
+        totals = conn.execute(
+            """
+            SELECT COUNT(*), COUNT(*) FILTER (WHERE outcome='WIN'),
+                   COUNT(*) FILTER (WHERE outcome='LOSS'),
+                   COUNT(*) FILTER (WHERE outcome='PUSH'),
+                   COALESCE(SUM(profit_units), 0)
+            FROM nba_predictions
+            WHERE snapshot->>'daily_top5'='true' AND settled_at IS NOT NULL
+            """
+        ).fetchone()
+        markets = conn.execute(
+            """
+            SELECT market, COUNT(*) FILTER (WHERE outcome='WIN'),
+                   COUNT(*) FILTER (WHERE outcome='LOSS'),
+                   COUNT(*) FILTER (WHERE outcome='PUSH'),
+                   COALESCE(SUM(profit_units), 0)
+            FROM nba_predictions
+            WHERE snapshot->>'daily_top5'='true' AND settled_at IS NOT NULL
+            GROUP BY market ORDER BY market
+            """
+        ).fetchall()
+    total, wins, losses, pushes, profit = totals
+    decisions = wins + losses
+    return {
+        "settled": total, "wins": wins, "losses": losses, "pushes": pushes,
+        "win_rate_pct": round(wins / decisions * 100, 1) if decisions else None,
+        "net_units": round(float(profit or 0), 2),
+        "by_market": {
+            name: {
+                "wins": mw, "losses": ml, "pushes": mp, "settled": mw + ml + mp,
+                "win_rate_pct": round(mw / (mw + ml) * 100, 1) if mw + ml else None,
+                "net_units": round(float(mpft or 0), 2),
+            }
+            for name, mw, ml, mp, mpft in markets
+        },
+    }
 
 
 def list_predictions(status="unsettled", market=None, limit=100):
