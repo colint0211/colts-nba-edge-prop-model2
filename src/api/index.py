@@ -37,6 +37,7 @@ _ESPN_ROSTER_CACHE = {}
 
 _ESPN_POSITION_CACHE = {}
 _DVP_CACHE = {"at": 0.0, "data": None, "season": None}
+_DVP_STAT_CACHE = {}
 _DVP_CACHE_TTL = 3600
 _TEAM_NAMES = {
  "ATL":"Atlanta Hawks","BOS":"Boston Celtics","BKN":"Brooklyn Nets","CHA":"Charlotte Hornets","CHI":"Chicago Bulls",
@@ -83,12 +84,19 @@ def _team_codes_from_game(game):
  for name,code in _TEAM_ALIASES.items():
   if name in lower: found.add(code)
  return found
-def _fetch_dvp_table():
+def _fetch_dvp_table(stat="PTS"):
+ stat=str(stat or "PTS").upper().strip()
+ stat_aliases={"POINTS":"PTS","REBOUNDS":"REB","ASSISTS":"AST","STEALS":"STL","THREES":"3PM"}
+ stat=stat_aliases.get(stat,stat)
+ if stat not in ("PTS","REB","AST","STL","3PM"):
+  raise ValueError("Unsupported DVP statistic: "+stat)
  now=time.time()
- if _DVP_CACHE["data"] is not None and now-_DVP_CACHE["at"]<_DVP_CACHE_TTL: return _DVP_CACHE["data"]
+ cached=_DVP_STAT_CACHE.get(stat)
+ if cached and now-cached["at"]<_DVP_CACHE_TTL:
+  return cached["data"]
 
  def fetch_and_parse(timeframe):
-  url="https://www.nbahouse.net/defense-vs-position?stat=PTS&tf="+timeframe
+  url="https://www.nbahouse.net/defense-vs-position?stat="+stat+"&tf="+timeframe
   request=Request(url,headers={"User-Agent":"Mozilla/5.0 ColtsNBAEdge/1.0","Accept":"text/html"})
   with urlopen(request,timeout=12) as response:
    html=response.read().decode("utf-8","replace")
@@ -101,26 +109,27 @@ def _fetch_dvp_table():
    if not code: code=_TEAM_ALIASES.get(re.sub(r"^[a-z]{3}","",team_text).strip())
    if not code: continue
    for position,cell in zip(positions,cells[1:6]):
-    match=re.search(r"([0-9]+(?:\.[0-9]+)?)",str(cell))
-    if match: parsed[(code,position)]={"points":float(match.group(1))}
+    match=re.search(r"([0-9]+(?:\\.[0-9]+)?)",str(cell))
+    if match: parsed[(code,position)]={stat:float(match.group(1))}
   if len(parsed)<120:
-   raise RuntimeError("Individual-position defense-vs-position source returned an incomplete table.")
+   raise RuntimeError("Individual-position "+stat+" defense-vs-position source returned an incomplete table.")
   return parsed," ".join(parser.text)
 
- # Avoid overreacting to tiny early-season samples. Use current-season DVP only
- # after the source reports at least 10 games for every team; otherwise use
- # the completed previous season as the stable baseline.
+ # Use current-season positional data only once the source reports at least
+ # 10 games for every team. Until then, use the completed prior season.
  try:
   current_table,current_text=fetch_and_parse("season")
  except Exception:
   current_table,current_text=None,""
- sample=re.search(r"\((\d+)\s*[–-]\s*(\d+)\s+games?\s+a\s+team\)",current_text,re.I)
+ sample=re.search(r"\\((\\d+)\\s*[–-]\\s*(\\d+)\\s+games?\\s+a\\s+team\\)",current_text,re.I)
  if current_table is not None and sample and int(sample.group(1))>=10:
   parsed,season=current_table,"current season"
  else:
   parsed,_=fetch_and_parse("prev")
   season="previous season (current season sample below 10 games or unavailable)"
- _DVP_CACHE.update({"at":now,"data":parsed,"season":season})
+ _DVP_STAT_CACHE[stat]={"at":now,"data":parsed,"season":season}
+ if stat=="PTS":
+  _DVP_CACHE.update({"at":now,"data":parsed,"season":season})
  return parsed
 
 def _position_group(position):
@@ -187,36 +196,41 @@ def _espn_player_position(athlete_id,team_code):
  return found
 def _dvp_matchup_adjustment(athlete_id,player_team,game,market):
  try:
-  # Positional defense is intentionally a points-only model input.
-  if str(market or "").lower().strip()!="points": return None
+  market=str(market or "").lower().strip()
+  stat_fields={"points":"PTS","rebounds":"REB","assists":"AST","steals":"STL","threes":"3PM"}
+  stat=stat_fields.get(market)
+  if not stat: return None
   team_code=_canonical_team_code(player_team); game_teams=_team_codes_from_game(game)
   if not team_code or len(game_teams)<2: return None
   opponent=next((code for code in game_teams if code!=team_code),None)
   if not opponent: return None
   position_key=_espn_player_position(athlete_id,team_code)
   if not position_key: return None
-  position=position_key
   position_keys={"G":("PG","SG"),"F":("SF","PF")}.get(position_key,(position_key,))
-  table=_fetch_dvp_table()
-  allowed_values=[table.get((opponent,pos),{}).get("points") for pos in position_keys]
+  table=_fetch_dvp_table(stat)
+  allowed_values=[table.get((opponent,pos),{}).get(stat) for pos in position_keys]
   if any(value is None for value in allowed_values): return None
   allowed=sum(allowed_values)/len(allowed_values)
-  league_values=[row["points"] for (team,pos),row in table.items() if pos in position_keys and "points" in row]
+  league_values=[row[stat] for (team,pos),row in table.items() if pos in position_keys and stat in row]
   if len(league_values)<20: return None
   league_average=sum(league_values)/len(league_values)
   if league_average<=0: return None
-  ratio=allowed/league_average; factor=max(0.92,min(1.08,1.0+(ratio-1.0)*0.30))
+  ratio=allowed/league_average
+  factor=max(0.92,min(1.08,1.0+(ratio-1.0)*0.30))
   position_names={"PG":"Point Guard","SG":"Shooting Guard","SF":"Small Forward","PF":"Power Forward","C":"Center",
    "G":"Guard (PG/SG blended)","F":"Forward (SF/PF blended)"}
-  return {"position":position,"position_group":position_key,"position_name":position_names[position_key],
+  stat_labels={"points":"points","rebounds":"rebounds","assists":"assists","steals":"steals","threes":"3-pointers made"}
+  stat_units={"points":"PPG","rebounds":"RPG","assists":"APG","steals":"SPG","threes":"3PM"}
+  season=_DVP_STAT_CACHE.get(stat,{}).get("season") or "season not identified"
+  position_method="PG/SG blended" if position_key=="G" else "SF/PF blended" if position_key=="F" else "Individual position"
+  return {"position":position_key,"position_group":position_key,"position_name":position_names[position_key],
    "opponent":opponent,"opponent_name":_TEAM_NAMES.get(opponent,opponent),
-   "stat":"points","allowed_per_game":round(allowed,2),"league_position_average":round(league_average,2),
+   "stat":market,"stat_label":stat_labels[market],"stat_unit":stat_units[market],
+   "allowed_per_game":round(allowed,2),"league_position_average":round(league_average,2),
    "league_relative_ratio":round(ratio,3),"adjustment_pct":round((factor-1.0)*100,2),"factor":round(factor,4),
-   "source":"NBA House individual-position points allowed table",
-   "source_season":_DVP_CACHE.get("season") or "season not identified",
-   "method":("PG/SG blended" if position_key=="G" else "SF/PF blended" if position_key=="F" else "Individual position")+" points allowed per game vs matching-position league average; 30% dampening; adjustment capped at +/-8%"}
+   "source":"NBA House individual-position "+stat+" allowed table","source_season":season,
+   "method":position_method+" "+stat_labels[market]+" allowed per game vs matching-position league average; 30% dampening; adjustment capped at +/-8%"}
  except Exception: return None
-
 
 def _espn_roster_player_id(name, team_codes):
     """Resolve an exact player identity only from the two teams in the matchup."""
@@ -982,8 +996,9 @@ def proprietary_market_board(market: str = "rebounds"):
                 failures.append(name + ": ESPN player match unavailable")
                 continue
             values, sample_label, player_minutes = _player_history(athlete_id, field, label)
-            # Positional defense is intentionally applied to the points model only.
-            model = _simulate_market(values, line, None, None, _norm_player_name(name) + market, minutes=player_minutes, market=market)
+            team_for_dvp = player_obj.get("team") or participant.get("team_abbreviation") or participant.get("team") or ""
+            matchup_adjustment = _dvp_matchup_adjustment(athlete_id, team_for_dvp, event.get("name") or raw.get("event_name") or raw.get("matchup") or "", market)
+            model = _simulate_market(values, line, None, None, _norm_player_name(name) + market, minutes=player_minutes, market=market, matchup_adjustment=matchup_adjustment)
             if not model:
                 failures.append(name + ": fewer than five valid game logs")
                 continue
@@ -1023,6 +1038,7 @@ def proprietary_market_board(market: str = "rebounds"):
                 "market": market, "line": line, "over_odds": over_odds, "under_odds": under_odds,
                 "sample_label": sample_label, "athlete_id": athlete_id, "games_used": len(values),
                 "position": (matchup_adjustment or {}).get("position"),
+                "defense_vs_position": matchup_adjustment,
                 **model,
             })
         except Exception as exc:
@@ -1439,10 +1455,7 @@ async def model_recalculate(request: FastRequest):
             raise HTTPException(status_code=400, detail="Odds are outside the supported range.")
         field, label = ("points", "PTS") if market == "points" else STAT_FIELDS[market]
         values, sample_label, minutes = _player_history(athlete_id, field, label)
-        matchup_adjustment = (
-            _dvp_matchup_adjustment(athlete_id, payload.get("team"), payload.get("game"), "points")
-            if market == "points" else None
-        )
+        matchup_adjustment = _dvp_matchup_adjustment(athlete_id, payload.get("team"), payload.get("game"), market)
         model = _simulate_market(values, line, None, None, _norm_player_name(player) + market + "custom", minutes=minutes, market=market, matchup_adjustment=matchup_adjustment)
         if not model:
             raise HTTPException(status_code=422, detail="Not enough verified game-log history to recalculate this player.")
