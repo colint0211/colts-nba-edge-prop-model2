@@ -502,6 +502,6 @@ const yesterday=new Date();yesterday.setDate(yesterday.getDate()-1);el('historyD
 load();loadPastPlays();
 ['rebounds','assists','steals','threes'].forEach(loadBP);
 setInterval(async()=>{await updateLive();render();renderFull()},15000);
-setInterval(()=>load(false),300000);
+setInterval(()=>{['rebounds','assists','steals','threes'].forEach(m=>{delete bpCache[m];loadBP(m)});load(false)},300000);
 setInterval(()=>loadPastPlays(),60000);
 </script></body></html>
