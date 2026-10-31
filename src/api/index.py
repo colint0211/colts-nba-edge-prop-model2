@@ -467,17 +467,17 @@ def _fetch_dvp_table(stat="PTS"):
    raise RuntimeError("Individual-position "+stat+" defense-vs-position source returned an incomplete table.")
   return parsed," ".join(parser.text)
 
- # Tank01 supplies one current-season positional defense table for all
- # 30 teams in a single request. Do not trust tiny opening-week samples.
+ # Use the current season as soon as Tank01 supplies a complete table.
+ # Early-season samples are intentionally accepted and labeled as small samples.
  try:
   tank_tables,tank_meta=_fetch_tank01_dvp_tables()
   tank_table=tank_tables.get(stat) or {}
-  if tank_meta.get("min_games_played",0)>=10 and len(tank_table)>=150:
+  if len(tank_table)>=150:
    parsed=tank_table
-   season="Tank01 current season ("+str(tank_meta["min_games_played"])+" games minimum per team)"
+   season="Tank01 current season ("+str(tank_meta["min_games_played"])+" games minimum per team; early-season sample)"
   else:
    parsed,_=fetch_and_parse("prev")
-   season="previous season (Tank01 current-season sample below 10 games per team)"
+   season="previous season (Tank01 current-season table incomplete)"
  except Exception:
   parsed,_=fetch_and_parse("prev")
   season="previous season (Tank01 current-season data unavailable)"
@@ -2145,10 +2145,10 @@ def tank01_dvp_probe():
 
 @app.get("/api/tank01-dvp-status")
 def tank01_dvp_status():
-    """Report whether Tank01's current-season positional tables are mature enough to use."""
+    """Report availability and sample size for Tank01 current-season positional tables."""
     try:
         tables, meta = _fetch_tank01_dvp_tables()
-        ready = meta.get("min_games_played", 0) >= 10
+        ready = all(len(table) >= 150 for table in tables.values())
         active_tables = {}
         active_sources = {}
         for market in ("PTS", "REB", "AST", "STL", "3PM"):
@@ -2173,10 +2173,10 @@ def tank01_dvp_status():
             "active_dvp_rows_by_market": active_tables,
             "active_dvp_source_by_market": active_sources,
             "markets": list(tables.keys()),
-            "fallback_policy": "Use prior-season NBA House DVP until every team has at least 10 current-season games.",
+            "fallback_policy": "Use current-season Tank01 DVP immediately when all 30 teams and five positions are present; sample sizes are reported for transparency.",
             "rate_limit_remaining": meta.get("rate_limit_remaining"),
-            "message": "Tank01 current-season DVP is active." if ready and all_active
-                else "Tank01 feed is authenticated and parsed; the app uses the verified prior-season table until current-season samples mature."
+            "message": "Tank01 current-season DVP is active, with early-season sample sizes disclosed." if ready and all_active
+                else "Tank01 feed is authenticated, but one or more current-season positional tables are incomplete."
         })
     except Exception as exc:
         return JSONResponse({
