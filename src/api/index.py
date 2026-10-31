@@ -36,6 +36,8 @@ _ESPN_LOG_CACHE = {}
 _ESPN_ROSTER_CACHE = {}
 
 _ESPN_POSITION_CACHE = {}
+_API_SPORTS_POSITION_CACHE = {}
+_API_SPORTS_POSITION_CACHE_TTL = 86400
 _DVP_CACHE = {"at": 0.0, "data": None, "season": None}
 _DVP_STAT_CACHE = {}
 _DVP_CACHE_TTL = 3600
@@ -151,6 +153,50 @@ def _position_group(position):
  return aliases.get(p)
 
 
+
+def _api_sports_player_position(player_name):
+ """Return API-Sports Basketball's listed broad position (Guard/Forward/Center).
+ This source does not distinguish PG/SG or SF/PF; ESPN remains the finer-position source.
+ """
+ name=str(player_name or "").strip()
+ normalized=_norm_player_name(name)
+ if len(normalized)<3:
+  return None
+ now=time.time()
+ cached=_API_SPORTS_POSITION_CACHE.get(normalized)
+ if cached and now-cached.get("at",0)<_API_SPORTS_POSITION_CACHE_TTL:
+  return cached.get("data")
+ api_key=os.getenv("API_SPORTS_KEY","").strip()
+ if not api_key:
+  _API_SPORTS_POSITION_CACHE[normalized]={"at":now,"data":None}
+  return None
+ try:
+  query=urlencode({"search":name})
+  request=Request(
+   "https://v1.basketball.api-sports.io/players?"+query,
+   headers={"User-Agent":"Mozilla/5.0 ColtsNBAEdge/1.0","Accept":"application/json","x-apisports-key":api_key}
+  )
+  with urlopen(request,timeout=8) as response:
+   payload=json.loads(response.read().decode("utf-8","replace"))
+  rows=payload.get("response") or [] if isinstance(payload,dict) else []
+  exact=[]
+  for row in rows:
+   if not isinstance(row,dict):
+    continue
+   candidate=row.get("name") or row.get("player",{}).get("name") if isinstance(row.get("player"),dict) else row.get("name")
+   if _norm_player_name(candidate)==normalized:
+    position=_position_group(row.get("position"))
+    if position:
+     exact.append(position)
+  # Require an exact, unambiguous player-name match. Never guess from fuzzy search results.
+  unique=set(exact)
+  result=next(iter(unique)) if len(unique)==1 else None
+  _API_SPORTS_POSITION_CACHE[normalized]={"at":now,"data":result}
+  return result
+ except Exception:
+  _API_SPORTS_POSITION_CACHE[normalized]={"at":now,"data":None}
+  return None
+
 def _espn_player_position(athlete_id,team_code):
  """Resolve a specific PG/SG/SF/PF/C role; generic G/F roster labels are not enough."""
  key=(str(athlete_id),str(team_code or "").upper())
@@ -196,7 +242,7 @@ def _espn_player_position(athlete_id,team_code):
  if not found: found=generic_position
  _ESPN_POSITION_CACHE[key]=found
  return found
-def _dvp_matchup_adjustment(athlete_id,player_team,game,market):
+def _dvp_matchup_adjustment(athlete_id,player_team,game,market,player_name=None):
  try:
   market=str(market or "").lower().strip()
   stat_fields={"points":"PTS","rebounds":"REB","assists":"AST","steals":"STL","threes":"3PM"}
@@ -206,9 +252,31 @@ def _dvp_matchup_adjustment(athlete_id,player_team,game,market):
   if not team_code or len(game_teams)<2: return None
   opponent=next((code for code in game_teams if code!=team_code),None)
   if not opponent: return None
-  position_key=_espn_player_position(athlete_id,team_code)
-  if not position_key: return None
-  position_keys={"G":("PG","SG"),"F":("SF","PF")}.get(position_key,(position_key,))
+
+  # ESPN can provide a specific PG/SG/SF/PF/C listing. API-Sports Basketball
+  # supplies broad Guard/Forward/Center labels only, so it is a cross-check or
+  # fallback, never a source of invented sub-positions.
+  espn_position=_espn_player_position(athlete_id,team_code)
+  api_position=None
+  position_source="ESPN roster/profile"
+  position_confidence="high" if espn_position not in (None,"G","F") else "medium"
+  position_crosscheck="not_needed_for_specific_position"
+  if espn_position in ("G","F") or espn_position is None:
+   api_position=_api_sports_player_position(player_name)
+   if espn_position in ("G","F"):
+    if api_position and api_position!=espn_position:
+     return None
+    position_crosscheck="confirmed" if api_position==espn_position else "unavailable"
+    position_source="ESPN broad position"+(" + API-Sports confirmed" if api_position==espn_position else "")
+    position_confidence="medium" if api_position==espn_position else "low"
+   elif api_position:
+    espn_position=api_position
+    position_source="API-Sports Basketball fallback"
+    position_confidence="medium"
+    position_crosscheck="fallback_used"
+  if not espn_position: return None
+
+  position_keys={"G":("PG","SG"),"F":("SF","PF")}.get(espn_position,(espn_position,))
   table=_fetch_dvp_table(stat)
   allowed_values=[table.get((opponent,pos),{}).get(stat) for pos in position_keys]
   if any(value is None for value in allowed_values): return None
@@ -224,9 +292,11 @@ def _dvp_matchup_adjustment(athlete_id,player_team,game,market):
   stat_labels={"points":"points","rebounds":"rebounds","assists":"assists","steals":"steals","threes":"3-pointers made"}
   stat_units={"points":"PPG","rebounds":"RPG","assists":"APG","steals":"SPG","threes":"3PM"}
   season=_DVP_STAT_CACHE.get(stat,{}).get("season") or "season not identified"
-  position_method="PG/SG blended" if position_key=="G" else "SF/PF blended" if position_key=="F" else "Individual position"
-  return {"position":position_key,"position_group":position_key,"position_name":position_names[position_key],
-   "opponent":opponent,"opponent_name":_TEAM_NAMES.get(opponent,opponent),
+  position_method="PG/SG 50/50 blend" if espn_position=="G" else "SF/PF 50/50 blend" if espn_position=="F" else "Individual listed position"
+  blend_weights={position_keys[0]:1.0} if len(position_keys)==1 else {position_keys[0]:0.5,position_keys[1]:0.5}
+  return {"position":espn_position,"position_group":espn_position,"position_name":position_names[espn_position],
+   "position_source":position_source,"position_confidence":position_confidence,"position_crosscheck":position_crosscheck,
+   "blend_weights":blend_weights,"opponent":opponent,"opponent_name":_TEAM_NAMES.get(opponent,opponent),
    "stat":market,"stat_label":stat_labels[market],"stat_unit":stat_units[market],
    "allowed_per_game":round(allowed,2),"league_position_average":round(league_average,2),
    "league_relative_ratio":round(ratio,3),"adjustment_pct":round((factor-1.0)*100,2),"factor":round(factor,4),
@@ -1050,7 +1120,7 @@ def proprietary_market_board(market: str = "rebounds"):
             values, sample_label, player_minutes = _player_history(athlete_id, field, label)
             team_for_dvp = player_obj.get("team") or participant.get("team_abbreviation") or participant.get("team") or ""
             event_matchup = event.get("name") or raw.get("event_name") or raw.get("matchup") or _bp_event_matchup(event_id)
-            matchup_adjustment = _dvp_matchup_adjustment(athlete_id, team_for_dvp, event_matchup, market)
+            matchup_adjustment = _dvp_matchup_adjustment(athlete_id, team_for_dvp, event_matchup, market, name)
             model = _simulate_market(values, line, None, None, _norm_player_name(name) + market, minutes=player_minutes, market=market, matchup_adjustment=matchup_adjustment)
             if not model:
                 failures.append(name + ": fewer than five valid game logs")
@@ -1508,7 +1578,7 @@ async def model_recalculate(request: FastRequest):
             raise HTTPException(status_code=400, detail="Odds are outside the supported range.")
         field, label = ("points", "PTS") if market == "points" else STAT_FIELDS[market]
         values, sample_label, minutes = _player_history(athlete_id, field, label)
-        matchup_adjustment = _dvp_matchup_adjustment(athlete_id, payload.get("team"), payload.get("game"), market)
+        matchup_adjustment = _dvp_matchup_adjustment(athlete_id, payload.get("team"), payload.get("game"), market, player)
         model = _simulate_market(values, line, None, None, _norm_player_name(player) + market + "custom", minutes=minutes, market=market, matchup_adjustment=matchup_adjustment)
         if not model:
             raise HTTPException(status_code=422, detail="Not enough verified game-log history to recalculate this player.")
@@ -1639,7 +1709,7 @@ async def api_proxy(path: str, request: FastRequest):
                             continue
                         try:
                             values, sample_label, player_minutes = _player_history(athlete_id, "points", "PTS")
-                            matchup_adjustment = _dvp_matchup_adjustment(athlete_id, roster_team, prop.get("game"), "points")
+                            matchup_adjustment = _dvp_matchup_adjustment(athlete_id, roster_team, prop.get("game"), "points", prop.get("player"))
                             model = _simulate_market(
                                 values, float(prop["line"]), prop.get("over_odds"),
                                 prop.get("under_odds"),
