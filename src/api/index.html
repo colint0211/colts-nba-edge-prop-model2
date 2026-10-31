@@ -239,7 +239,9 @@ function dvpSummary(p){
   const sign=Number(d.adjustment_pct)>0?'+':'';
   const unit=d.stat_unit||({points:'PPG',rebounds:'RPG',assists:'APG',steals:'SPG',threes:'3PM'}[p.market]||'per game');
   const label=d.stat_label||({points:'points',rebounds:'rebounds',assists:'assists',steals:'steals',threes:'3-pointers made'}[p.market]||p.market||'stat');
-  return '<div class="card-bottom"><span>Defense vs '+esc(d.position_name||positionDisplayName(d.position))+': '+esc(d.opponent_name||d.opponent)+' allows '+num(d.allowed_per_game,2)+' '+esc(unit)+' ('+esc(label)+') vs '+num(d.league_position_average,2)+' positional league avg</span><span>Projection adjustment: '+sign+num(d.adjustment_pct,1)+'%</span></div>';
+  const weights=d.blend_weights&&typeof d.blend_weights==='object'?Object.entries(d.blend_weights).map(([k,v])=>k+' '+Math.round(Number(v)*100)+'%').join(' / '):'';
+  const positionMeta=[d.position_source||'Position source unavailable',d.position_confidence?d.position_confidence+' confidence':'',weights?'Blend: '+weights:''].filter(Boolean).join(' · ');
+  return '<div class="card-bottom"><span>Defense vs '+esc(d.position_name||positionDisplayName(d.position))+': '+esc(d.opponent_name||d.opponent)+' allows '+num(d.allowed_per_game,2)+' '+esc(unit)+' ('+esc(label)+') vs '+num(d.league_position_average,2)+' positional league avg</span><span>Projection adjustment: '+sign+num(d.adjustment_pct,1)+'%</span></div><div class="card-bottom"><span>'+esc(positionMeta)+'</span></div>';
 }
 function card(p,i){
   const g=gameFor(p),st=playerLive(p),gr=grade(p),pts=st&&st.points!=null?Number(st.points):null;
