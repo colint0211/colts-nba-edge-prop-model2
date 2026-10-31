@@ -74,7 +74,7 @@ _BDL_GAMES_CACHE = {"at": 0.0, "data": None}
 _BDL_GAMES_CACHE_TTL = 600
 
 
-def _load_balldontlie_games():
+def _load_balldontlie_games(allow_fetch=True):
     """Load today's and tomorrow's NBA games once per cache window.
 
     BALLDONTLIE free tier is used only as a secondary schedule/status source;
@@ -89,6 +89,8 @@ def _load_balldontlie_games():
     )
     if cached is not None and now - _BDL_GAMES_CACHE.get("at", 0.0) < cached_ttl:
         return cached
+    if not allow_fetch:
+        return {"status": "not_loaded", "source": "BALLDONTLIE", "games": [], "count": 0}
 
     api_key = os.getenv("BALLDONTLIE_API_KEY", "").strip()
     if not api_key:
@@ -1492,7 +1494,9 @@ def proprietary_market_board(market: str = "rebounds"):
     now = time.time()
     cached_board = _BP_BOARD_CACHE.get(market)
     injury_feed = _load_official_injury_feed()
-    bdl_games = _load_balldontlie_games()
+    # The points-board request owns the one-per-cache-window BALLDONTLIE fetch.
+    # Other prop markets reuse that cached schedule instead of consuming more free-tier calls.
+    bdl_games = _load_balldontlie_games(allow_fetch=False)
     if cached_board and now - cached_board[0] < _BP_BOARD_TTL_SECONDS:
         cached_result = json.loads(json.dumps(cached_board[1]))
         for cached_prop in cached_result.get("props") or []:
