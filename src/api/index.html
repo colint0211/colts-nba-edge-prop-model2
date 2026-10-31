@@ -502,6 +502,9 @@ async function recordResult(btn){
   }catch(e){alert('Could not save result: '+String(e.message||e))}
 }
 const yesterday=new Date();yesterday.setDate(yesterday.getDate()-1);el('historyDate').value=localDateKey(yesterday);el('historyDate').addEventListener('change',loadPastPlays);
+// Start the live scoreboard independently of the prop-board request. A slow or
+// unavailable odds/model request must never prevent live scores from rendering.
+updateLive();
 load();loadPastPlays();
 ['rebounds','assists','steals','threes'].forEach(loadBP);
 setInterval(async()=>{await updateLive();render();renderFull()},15000);
