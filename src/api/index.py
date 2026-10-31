@@ -135,6 +135,7 @@ def _position_group(position):
   "SMALL FORWARD":"SF","SF":"SF",
   "POWER FORWARD":"PF","PF":"PF",
   "CENTER":"C","C":"C",
+  "GUARD":"G","G":"G","FORWARD":"F","F":"F",
  }
  return aliases.get(p)
 
@@ -146,16 +147,19 @@ def _espn_player_position(athlete_id,team_code):
  code=_canonical_team_code(team_code)
  if not code: return None
  found=None
+ generic_position=None
  try:
   payload=_get_json("https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/"+code.lower()+"/roster",timeout=8)
   def walk(value):
-   nonlocal found
-   if found: return
+   nonlocal found,generic_position
+   if found not in (None,"G","F"): return
    if isinstance(value,dict):
     athlete=value.get("athlete") if isinstance(value.get("athlete"),dict) else value
     if str(athlete.get("id") or "").strip()==str(athlete_id):
      position=athlete.get("position") or value.get("position") or {}
-     found=_position_group(position)
+     resolved=_position_group(position)
+     if resolved in ("G","F"): generic_position=resolved
+     elif resolved: found=resolved
      return
     for child in value.values():
      if isinstance(child,(dict,list)): walk(child)
@@ -165,17 +169,20 @@ def _espn_player_position(athlete_id,team_code):
  except Exception:
   pass
 
- # ESPN's public roster endpoint often exposes only G/F/C. Its Core API
- # athlete record carries the more specific position abbreviation where available.
- if not found:
+ # ESPN's roster can expose only G/F. Check its athlete profile for a
+ # specific PG/SG/SF/PF/C role before falling back to a blended group.
+ if found in (None,"G","F"):
   try:
    athlete=_get_json(
     "https://sports.core.api.espn.com/v2/sports/basketball/leagues/nba/athletes/"+str(athlete_id),
     timeout=8
    )
-   found=_position_group(athlete.get("position") if isinstance(athlete,dict) else None)
+   specific=_position_group(athlete.get("position") if isinstance(athlete,dict) else None)
+   if specific and specific not in ("G","F"): found=specific
+   elif specific in ("G","F"): generic_position=specific
   except Exception:
    pass
+ if not found: found=generic_position
  _ESPN_POSITION_CACHE[key]=found
  return found
 def _dvp_matchup_adjustment(athlete_id,player_team,game,market):
@@ -189,20 +196,25 @@ def _dvp_matchup_adjustment(athlete_id,player_team,game,market):
   position_key=_espn_player_position(athlete_id,team_code)
   if not position_key: return None
   position=position_key
-  table=_fetch_dvp_table(); allowed=table.get((opponent,position_key),{}).get("points")
-  league_values=[row["points"] for (team,pos),row in table.items() if pos==position_key and "points" in row]
-  if allowed is None or len(league_values)<20: return None
+  position_keys={"G":("PG","SG"),"F":("SF","PF")}.get(position_key,(position_key,))
+  table=_fetch_dvp_table()
+  allowed_values=[table.get((opponent,pos),{}).get("points") for pos in position_keys]
+  if any(value is None for value in allowed_values): return None
+  allowed=sum(allowed_values)/len(allowed_values)
+  league_values=[row["points"] for (team,pos),row in table.items() if pos in position_keys and "points" in row]
+  if len(league_values)<20: return None
   league_average=sum(league_values)/len(league_values)
   if league_average<=0: return None
   ratio=allowed/league_average; factor=max(0.92,min(1.08,1.0+(ratio-1.0)*0.30))
-  position_names={"PG":"Point Guard","SG":"Shooting Guard","SF":"Small Forward","PF":"Power Forward","C":"Center"}
+  position_names={"PG":"Point Guard","SG":"Shooting Guard","SF":"Small Forward","PF":"Power Forward","C":"Center",
+   "G":"Guard (PG/SG blended)","F":"Forward (SF/PF blended)"}
   return {"position":position,"position_group":position_key,"position_name":position_names[position_key],
    "opponent":opponent,"opponent_name":_TEAM_NAMES.get(opponent,opponent),
    "stat":"points","allowed_per_game":round(allowed,2),"league_position_average":round(league_average,2),
    "league_relative_ratio":round(ratio,3),"adjustment_pct":round((factor-1.0)*100,2),"factor":round(factor,4),
    "source":"NBA House individual-position points allowed table",
    "source_season":_DVP_CACHE.get("season") or "season not identified",
-   "method":"Individual position points allowed per game vs same-position league average; 30% dampening; adjustment capped at +/-8%"}
+   "method":("PG/SG blended" if position_key=="G" else "SF/PF blended" if position_key=="F" else "Individual position")+" points allowed per game vs matching-position league average; 30% dampening; adjustment capped at +/-8%"}
  except Exception: return None
 
 
