@@ -704,6 +704,56 @@ _BP_CACHE_TTL_SECONDS = 300
 _BP_BOARD_TTL_SECONDS = 180
 _BP_RATE_LIMIT_COOLDOWN_SECONDS = 300
 _BP_STALE_CACHE_SECONDS = 3600
+_BP_EVENT_MATCHUP_CACHE = {}
+
+def _bp_event_matchup(event_id):
+    """Resolve BettingPros event IDs to an away-at-home matchup for DVP."""
+    key=str(event_id or "").strip()
+    if not key:
+        return ""
+    cached=_BP_EVENT_MATCHUP_CACHE.get(key)
+    if cached and time.time()-cached["at"]<3600:
+        return cached["matchup"]
+    api_key=os.getenv("BETTINGPROS_API_KEY","").strip()
+    if not api_key:
+        return ""
+    headers={"x-api-key":api_key,"accept":"application/json","user-agent":"ColtsNBAEdge/1.0"}
+    urls=[
+        "https://api.bettingpros.com/v3/events?"+urlencode({"sport":"NBA","event_id":key}),
+        "https://api.bettingpros.com/v3/events/"+key+"?"+urlencode({"sport":"NBA"}),
+    ]
+    payload=None
+    for url in urls:
+        try:
+            req=Request(url,headers=headers)
+            with urlopen(req,timeout=10) as response:
+                candidate=json.loads(response.read().decode("utf-8","replace"))
+            if isinstance(candidate,dict):
+                payload=candidate
+                break
+        except Exception:
+            continue
+    matchup=""
+    def walk(value):
+        if isinstance(value,dict):
+            home=value.get("home_team") or value.get("homeTeam") or value.get("home")
+            away=value.get("away_team") or value.get("awayTeam") or value.get("away")
+            if isinstance(home,dict): home=home.get("abbreviation") or home.get("short_name") or home.get("name") or home.get("display_name")
+            if isinstance(away,dict): away=away.get("abbreviation") or away.get("short_name") or away.get("name") or away.get("display_name")
+            if home and away:
+                return str(away)+" @ "+str(home)
+            for child in value.values():
+                found=walk(child)
+                if found: return found
+        elif isinstance(value,list):
+            for child in value:
+                found=walk(child)
+                if found: return found
+        return ""
+    if payload:
+        matchup=walk(payload)
+    _BP_EVENT_MATCHUP_CACHE[key]={"at":time.time(),"matchup":matchup}
+    return matchup
 
 def _bp_fetch_props(market, limit=50):
     """Shared per-market cache; never fan out repeated props requests during a provider cooldown."""
@@ -999,7 +1049,8 @@ def proprietary_market_board(market: str = "rebounds"):
                 continue
             values, sample_label, player_minutes = _player_history(athlete_id, field, label)
             team_for_dvp = player_obj.get("team") or participant.get("team_abbreviation") or participant.get("team") or ""
-            matchup_adjustment = _dvp_matchup_adjustment(athlete_id, team_for_dvp, event.get("name") or raw.get("event_name") or raw.get("matchup") or "", market)
+            event_matchup = event.get("name") or raw.get("event_name") or raw.get("matchup") or _bp_event_matchup(event_id)
+            matchup_adjustment = _dvp_matchup_adjustment(athlete_id, team_for_dvp, event_matchup, market)
             model = _simulate_market(values, line, None, None, _norm_player_name(name) + market, minutes=player_minutes, market=market, matchup_adjustment=matchup_adjustment)
             if not model:
                 failures.append(name + ": fewer than five valid game logs")
@@ -1036,7 +1087,7 @@ def proprietary_market_board(market: str = "rebounds"):
             output.append({
                 "player": name,
                 "team": player_obj.get("team") or participant.get("team_abbreviation") or participant.get("team") or "",
-                "game": event.get("name") or raw.get("event_name") or raw.get("matchup") or "",
+                "game": event_matchup,
                 "market": market, "line": line, "over_odds": over_odds, "under_odds": under_odds,
                 "sample_label": sample_label, "athlete_id": athlete_id, "games_used": len(values),
                 "position": (matchup_adjustment or {}).get("position"),
