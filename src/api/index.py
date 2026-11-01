@@ -2036,45 +2036,68 @@ def _enrich_live_boxscores(payload):
     """Merge verified ESPN box-score stats and minutes into the live player maps."""
     if not isinstance(payload, dict):
         return payload
-    by_id = payload.get("players_by_id") or {}
-    by_name = payload.get("players_by_name") or {}
+    by_id = payload.setdefault("players_by_id", {})
+    by_name = payload.setdefault("players_by_name", {})
     if not isinstance(by_id, dict) or not isinstance(by_name, dict):
+        payload["live_enrichment"] = {"ok": False, "error": "player_maps_invalid"}
         return payload
-    games = payload.get("games") or []
-    for game in games:
+
+    aliases = {
+        "MIN": "minutes_played", "MINUTES": "minutes_played",
+        "PTS": "points", "POINTS": "points",
+        "REB": "rebounds", "REBOUNDS": "rebounds",
+        "AST": "assists", "ASSISTS": "assists",
+        "STL": "steals", "STEALS": "steals",
+        "BLK": "blocks", "BLOCKS": "blocks",
+        "3PT": "three_points_made", "3PM": "three_points_made",
+        "3PTM": "three_points_made", "3FGM": "three_points_made",
+    }
+    field_counts = {field: 0 for field in set(aliases.values())}
+    games_checked = 0
+    athlete_rows = 0
+    athletes_enriched = set()
+    errors = []
+
+    for game in payload.get("games") or []:
         if not isinstance(game, dict) or str(game.get("state") or "").lower() not in ("in", "post", "final"):
             continue
         event_id = game.get("event_id") or game.get("id")
+        if not event_id:
+            continue
+        games_checked += 1
         summary = _fetch_live_summary(event_id)
-        boxscore = summary.get("boxscore") or {}
-        teams = boxscore.get("players") or []
-        for team_block in teams:
+        boxscore = summary.get("boxscore") if isinstance(summary, dict) else None
+        team_blocks = boxscore.get("players") if isinstance(boxscore, dict) else None
+        if not isinstance(team_blocks, list):
+            cached = _ESPN_LIVE_SUMMARY_CACHE.get(str(event_id), {})
+            if cached.get("error"):
+                errors.append(str(event_id) + ": " + cached["error"])
+            continue
+
+        for team_block in team_blocks:
             if not isinstance(team_block, dict):
                 continue
             for stat_group in team_block.get("statistics") or []:
                 if not isinstance(stat_group, dict):
                     continue
-                labels = stat_group.get("names") or stat_group.get("labels") or []
+                labels = stat_group.get("names")
+                if not isinstance(labels, list) or not labels:
+                    labels = stat_group.get("labels") or []
                 if not isinstance(labels, list):
                     continue
                 indexes = {}
-                aliases = {
-                    "MIN": "minutes_played", "MINUTES": "minutes_played",
-                    "PTS": "points", "POINTS": "points",
-                    "REB": "rebounds", "REBOUNDS": "rebounds",
-                    "AST": "assists", "ASSISTS": "assists",
-                    "STL": "steals", "STEALS": "steals",
-                    "BLK": "blocks", "BLOCKS": "blocks",
-                    "3PT": "three_points_made", "3PM": "three_points_made",
-                    "3PTM": "three_points_made", "3FGM": "three_points_made",
-                }
                 for index, label in enumerate(labels):
                     key = str(label or "").strip().upper().replace(" ", "")
                     if key in aliases:
                         indexes[index] = aliases[key]
-                for athlete_row in stat_group.get("athletes") or []:
+                athlete_list = stat_group.get("athletes") or []
+                if not isinstance(athlete_list, list):
+                    continue
+
+                for athlete_row in athlete_list:
                     if not isinstance(athlete_row, dict):
                         continue
+                    athlete_rows += 1
                     athlete = athlete_row.get("athlete") or {}
                     if not isinstance(athlete, dict):
                         athlete = {}
@@ -2088,47 +2111,57 @@ def _enrich_live_boxscores(payload):
                         if index >= len(values):
                             continue
                         raw = str(values[index] or "").strip()
-                        if field == "minutes_played":
-                            # ESPN may report MM:SS; convert to decimal minutes.
-                            if ":" in raw:
-                                try:
-                                    mm, ss = raw.split(":", 1)
-                                    value = float(mm) + float(ss) / 60.0
-                                except (TypeError, ValueError):
-                                    continue
+                        if not raw or raw in ("-", "--"):
+                            continue
+                        try:
+                            if field == "minutes_played" and ":" in raw:
+                                mm, ss = raw.split(":", 1)
+                                value = float(mm) + float(ss) / 60.0
+                            elif field == "three_points_made" and "-" in raw:
+                                value = float(raw.split("-", 1)[0])
                             else:
-                                try:
-                                    value = float(raw)
-                                except (TypeError, ValueError):
-                                    continue
-                        else:
-                            try:
                                 value = float(raw)
-                            except (TypeError, ValueError):
-                                continue
+                        except (TypeError, ValueError):
+                            continue
                         if math.isfinite(value) and value >= 0:
                             updates[field] = round(value, 2)
                     if not updates:
                         continue
+
                     if athlete_id:
                         target = by_id.setdefault(athlete_id, {})
+                        if not isinstance(target, dict):
+                            target = by_id[athlete_id] = {}
                         target.update(updates)
-                        if name:
-                            target.setdefault("player", name)
+                        target.setdefault("player", name or target.get("player") or "")
                         target["athlete_id"] = athlete_id
                         target["game_id"] = str(event_id)
                     if name:
                         name_key = _quarter_name_key(name)
                         target = by_name.setdefault(name_key, {})
+                        if not isinstance(target, dict):
+                            target = by_name[name_key] = {}
                         target.update(updates)
                         target.setdefault("player", name)
                         if athlete_id:
                             target["athlete_id"] = athlete_id
                         target["game_id"] = str(event_id)
+                    if athlete_id or name:
+                        athletes_enriched.add(athlete_id or _quarter_name_key(name))
+                    for field in updates:
+                        field_counts[field] += 1
+
     payload["players_by_id"] = by_id
     payload["players_by_name"] = by_name
+    payload["live_enrichment"] = {
+        "ok": True,
+        "games_checked": games_checked,
+        "athlete_rows_seen": athlete_rows,
+        "athletes_enriched": len(athletes_enriched),
+        "field_updates": field_counts,
+        "errors": errors[:3],
+    }
     return payload
-
 
 def _enrich_live_quarters(payload):
     """Attach player quarter point totals only when ESPN supplies actual scoring plays."""
