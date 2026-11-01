@@ -1,6 +1,6 @@
 <!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#07111f"><title>Colt's NBA Edge</title><style>
 :root{color-scheme:dark;--bg:#07111f;--panel:#101d30;--panel2:#14243a;--line:#263a53;--text:#eff6ff;--muted:#9aacc3;--green:#47e0a1;--red:#ff7e8a;--gold:#ffd27a}*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at top,#132b46 0%,var(--bg) 55%);color:var(--text);font:14px/1.45 system-ui,-apple-system,Segoe UI,sans-serif}header{padding:24px clamp(14px,4vw,42px);background:rgba(8,18,32,.86);border-bottom:1px solid var(--line)}main{max-width:1440px;margin:auto;padding:22px clamp(12px,3vw,30px) 44px}.headrow{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap}h1{font-size:clamp(23px,4vw,34px);letter-spacing:-.7px;margin:0;font-weight:850}.brand{color:var(--green)}p,.muted,small{color:var(--muted)}.bar,.controls,.tabs{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin:16px 0}.pill,button,input,select{padding:10px 12px;background:var(--panel2);color:inherit;border:1px solid var(--line);border-radius:10px}button{cursor:pointer;font-weight:750}button:hover{border-color:var(--green)}button.active{background:#123c32;border-color:#2d9876;color:var(--green)}.statuspill{border-radius:999px;padding:7px 11px;background:#102b2a;border:1px solid #215b50;color:var(--green);font-size:12px;font-weight:800}.statrow{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:11px}.stat{padding:15px;background:linear-gradient(145deg,#14243a,#0e1a2c);border:1px solid var(--line);border-radius:15px}.statlabel{color:var(--muted);font-size:12px}.num{font-size:27px;font-weight:850;margin-top:3px}.sectiontitle{font-size:19px;font-weight:850;margin:25px 0 5px}.sectionhint{color:var(--muted);font-size:12px;margin-bottom:12px}.games{display:flex;flex-wrap:wrap;gap:7px}.game{padding:7px 10px;border:1px solid var(--line);border-radius:9px;background:#0f1d30;color:#dbe8f9;font-size:12px}.game.live{border-color:#2c8d6b;background:#102e2a}.controls input{flex:1;min-width:180px}.cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:13px}.player-card{min-width:0;padding:16px;background:linear-gradient(145deg,#14253b,#0c1828);border:1px solid var(--line);border-radius:16px;box-shadow:0 10px 30px #0002;position:relative;overflow:hidden}.player-card:before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:#38506d}.player-card.value:before{background:var(--green)}.player-top{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.player-name{font-size:17px;font-weight:850;line-height:1.2}.matchup{font-size:12px;color:var(--muted);margin-top:5px}.decision{font-size:10px;font-weight:850;letter-spacing:.4px;border-radius:999px;padding:5px 8px;background:#27354a;color:#dce7f5;white-space:nowrap}.decision.value{background:#103c30;color:var(--green)}.decision.lean{background:#3b3020;color:var(--gold)}.decision.pass{background:#3b2029;color:var(--red)}.scorebox{display:flex;justify-content:space-between;align-items:center;gap:10px;margin:15px 0 12px;padding:11px 12px;background:#091625;border:1px solid #20354d;border-radius:12px}.score-label{font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);font-weight:850}.score{font-size:16px;font-weight:900;white-space:nowrap}.game-status{font-size:11px;color:var(--muted);text-align:right}.live-dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--green);margin-right:5px;vertical-align:middle}.statline{display:grid;grid-template-columns:1fr 1fr;gap:10px}.mini{background:#15263c;border:1px solid #293e58;border-radius:12px;padding:11px}.mini-label{font-size:11px;color:var(--muted)}.mini-value{font-size:23px;font-weight:900;margin-top:2px}.mini-value span{font-size:12px;color:var(--muted);font-weight:700}.progress{height:5px;border-radius:99px;background:#263950;overflow:hidden;margin-top:8px}.progress>span{display:block;height:100%;background:linear-gradient(90deg,#31c98c,#8af0c5);border-radius:99px;width:0}.card-bottom{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;border-top:1px solid #243850;margin-top:13px;padding-top:11px;font-size:12px;color:var(--muted)}.grade{font-weight:900}.grade.hit{color:var(--green)}.grade.miss{color:var(--red)}.empty{padding:28px;border:1px dashed var(--line);border-radius:14px;text-align:center;color:var(--muted);grid-column:1/-1}.ev{font-size:17px;font-weight:900;color:var(--green)}.footer{font-size:12px;margin-top:22px;color:var(--muted)}@media(max-width:1050px){.cards{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:650px){header{padding:18px 14px}main{padding:16px 11px 32px}.statrow{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.stat{padding:12px}.num{font-size:23px}.cards{grid-template-columns:1fr;gap:10px}.player-card{padding:14px}.sectiontitle{margin-top:20px}.tabs button{flex:1;min-width:28%}}
-.reasoning{margin-top:12px;border:1px solid #2a4058;border-radius:11px;background:#0b1727;padding:10px 12px}.reasoning summary{cursor:pointer;font-weight:800;color:#cde3ff}.reasoning-body{padding-top:9px;color:var(--muted);font-size:12px}.reasoning-body div{margin:5px 0}.reasoning-body b{color:var(--text)}.reason-warning{color:var(--gold)!important}.history-table-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:13px;margin-top:12px}.history-table{width:100%;border-collapse:collapse;min-width:760px;font-size:12px}.history-table th,.history-table td{padding:10px 11px;text-align:left;border-bottom:1px solid #243850;white-space:nowrap}.history-table th{color:var(--muted);font-weight:800;background:#0b1727}.history-table tr:last-child td{border-bottom:0}.history-status{font-weight:900}.history-status.win{color:var(--green)}.history-status.loss{color:var(--red)}.history-status.push{color:var(--gold)}.history-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px;margin:12px 0}.history-summary .stat{padding:11px}.history-summary .num{font-size:21px}.history-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.history-actions input,.history-actions select{min-width:130px}@media(max-width:650px){.history-summary{grid-template-columns:repeat(2,minmax(0,1fr))}}</style></head><body><header><div class="headrow"><div><h1><span class="brand">COLT'S</span> NBA EDGE</h1><p style="margin:6px 0 0">NBA player prop value board · live game scores · live player points</p></div><span class="statuspill" id="status">LOADING SLATE</span></div><div class="bar"><button onclick="load(true)">↻ Refresh board</button><label style="display:flex;gap:7px;align-items:center;color:var(--muted);font-size:12px">Bankroll ($)<input id="bankroll" type="number" min="0" step="1" placeholder="Enter bankroll" style="width:145px" oninput="render();renderFull()"></label><span id="updated" class="muted">Loading today's games…</span><span id="liveUpdated" class="muted"></span></div></header><main>
+.reasoning{margin-top:12px;border:1px solid #2a4058;border-radius:11px;background:#0b1727;padding:10px 12px}.reasoning summary{cursor:pointer;font-weight:800;color:#cde3ff}.reasoning-body{padding-top:9px;color:var(--muted);font-size:12px}.reasoning-body div{margin:5px 0}.reasoning-body b{color:var(--text)}.reason-warning{color:var(--gold)!important}.history-table-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:13px;margin-top:12px}.history-table{width:100%;border-collapse:collapse;min-width:760px;font-size:12px}.history-table th,.history-table td{padding:10px 11px;text-align:left;border-bottom:1px solid #243850;white-space:nowrap}.history-table th{color:var(--muted);font-weight:800;background:#0b1727}.history-table tr:last-child td{border-bottom:0}.history-status{font-weight:900}.history-status.win{color:var(--green)}.history-status.loss{color:var(--red)}.history-status.push{color:var(--gold)}.history-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px;margin:12px 0}.history-summary .stat{padding:11px}.history-summary .num{font-size:21px}.history-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.history-actions input,.history-actions select{min-width:130px}@media(max-width:650px){.history-summary{grid-template-columns:repeat(2,minmax(0,1fr))}}</style></head><body><header><div class="headrow"><div><h1><span class="brand">COLT'S</span> NBA EDGE</h1><p style="margin:6px 0 0">NBA player prop value board · live game scores · live player stats</p></div><span class="statuspill" id="status">LOADING SLATE</span></div><div class="bar"><button onclick="load(true)">↻ Refresh board</button><label style="display:flex;gap:7px;align-items:center;color:var(--muted);font-size:12px">Bankroll ($)<input id="bankroll" type="number" min="0" step="1" placeholder="Enter bankroll" style="width:145px" oninput="render();renderFull()"></label><span id="updated" class="muted">Loading today's games…</span><span id="liveUpdated" class="muted"></span></div></header><main>
 <div class="statrow"><div class="stat"><div class="statlabel">Today's games</div><div id="ng" class="num">—</div></div><div class="stat"><div class="statlabel">Prop lines loaded</div><div id="nl" class="num">—</div></div><div class="stat"><div class="statlabel">Projections calculated</div><div id="np" class="num">—</div></div><div class="stat"><div class="statlabel">Positive EV candidates</div><div id="nv" class="num">—</div></div></div>
 
 <div class="sectiontitle" id="pastPlays">Daily Top 5 results</div>
@@ -30,7 +30,7 @@
 <div class="tabs" id="tabs"><button data-market="ev" onclick="setMarket('ev')">Top 5 EV</button><button class="active" data-market="points" onclick="setMarket('points')">Top 5 Points</button><button data-market="rebounds" onclick="setMarket('rebounds')">Top 5 Rebounds</button><button data-market="steals" onclick="setMarket('steals')">Top 5 Steals</button><button data-market="assists" onclick="setMarket('assists')">Top 5 Assists</button><button data-market="threes" onclick="setMarket('threes')">Top 5 3-Pointers Made</button></div>
 <div class="controls"><input class="pill" id="search" placeholder="Search player or matchup" oninput="render()"><span id="count" class="muted"></span></div><div id="cards" class="cards"><div class="empty">Calculating today's best plays…</div></div>
 <div class="sectiontitle">Full player prop board</div><div class="sectionhint" id="fullHint">All currently sourced points props, including leans and passes.</div><div class="controls"><select class="pill" id="filter" onchange="renderFull()"><option value="all">All picks</option><option value="value">Value candidates</option><option value="lean">Leans / verify</option><option value="pass">Pass</option></select><input class="pill" id="searchFull" placeholder="Search full board" oninput="renderFull()"><span id="countFull" class="muted"></span></div><div id="fullCards" class="cards"></div>
-<div class="footer">Live scores and player points are supplied by ESPN public endpoints. BettingPros supplies the Rebounds, Assists, Steals, and 3-Pointers Made markets. EV plays are shown only when the API response includes the required projection and expected-value fields; lines alone are not treated as picks. BALLDONTLIE provides a secondary game schedule/status cross-check and does not alter player projections or probabilities. Live data refreshes every 15 seconds while this page is open.</div></main>
+<div class="footer">Live scores are supplied by ESPN public endpoints. DraftKings NBA player-prop lines and odds are supplied by PropLine. EV plays are shown only when the API response includes the required projection and expected-value fields; lines alone are not treated as picks. BALLDONTLIE provides a secondary game schedule/status cross-check and does not alter player projections or probabilities. Live data refreshes every 15 seconds while this page is open.</div></main>
 <script>
 let data=[],liveData={games:[],players_by_id:{},players_by_name:{}},market='points',bpCache={},bpLoading={};
 let customOverrides={};
@@ -136,8 +136,8 @@ function setMarket(m){
   document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('active',b.dataset.market===m));
   const labels={ev:'Top 5 EV Plays',points:'Top 5 Points',rebounds:'Top 5 Rebounds',assists:'Top 5 Assists',steals:'Top 5 Steals',threes:'Top 5 3-Pointers Made'};
   el('topTitle').textContent=labels[m]||'Top 5 Plays';
-  el('topHint').textContent=m==='points'?'Top five proprietary points projections.':m==='ev'?'Top five positive-EV plays ranked across points, rebounds, assists, steals and three-pointers made.':'Proprietary '+bpMarketLabel(m)+' projections, probabilities and EV. BettingPros supplies lines and odds only.';
-  el('fullHint').textContent=m==='ev'?'All positive-EV candidates across all five markets.':m==='points'?'All proprietary points props.':'All proprietary '+bpMarketLabel(m)+' projections using BettingPros lines and odds only.';
+  el('topHint').textContent=m==='points'?'Top five proprietary points projections.':m==='ev'?'Top five positive-EV plays ranked across points, rebounds, assists, steals and three-pointers made.':'Proprietary '+bpMarketLabel(m)+' projections, probabilities and EV. DraftKings lines via PropLine; projections remain model-generated.';
+  el('fullHint').textContent=m==='ev'?'All positive-EV candidates across all five markets.':m==='points'?'All proprietary points props.':'All proprietary '+bpMarketLabel(m)+' projections using DraftKings lines via PropLine.';
   render();renderFull();
   if(m==='ev')['rebounds','assists','steals','threes'].forEach(loadBP);
   else if(['rebounds','assists','steals','threes'].includes(m))loadBP(m);
@@ -145,17 +145,32 @@ function setMarket(m){
 async function load(refresh=false){
   el('status').textContent='CALCULATING';
   try{
-    const r=await fetch('/api/auto-board'+(refresh?'?refresh=true':''),{cache:'no-store'}),d=await r.json();
-    if(!r.ok)throw Error(d.detail?.message||d.detail||'Board unavailable');
-    data=d.props||[];
+    const [scheduleResult,boardResult]=await Promise.all([
+      fetch('/api/auto-board'+(refresh?'?refresh=true':''),{cache:'no-store'})
+        .then(async r=>({ok:r.ok,data:await r.json()}))
+        .catch(()=>({ok:false,data:{}})),
+      fetch('/api/proprietary-market-board?market=points&ts='+Date.now(),{cache:'no-store'})
+        .then(async r=>({ok:r.ok,data:await r.json()}))
+        .catch(e=>({ok:false,data:{detail:String(e.message||e)}}))
+    ]);
+    const schedule=scheduleResult.data||{},board=boardResult.data||{};
+    if(!boardResult.ok)throw Error(board.detail||board.error||'DraftKings points board unavailable');
+    data=(board.props||[]).map(p=>({...p,
+      overOdds:p.over_odds,underOdds:p.under_odds,
+      ev:p.expected_value_pct==null?null:Number(p.expected_value_pct)/100,
+      expected_profit_per_100:p.expected_value_pct,
+      model_status:'projected',best_side:p.best_side,
+      best_probability:p.best_probability,market:'points',
+      simulations:p.simulations
+    })).filter(p=>p.player&&p.line!=null);
     await loadCustomLines();data=await applySavedOverrides(data,'points');
     await recordDailyTopFive('points',rankEV(data).slice(0,5));
-    el('ng').textContent=d.schedule_game_count??'—';
-    el('nl').textContent=d.line_count??data.length;
-    el('np').textContent=d.projected_count??0;
+    el('ng').textContent=schedule.schedule_game_count??'—';
+    el('nl').textContent=board.line_count??data.length;
+    el('np').textContent=board.projected_count??data.length;
     el('nv').textContent=data.filter(x=>x.recommendation==='VALUE CANDIDATE'&&!isFallback(x)&&Number(x.expected_profit_per_100)>0).length;
-    el('updated').textContent='Board updated '+new Date(d.calculated_at||Date.now()).toLocaleTimeString();
-    el('status').textContent=d.status==='ready'?'BOARD READY':'DATA LIMITED';
+    el('updated').textContent='Board updated '+new Date(board.calculated_at||Date.now()).toLocaleTimeString();
+    el('status').textContent=board.projected_count>0?'BOARD READY':'DATA LIMITED';
     await updateLive();render();renderFull();
   }catch(e){
     el('status').textContent='BOARD UNAVAILABLE';
@@ -206,36 +221,36 @@ function reasoning(p){
 }
 function livePace(p){
   const st=playerLive(p)||{},g=gameFor(p)||{};
-  const points=Number(st.points);
-  const line=Number(p.line);
+  const market=String(p.market||"points").toLowerCase();
+  const fields={points:["points","pts"],rebounds:["rebounds","rebound","reb"],assists:["assists","assist","ast"],steals:["steals","steal","stl"],threes:["three_points_made","threePointsMade","three_pointers_made","threePointersMade","threes","3pm","3PTM"]};
+  const keys=fields[market]||fields.points;
+  let raw=null;for(const key of keys){if(st[key]!=null){raw=st[key];break;}}
+  const current=Number(raw),line=Number(p.line);
   const minutesRaw=st.minutes_played??st.minutesPlayed??st.minutes??st.min??st.minutes_used;
   const parseClock=v=>{
     if(typeof v==="number"&&Number.isFinite(v))return v;
-    const s=String(v??"").trim();
-    const m=s.match(/^(\d{1,2}):(\d{2})$/);
+    const s=String(v??"").trim(),m=s.match(/^(\d{1,2}):(\d{2})$/);
     if(m)return Number(m[1])+Number(m[2])/60;
-    const n=Number(s);
-    return Number.isFinite(n)?n:null;
+    const n=Number(s);return Number.isFinite(n)?n:null;
   };
-  const minutes=parseClock(minutesRaw);
-  const period=Number(g.period||g.period_number||0);
-  const clock=String(g.clock||g.display_clock||"").trim();
-  const clockMatch=clock.match(/^(\d{1,2}):(\d{2})$/);
-  if(g.state!=="in"||!Number.isFinite(points)||minutes==null||minutes<=0||!Number.isFinite(line)||!clockMatch||period<1)return null;
+  const minutes=parseClock(minutesRaw),period=Number(g.period||g.period_number||0);
+  const clock=String(g.clock||g.display_clock||"").trim(),clockMatch=clock.match(/^(\d{1,2}):(\d{2})$/);
+  if(g.state!=="in"||!Number.isFinite(current)||minutes==null||minutes<=0||!Number.isFinite(line)||!clockMatch||period<1)return null;
   const secondsLeft=Number(clockMatch[1])*60+Number(clockMatch[2]);
-  const regulationRemaining=period<=4?Math.max(0,(4-period)*12+secondsLeft/60):secondsLeft/60;
-  const gameMinutesLeft=regulationRemaining;
+  const gameMinutesLeft=period<=4?Math.max(0,(4-period)*12+secondsLeft/60):secondsLeft/60;
   const expectedTotalMinutes=Number(p.projected_minutes??p.expected_minutes??st.projected_minutes??st.expected_minutes??34);
   const remainingPlayerMinutes=Math.max(0,Math.min(gameMinutesLeft,expectedTotalMinutes-minutes));
-  const scoringRate=points/minutes;
-  const projected=points+scoringRate*remainingPlayerMinutes;
-  const margin=projected-line;
+  const projected=current+(current/minutes)*remainingPlayerMinutes,margin=projected-line;
   const verdict=margin>=0.5?"ON PACE TO HIT":margin<=-0.5?"ON PACE TO MISS":"TOO CLOSE TO CALL";
-  return {points,minutes,gameMinutesLeft,remainingPlayerMinutes,projected,margin,verdict};
+  const label=({points:"pts",rebounds:"reb",assists:"ast",steals:"stl",threes:"3PM"})[market]||"stat";
+  return {current,minutes,gameMinutesLeft,remainingPlayerMinutes,projected,margin,verdict,label};
 }
 function dvpSummary(p){
   const d=p.defense_vs_position;
-  if(!d)return '<div class="card-bottom"><span>Positional defense: unavailable for this player / matchup; no adjustment applied.</span></div>';
+  if(!d||d.available===false){
+    const reason=d&&d.reason?d.reason:'No positional-defense diagnostic was returned by the model.';
+    return '<div class="card-bottom"><span>Positional defense: not applied · '+esc(reason)+'</span></div>';
+  }
   const sign=Number(d.adjustment_pct)>0?'+':'';
   const unit=d.stat_unit||({points:'PPG',rebounds:'RPG',assists:'APG',steals:'SPG',threes:'3PM'}[p.market]||'per game');
   const label=d.stat_label||({points:'points',rebounds:'rebounds',assists:'assists',steals:'steals',threes:'3-pointers made'}[p.market]||p.market||'stat');
@@ -271,11 +286,11 @@ function card(p,i){
   const score=g?(g.away_score!=null&&g.home_score!=null?g.away+' '+g.away_score+' – '+g.home_score+' '+g.home:g.away+' @ '+g.home):'Score unavailable';
   const liveText=g&&g.state==='in'?'<span class="live-dot"></span>'+esc((g.period?'Q'+g.period:'LIVE')+(g.clock&&g.clock!=='0:00'?' · '+g.clock+' left':'')):esc(g?g.status:'Game status unavailable');
   const pace=livePace(p);
-  const paceHtml=pace?'<div class="statline" style="margin-top:10px"><div class="mini"><div class="mini-label">Live scoring pace</div><div class="mini-value">'+num(pace.projected,1)+' pts projected</div><div class="mini-label">'+num(pace.points,0)+' pts in '+num(pace.minutes,1)+' min · '+num(pace.gameMinutesLeft,1)+' game min left · '+num(pace.remainingPlayerMinutes,1)+' expected player min left</div></div><div class="mini"><div class="mini-label">Live bet outlook</div><div class="mini-value">'+esc(pace.verdict)+'</div><div class="mini-label">'+(pace.margin>=0?'+':'')+num(pace.margin,1)+' vs '+num(p.line,1)+' line</div></div></div>':'<div class="mini" style="margin-top:10px"><div class="mini-label">Live pace</div><div class="mini-value">Waiting for live minutes and game clock</div><div class="mini-label">Pace estimate appears during a live game when player minutes are available.</div></div>';
+  const paceHtml=pace?'<div class="statline" style="margin-top:10px"><div class="mini"><div class="mini-label">Live '+esc(pace.label)+' pace</div><div class="mini-value">'+num(pace.projected,1)+' '+esc(pace.label)+' projected</div><div class="mini-label">'+num(pace.current,0)+' '+esc(pace.label)+' in '+num(pace.minutes,1)+' min · '+num(pace.gameMinutesLeft,1)+' game min left · '+num(pace.remainingPlayerMinutes,1)+' expected player min left</div></div><div class="mini"><div class="mini-label">Live bet outlook</div><div class="mini-value">'+esc(pace.verdict)+'</div><div class="mini-label">'+(pace.margin>=0?'+':'')+num(pace.margin,1)+' vs '+num(p.line,1)+' line</div></div></div>':'<div class="mini" style="margin-top:10px"><div class="mini-label">Live pace</div><div class="mini-value">Waiting for live minutes and game clock</div><div class="mini-label">Pace estimate appears when the matching live stat, player minutes and game clock are available.</div></div>';
   const gradeHtml=gr?'<span class="grade '+(gr==='HIT'?'hit':gr==='MISS'?'miss':'push')+'">'+(gr==='HIT'?'✓ HIT':gr==='MISS'?'✕ MISS':'PUSH')+'</span>':'<span>Pending</span>';
   return '<article class="player-card '+d+'"><div class="player-top"><div><div class="player-name">'+esc((i+1)+'. '+p.player+(p.roster_team?' ('+p.roster_team+')':''))+'</div><div class="matchup">'+esc(p.game||'Matchup unavailable')+' · '+esc(p.sample_label||'Projection unavailable')+'</div></div><span class="decision '+d+'">'+esc(shownRecommendation)+'</span></div>'+
   '<div class="scorebox"><div><div class="score-label">Live game score</div><div class="score">'+esc(score)+'</div></div><div class="game-status">'+liveText+'</div></div>'+
-  '<div class="statline"><div class="mini"><div class="mini-label">Live points / prop line</div><div class="mini-value">'+(pts==null?'—':pts)+' <span>/ '+num(p.line)+' pts</span></div><div class="progress"><span style="width:'+progress+'%"></span></div></div><div class="mini"><div class="mini-label">Pre-game model projection</div><div class="mini-value">'+num(p.projection)+' <span>pts</span></div><div class="mini-label">'+num(p.best_probability)+'% best-side probability</div></div></div>'+paceHtml+
+  '<div class="statline"><div class="mini"><div class="mini-label">Live '+esc(({points:'points',rebounds:'rebounds',assists:'assists',steals:'steals',threes:'3-pointers made'})[p.market]||'stat')+' / prop line</div><div class="mini-value">'+(pts==null?'—':pts)+' <span>/ '+num(p.line)+' '+esc(({points:'pts',rebounds:'reb',assists:'ast',steals:'stl',threes:'3PM'})[p.market]||'stat')+'</span></div><div class="progress"><span style="width:'+progress+'%"></span></div></div><div class="mini"><div class="mini-label">Pre-game model projection</div><div class="mini-value">'+num(p.projection)+' <span>'+esc(({points:'pts',rebounds:'reb',assists:'ast',steals:'stl',threes:'3PM'})[p.market]||'stat')+'</span></div><div class="mini-label">'+num(p.best_probability)+'% best-side probability</div></div></div>'+paceHtml+
   '<div class="card-bottom"><span>Pick: <b>'+esc(p.best_side||'—')+'</b> · '+num(p.edge_pp)+' pp edge</span><span class="ev">'+(p.expected_profit_per_100==null?'—':'$'+num(p.expected_profit_per_100,2)+' EV')+'</span></div>'+
   '<div class="card-bottom"><span>Odds O '+esc(p.over_odds??'—')+' / U '+esc(p.under_odds??'—')+'</span><span>'+gradeHtml+'</span></div>'+injurySummary(p)+balldontlieSummary(p)+dvpSummary(p)+lineEditor(p)+reasoning(p)+'</article>';
 }
@@ -346,13 +361,13 @@ function bpLineCard(p,i){
   const stake=bankroll>0&&qualifies?bankroll*0.05:null;
   const cls=p.recommendation==='VALUE CANDIDATE'?'value':p.recommendation==='LEAN / VERIFY'?'lean':'pass';
   const label=bpMarketLabel(p.market);
-  return '<article class="player-card '+cls+'"><div class="player-top"><div><div class="player-name">'+esc((i+1)+'. '+p.player+(p.team?' ('+p.team+')':''))+'</div><div class="matchup">'+esc(p.game||'NBA player prop')+' · Proprietary ESPN game-log model</div></div><span class="decision '+cls+'">'+esc(p.recommendation||'PASS')+'</span></div>'+
+  return '<article class="player-card '+cls+'"><div class="player-top"><div><div class="player-name">'+esc((i+1)+'. '+p.player+(p.team?' ('+p.team+')':''))+'</div><div class="matchup">'+esc(p.game||'NBA player prop')+' · Proprietary ESPN game-log model · DraftKings odds</div></div><span class="decision '+cls+'">'+esc(p.recommendation||'PASS')+'</span></div>'+
     '<div class="scorebox"><div><div class="score-label">'+esc(label)+' line</div><div class="score">'+esc(p.line)+'</div></div><div class="game-status">Over '+esc(odds(p.overOdds??p.over_odds))+'<br>Under '+esc(odds(p.underOdds??p.under_odds))+'</div></div>'+
     '<div class="statline"><div class="mini"><div class="mini-label">Our projection</div><div class="mini-value">'+num(p.projection,2)+'</div><div class="mini-label">'+esc(p.sample_label||'Game-log sample')+'</div></div><div class="mini"><div class="mini-label">Over / Under / Push</div><div class="mini-value">'+num(p.over_probability,1)+'% / '+num(p.under_probability,1)+'%</div><div class="mini-label">Push '+num(p.push_probability,1)+'%</div></div></div>'+
     '<div class="card-bottom"><span>Model pick: <b>'+esc(p.best_side||'—')+'</b> · '+num(p.edge_pp)+' pp edge</span><span class="ev">'+(p.expected_value_pct==null?'—':(Number(p.expected_value_pct)>0?'+':'')+num(p.expected_value_pct,2)+'% EV')+'</span></div>'+
     '<div class="card-bottom"><span>Simulations: '+esc(p.simulations||50000).toLocaleString()+'</span><span>Odds O '+esc(odds(p.overOdds??p.over_odds))+' / U '+esc(odds(p.underOdds??p.under_odds))+'</span></div>'+
-    '<div class="card-bottom"><span>DK/FD market: '+esc((p.market_books||[]).join(', ')||'No verified pair')+'</span><span>Stake: '+(stake==null?'Enter bankroll / no qualifying bet':'$'+num(stake,2)+' (5%)')+'</span></div>'+
-    '<div class="card-bottom"><span>Kelly diagnostic: '+(p.kelly_fraction_pct==null?'—':num(p.kelly_fraction_pct,2)+'%')+'</span><span>50/50 model-market blend</span></div>'+injurySummary(p)+balldontlieSummary(p)+dvpSummary(p)+lineEditor(p)+'</article>';
+    '<div class="card-bottom"><span>Sportsbook: '+esc((p.market_books||[]).join(', ')||'DraftKings')+'</span><span>Stake: '+(stake==null?'Enter bankroll / no qualifying bet':'$'+num(stake,2)+' (5%)')+'</span></div>'+
+    '<div class="card-bottom"><span>Kelly diagnostic: '+(p.kelly_fraction_pct==null?'—':num(p.kelly_fraction_pct,2)+'%')+'</span><span>50/50 model/DraftKings blend</span></div>'+injurySummary(p)+balldontlieSummary(p)+dvpSummary(p)+lineEditor(p)+'</article>';
 }
 function allModelEV(){
   const all=rankEV(data).map(p=>({...p,market:'points'}));
@@ -370,10 +385,10 @@ function bpCard(p,i){
   const cls=positive?'value':hasProjection?'lean':'pass';
   const odds=x=>x==null?'—':(Number(x)>0?'+':'')+x;
   const evText=hasEV?((Number(p.ev)>0?'+':'')+num(Number(p.ev)*100,1)+'%'):'—';
-  return '<article class="player-card '+cls+'"><div class="player-top"><div><div class="player-name">'+esc((i+1)+'. '+p.player+(p.team?' ('+p.team+')':''))+'</div><div class="matchup">'+esc(p.game||'NBA player prop')+' · BettingPros</div></div><span class="decision '+cls+'">'+decision+'</span></div>'+
+  return '<article class="player-card '+cls+'"><div class="player-top"><div><div class="player-name">'+esc((i+1)+'. '+p.player+(p.team?' ('+p.team+')':''))+'</div><div class="matchup">'+esc(p.game||'NBA player prop')+' · DraftKings via PropLine</div></div><span class="decision '+cls+'">'+decision+'</span></div>'+
     '<div class="scorebox"><div><div class="score-label">'+esc(bpMarketLabel(p.market))+' line</div><div class="score">'+esc(p.line)+'</div></div><div class="game-status">Over '+esc(odds(p.overOdds))+'<br>Under '+esc(odds(p.underOdds))+'</div></div>'+
-    '<div class="statline"><div class="mini"><div class="mini-label">BettingPros projection</div><div class="mini-value">'+(hasProjection?num(p.projection,2):'—')+'</div><div class="mini-label">'+(p.side?'Suggested side: '+esc(String(p.side).toUpperCase()):'No verified side supplied')+'</div></div><div class="mini"><div class="mini-label">Expected value</div><div class="mini-value">'+evText+'</div><div class="mini-label">'+(p.probability!=null&&Number.isFinite(Number(p.probability))?'Projection probability '+num(Number(p.probability)>1?Number(p.probability):Number(p.probability)*100,1)+'%':(p.rating!=null?'Bet rating '+esc(p.rating):'Not supplied by API response'))+'</div></div></div>'+
-    '<div class="card-bottom"><span>Market: <b>'+esc(bpMarketLabel(p.market))+'</b></span><span>Source: BettingPros API</span></div></article>';
+    '<div class="statline"><div class="mini"><div class="mini-label">Model projection</div><div class="mini-value">'+(hasProjection?num(p.projection,2):'—')+'</div><div class="mini-label">'+(p.side?'Suggested side: '+esc(String(p.side).toUpperCase()):'No verified side supplied')+'</div></div><div class="mini"><div class="mini-label">Expected value</div><div class="mini-value">'+evText+'</div><div class="mini-label">'+(p.probability!=null&&Number.isFinite(Number(p.probability))?'Projection probability '+num(Number(p.probability)>1?Number(p.probability):Number(p.probability)*100,1)+'%':(p.rating!=null?'Bet rating '+esc(p.rating):'Not supplied by API response'))+'</div></div></div>'+
+    '<div class="card-bottom"><span>Market: <b>'+esc(bpMarketLabel(p.market))+'</b></span><span>Source: DraftKings via PropLine</span></div></article>';
 }
 function render(){
   const q=el('search').value.toLowerCase();let list=[];
@@ -484,9 +499,12 @@ async function recordResult(btn){
   }catch(e){alert('Could not save result: '+String(e.message||e))}
 }
 const yesterday=new Date();yesterday.setDate(yesterday.getDate()-1);el('historyDate').value=localDateKey(yesterday);el('historyDate').addEventListener('change',loadPastPlays);
+// Start the live scoreboard independently of the prop-board request. A slow or
+// unavailable odds/model request must never prevent live scores from rendering.
+updateLive();
 load();loadPastPlays();
 ['rebounds','assists','steals','threes'].forEach(loadBP);
 setInterval(async()=>{await updateLive();render();renderFull()},15000);
-setInterval(()=>load(false),300000);
+setInterval(()=>{['rebounds','assists','steals','threes'].forEach(m=>{delete bpCache[m];loadBP(m)});load(false)},300000);
 setInterval(()=>loadPastPlays(),60000);
 </script></body></html>

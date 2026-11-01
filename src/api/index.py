@@ -308,6 +308,7 @@ def official_injury_status():
 ESPN_BASE = "https://site.web.api.espn.com/apis/common/v3/sports/basketball/nba"
 ESPN_SEARCH = "https://site.web.api.espn.com/apis/search/v2"
 STAT_FIELDS = {
+    "points": ("points", "PTS"),
     "rebounds": ("rebounds", "REB"),
     "assists": ("assists", "AST"),
     "steals": ("steals", "STL"),
@@ -370,6 +371,71 @@ def _team_codes_from_game(game):
  for name,code in _TEAM_ALIASES.items():
   if name in lower: found.add(code)
  return found
+
+_TANK01_DVP_TABLE_CACHE = {"at": 0.0, "tables": None, "meta": None}
+_TANK01_DVP_TABLE_TTL = 21600
+
+
+def _fetch_tank01_dvp_tables():
+ """Fetch all five positional defense markets from one Tank01 request."""
+ now = time.time()
+ cached = _TANK01_DVP_TABLE_CACHE
+ if cached.get("tables") is not None and now - cached.get("at", 0.0) < _TANK01_DVP_TABLE_TTL:
+  return cached["tables"], cached["meta"]
+ payload, headers = _tank01_request("/getNBATeams", {"teamStats": "true"}, timeout=20)
+ body = payload.get("body")
+ if isinstance(body, list):
+  teams = body
+ elif isinstance(body, dict):
+  teams = [value for value in body.values() if isinstance(value, dict)]
+ else:
+  teams = []
+ if len(teams) < 30:
+  raise RuntimeError("Tank01 did not return all 30 NBA teams.")
+ stat_keys = {"PTS": "pts", "REB": "reb", "AST": "ast", "STL": "stl", "3PM": "tptfgm"}
+ positions = ("PG", "SG", "SF", "PF", "C")
+ tables = {stat: {} for stat in stat_keys}
+ game_counts = []
+ for team in teams:
+  if not isinstance(team, dict):
+   continue
+  team_code = _canonical_team_code(team.get("teamAbv"))
+  defense = team.get("defensiveStats")
+  if not team_code or not isinstance(defense, dict):
+   continue
+  try:
+   games = int(float(defense.get("gamesPlayed")))
+  except (TypeError, ValueError, OverflowError):
+   games = 0
+  if games > 0:
+   game_counts.append(games)
+  for stat, field in stat_keys.items():
+   position_values = defense.get(field)
+   if not isinstance(position_values, dict):
+    continue
+   for position in positions:
+    try:
+     value = float(position_values.get(position))
+    except (TypeError, ValueError, OverflowError):
+     continue
+    if math.isfinite(value) and value >= 0:
+     tables[stat][(team_code, position)] = {stat: value}
+ for stat, table in tables.items():
+  if len(table) < 150:
+   raise RuntimeError("Tank01 positional table is incomplete for " + stat + ".")
+ if len(game_counts) < 30:
+  raise RuntimeError("Tank01 did not provide a games-played sample for every team.")
+ meta = {
+  "min_games_played": min(game_counts),
+  "max_games_played": max(game_counts),
+  "team_count": len(game_counts),
+  "source": "Tank01 RapidAPI getNBATeams teamStats=true",
+  "rate_limit_remaining": headers.get("x-ratelimit-requests-remaining"),
+ }
+ _TANK01_DVP_TABLE_CACHE.update({"at": now, "tables": tables, "meta": meta})
+ return tables, meta
+
+
 def _fetch_dvp_table(stat="PTS"):
  stat=str(stat or "PTS").upper().strip()
  stat_aliases={"POINTS":"PTS","REBOUNDS":"REB","ASSISTS":"AST","STEALS":"STL","THREES":"3PM"}
@@ -401,18 +467,20 @@ def _fetch_dvp_table(stat="PTS"):
    raise RuntimeError("Individual-position "+stat+" defense-vs-position source returned an incomplete table.")
   return parsed," ".join(parser.text)
 
- # Use current-season positional data only once the source reports at least
- # 10 games for every team. Until then, use the completed prior season.
+ # Use the current season as soon as Tank01 supplies a complete table.
+ # Early-season samples are intentionally accepted and labeled as small samples.
  try:
-  current_table,current_text=fetch_and_parse("season")
+  tank_tables,tank_meta=_fetch_tank01_dvp_tables()
+  tank_table=tank_tables.get(stat) or {}
+  if len(tank_table)>=150:
+   parsed=tank_table
+   season="Tank01 current season ("+str(tank_meta["min_games_played"])+" games minimum per team; early-season sample)"
+  else:
+   parsed,_=fetch_and_parse("prev")
+   season="previous season (Tank01 current-season table incomplete)"
  except Exception:
-  current_table,current_text=None,""
- sample=re.search(r"\((\d+)\s*[–-]\s*(\d+)\s+games?\s+a\s+team\)",current_text,re.I)
- if current_table is not None and sample and int(sample.group(1))>=10:
-  parsed,season=current_table,"current season"
- else:
   parsed,_=fetch_and_parse("prev")
-  season="previous season (current season sample below 10 games or unavailable)"
+  season="previous season (Tank01 current-season data unavailable)"
  _DVP_STAT_CACHE[stat]={"at":now,"data":parsed,"season":season}
  if stat=="PTS":
   _DVP_CACHE.update({"at":now,"data":parsed,"season":season})
@@ -525,19 +593,34 @@ def _espn_player_position(athlete_id,team_code):
  _ESPN_POSITION_CACHE[key]=found
  return found
 def _dvp_matchup_adjustment(athlete_id,player_team,game,market,player_name=None):
+ def unavailable(reason, **details):
+  result={"available":False,"adjustment_applied":False,"reason":reason}
+  result.update(details)
+  return result
  try:
   market=str(market or "").lower().strip()
   stat_fields={"points":"PTS","rebounds":"REB","assists":"AST","steals":"STL","threes":"3PM"}
   stat=stat_fields.get(market)
-  if not stat: return None
-  team_code=_canonical_team_code(player_team); game_teams=_team_codes_from_game(game)
-  if not team_code or len(game_teams)<2: return None
+  if not stat: return unavailable("Unsupported prop category; no positional-defense table is mapped for this market.")
+  team_code=_canonical_team_code(player_team)
+  game_teams=_team_codes_from_game(game)
+  if len(game_teams)!=2:
+   return unavailable("Matchup could not be parsed into two verified NBA teams.", player_team=team_code or None)
+  if not team_code and player_name:
+   # PropLine often omits a team suffix. Resolve the exact player name against
+   # only the two verified matchup rosters; never infer from name or position.
+   try:
+    roster_id, roster_team = _espn_roster_player_id(player_name, game_teams)
+    if roster_id and roster_team in game_teams:
+     team_code = roster_team
+   except Exception:
+    team_code = None
+  if not team_code:
+   return unavailable("Player team was absent from the prop quote and could not be uniquely verified on either matchup roster.", matchup_teams=game_teams)
+  if team_code not in game_teams:
+   return unavailable("Player team does not match either team in the supplied matchup.", player_team=team_code, matchup_teams=game_teams)
   opponent=next((code for code in game_teams if code!=team_code),None)
-  if not opponent: return None
-
-  # ESPN can provide a specific PG/SG/SF/PF/C listing. API-Sports Basketball
-  # supplies broad Guard/Forward/Center labels only, so it is a cross-check or
-  # fallback, never a source of invented sub-positions.
+  if not opponent: return unavailable("Opponent could not be identified from the matchup.")
   espn_position=_espn_player_position(athlete_id,team_code)
   api_position=None
   position_source="ESPN roster/profile"
@@ -547,7 +630,7 @@ def _dvp_matchup_adjustment(athlete_id,player_team,game,market,player_name=None)
    api_position=_api_sports_player_position(player_name)
    if espn_position in ("G","F"):
     if api_position and api_position!=espn_position:
-     return None
+     return unavailable("ESPN and API-Sports broad position labels conflict; adjustment withheld.",player_team=team_code,opponent=opponent,espn_position=espn_position,api_sports_position=api_position)
     position_crosscheck="confirmed" if api_position==espn_position else "unavailable"
     position_source="ESPN broad position"+(" + API-Sports confirmed" if api_position==espn_position else "")
     position_confidence="medium" if api_position==espn_position else "low"
@@ -556,27 +639,32 @@ def _dvp_matchup_adjustment(athlete_id,player_team,game,market,player_name=None)
     position_source="API-Sports Basketball fallback"
     position_confidence="medium"
     position_crosscheck="fallback_used"
-  if not espn_position: return None
-
+  if not espn_position:
+   return unavailable("Player position was not found in ESPN or the exact-name API-Sports lookup.",player_team=team_code,opponent=opponent)
   position_keys={"G":("PG","SG"),"F":("SF","PF")}.get(espn_position,(espn_position,))
-  table=_fetch_dvp_table(stat)
+  try:
+   table=_fetch_dvp_table(stat)
+  except Exception as exc:
+   return unavailable("Positional-defense data source failed: "+type(exc).__name__+".",player_team=team_code,opponent=opponent,position=espn_position,stat=market)
   allowed_values=[table.get((opponent,pos),{}).get(stat) for pos in position_keys]
-  if any(value is None for value in allowed_values): return None
+  if any(value is None for value in allowed_values):
+   return unavailable("The defensive table did not contain the opponent's required position rows.",player_team=team_code,opponent=opponent,position=espn_position,stat=market)
   allowed=sum(allowed_values)/len(allowed_values)
   league_values=[row[stat] for (team,pos),row in table.items() if pos in position_keys and stat in row]
-  if len(league_values)<20: return None
+  if len(league_values)<20:
+   return unavailable("The positional-defense table has too few league comparison rows.",player_team=team_code,opponent=opponent,position=espn_position,stat=market)
   league_average=sum(league_values)/len(league_values)
-  if league_average<=0: return None
+  if league_average<=0:
+   return unavailable("The positional-defense league average is invalid.",player_team=team_code,opponent=opponent,position=espn_position,stat=market)
   ratio=allowed/league_average
   factor=max(0.92,min(1.08,1.0+(ratio-1.0)*0.30))
-  position_names={"PG":"Point Guard","SG":"Shooting Guard","SF":"Small Forward","PF":"Power Forward","C":"Center",
-   "G":"Guard (PG/SG blended)","F":"Forward (SF/PF blended)"}
+  position_names={"PG":"Point Guard","SG":"Shooting Guard","SF":"Small Forward","PF":"Power Forward","C":"Center","G":"Guard (PG/SG blended)","F":"Forward (SF/PF blended)"}
   stat_labels={"points":"points","rebounds":"rebounds","assists":"assists","steals":"steals","threes":"3-pointers made"}
   stat_units={"points":"PPG","rebounds":"RPG","assists":"APG","steals":"SPG","threes":"3PM"}
   season=_DVP_STAT_CACHE.get(stat,{}).get("season") or "season not identified"
   position_method="PG/SG 50/50 blend" if espn_position=="G" else "SF/PF 50/50 blend" if espn_position=="F" else "Individual listed position"
   blend_weights={position_keys[0]:1.0} if len(position_keys)==1 else {position_keys[0]:0.5,position_keys[1]:0.5}
-  return {"position":espn_position,"position_group":espn_position,"position_name":position_names[espn_position],
+  return {"available":True,"adjustment_applied":True,"position":espn_position,"position_group":espn_position,"position_name":position_names[espn_position],
    "position_source":position_source,"position_confidence":position_confidence,"position_crosscheck":position_crosscheck,
    "blend_weights":blend_weights,"opponent":opponent,"opponent_name":_TEAM_NAMES.get(opponent,opponent),
    "stat":market,"stat_label":stat_labels[market],"stat_unit":stat_units[market],
@@ -584,7 +672,8 @@ def _dvp_matchup_adjustment(athlete_id,player_team,game,market,player_name=None)
    "league_relative_ratio":round(ratio,3),"adjustment_pct":round((factor-1.0)*100,2),"factor":round(factor,4),
    "source":"NBA House individual-position "+stat+" allowed table","source_season":season,
    "method":position_method+" "+stat_labels[market]+" allowed per game vs matching-position league average; 30% dampening; adjustment capped at +/-8%"}
- except Exception: return None
+ except Exception as exc:
+  return unavailable("Positional-defense calculation failed: "+type(exc).__name__+".")
 
 def _espn_roster_player_id(name, team_codes):
     """Resolve an exact player identity only from the two teams in the matchup."""
@@ -1114,7 +1203,7 @@ def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, ma
         target_mean *= minute_factor
 
     matchup_factor = 1.0
-    if isinstance(matchup_adjustment, dict):
+    if isinstance(matchup_adjustment, dict) and matchup_adjustment.get("available", True):
         try:
             candidate = float(matchup_adjustment.get("factor", 1.0))
             if math.isfinite(candidate):
@@ -1163,7 +1252,7 @@ def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, ma
         "expected_value_pct":round(best[0]*100,2) if best else None,
         "edge_pp":None,
         "recommendation":"VALUE CANDIDATE" if best and best[0]>0.05 else ("LEAN / VERIFY" if best and best[0]>0 else "PASS"),
-        "model_components":["exponentially weighted history","10-game form signal","minutes adjustment" if valid_minutes else "minutes unavailable; no adjustment","defense-vs-position matchup adjustment" if matchup_adjustment else "defense-vs-position unavailable; no adjustment","empirical/parametric mixture distribution","Monte Carlo probability estimation"],
+        "model_components":["exponentially weighted history","10-game form signal","minutes adjustment" if valid_minutes else "minutes unavailable; no adjustment","defense-vs-position matchup adjustment" if isinstance(matchup_adjustment, dict) and matchup_adjustment.get("available", True) else "defense-vs-position unavailable; no adjustment","empirical/parametric mixture distribution","Monte Carlo probability estimation"],
         "model_method":"recency-weighted empirical/parametric mixture with minutes adjustment; provisional pending out-of-sample calibration",
         "sample_size":n,"long_run_mean":round(long_mean,2),"recent5_mean":round(recent5_mean,2),        "recent10_mean":round(recent10_mean,2),"weighted_mean":round(weighted_mean,2),
         "distribution_std_dev":round(std_dev,2),"minute_adjustment_factor":round(minute_factor,3),
@@ -1485,18 +1574,201 @@ def _score_blended_market(model, market_quote):
     })
     return model
 
+_PROPLINE_CACHE = {"at": 0.0, "events": None, "headers": {}}
+_PROPLINE_CACHE_TTL = 60
+_PROPLINE_STALE_TTL = 600
+_PROPLINE_COOLDOWN_UNTIL = 0.0
+_PROPLINE_MARKETS = {
+    "points": "player_points",
+    "rebounds": "player_rebounds",
+    "assists": "player_assists",
+    "steals": "player_steals",
+    "threes": "player_threes",
+}
+
+
+def _propline_fetch_events():
+    """Fetch one cached DraftKings-only NBA slate from PropLine."""
+    global _PROPLINE_COOLDOWN_UNTIL
+    now = time.time()
+    cached_events = _PROPLINE_CACHE.get("events")
+    age = now - float(_PROPLINE_CACHE.get("at") or 0.0)
+    if cached_events is not None and age < _PROPLINE_CACHE_TTL:
+        return cached_events, "cache", _PROPLINE_CACHE.get("headers") or {}
+
+    api_key = os.getenv("PROPLINE_API_KEY", "").strip()
+    if not api_key:
+        raise HTTPException(status_code=503, detail="PROPLINE_API_KEY is missing from this deployment.")
+
+    if now < _PROPLINE_COOLDOWN_UNTIL:
+        if cached_events is not None and age < _PROPLINE_STALE_TTL:
+            return cached_events, "stale-cache", _PROPLINE_CACHE.get("headers") or {}
+        retry = max(1, int(_PROPLINE_COOLDOWN_UNTIL - now))
+        raise HTTPException(status_code=503, detail="PropLine rate-limit cooldown active. Retry in " + str(retry) + " seconds.")
+
+    params = urlencode({
+        "markets": ",".join(_PROPLINE_MARKETS.values()),
+        "bookmakers": "draftkings",
+        "includeLinks": "true",
+        "max_age": 300,
+    })
+    request = Request(
+        "https://api.prop-line.com/v1/sports/basketball_nba/odds?" + params,
+        headers={
+            "X-API-Key": api_key,
+            "Accept": "application/json",
+            "User-Agent": "ColtsNBAEdge/1.0",
+        },
+    )
+    try:
+        with urlopen(request, timeout=20) as response:
+            payload = json.loads(response.read().decode("utf-8", "replace"))
+            headers = {
+                "daily_limit": response.headers.get("X-Daily-Limit"),
+                "daily_used": response.headers.get("X-Daily-Used"),
+                "daily_remaining": response.headers.get("X-Daily-Remaining"),
+                "fetched_at": datetime.now(timezone.utc).isoformat(),
+            }
+        if isinstance(payload, list):
+            events = payload
+        elif isinstance(payload, dict):
+            events = payload.get("events") or payload.get("data") or payload.get("results")
+            if not isinstance(events, list):
+                events = [payload] if payload.get("bookmakers") else []
+        else:
+            events = []
+        if not isinstance(events, list):
+            raise ValueError("PropLine odds response did not contain an event list.")
+        _PROPLINE_CACHE.update({"at": time.time(), "events": events, "headers": headers})
+        _PROPLINE_COOLDOWN_UNTIL = 0.0
+        return events, "live", headers
+    except HTTPError as exc:
+        if exc.code == 429:
+            retry_after = exc.headers.get("Retry-After") if exc.headers else None
+            try:
+                cooldown = max(1, min(3600, int(retry_after)))
+            except (TypeError, ValueError):
+                cooldown = 60
+            _PROPLINE_COOLDOWN_UNTIL = time.time() + cooldown
+            if cached_events is not None and age < _PROPLINE_STALE_TTL:
+                return cached_events, "stale-cache", _PROPLINE_CACHE.get("headers") or {}
+            raise HTTPException(status_code=503, detail="PropLine request limit reached. Retry in " + str(cooldown) + " seconds.") from exc
+        if exc.code in (401, 403):
+            raise HTTPException(status_code=502, detail="PropLine rejected PROPLINE_API_KEY or this account tier.") from exc
+        raise HTTPException(status_code=502, detail="PropLine NBA odds endpoint returned HTTP " + str(exc.code) + ".") from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        if cached_events is not None and age < _PROPLINE_STALE_TTL:
+            return cached_events, "stale-cache", _PROPLINE_CACHE.get("headers") or {}
+        raise HTTPException(status_code=502, detail="Could not retrieve DraftKings NBA props from PropLine: " + type(exc).__name__ + ".") from exc
+
+
+def _propline_market_props(events, market):
+    """Normalize DraftKings main-line Over/Under outcomes into one row per player."""
+    market_key = _PROPLINE_MARKETS[market]
+    grouped = {}
+    for event in events or []:
+        if not isinstance(event, dict):
+            continue
+        event_id = str(event.get("id") or "")
+        away = str(event.get("away_team") or "")
+        home = str(event.get("home_team") or "")
+        matchup = (away + " @ " + home).strip(" @")
+        for bookmaker in event.get("bookmakers") or []:
+            if not isinstance(bookmaker, dict) or str(bookmaker.get("key") or "").lower() != "draftkings":
+                continue
+            for market_row in bookmaker.get("markets") or []:
+                if not isinstance(market_row, dict) or market_row.get("key") != market_key:
+                    continue
+                if market_row.get("suspended_at"):
+                    continue
+                line_type = str(market_row.get("line_type") or "").lower()
+                if line_type and line_type != "main":
+                    continue
+                updated = market_row.get("last_update")
+                for outcome in market_row.get("outcomes") or []:
+                    if not isinstance(outcome, dict):
+                        continue
+                    side = str(outcome.get("name") or "").strip().lower()
+                    if side not in ("over", "under"):
+                        continue
+                    player_text = str(
+                        outcome.get("description")
+                        or outcome.get("player")
+                        or market_row.get("player")
+                        or ""
+                    ).strip()
+                    if not player_text:
+                        continue
+                    team = ""
+                    team_match = re.search(r"\(([A-Z]{2,3})\)\s*$", player_text)
+                    if team_match:
+                        team = _canonical_team_code(team_match.group(1)) or team_match.group(1)
+                        player_text = player_text[:team_match.start()].strip()
+                    try:
+                        point = float(outcome.get("point"))
+                        price = int(float(outcome.get("price")))
+                    except (TypeError, ValueError, OverflowError):
+                        continue
+                    if not math.isfinite(point) or price == 0 or abs(price) > 10000:
+                        continue
+                    key = (event_id, _norm_player_name(player_text), point)
+                    row = grouped.setdefault(key, {
+                        "player": player_text,
+                        "team": team,
+                        "game": matchup,
+                        "event_id": event_id,
+                        "line": point,
+                        "over_odds": None,
+                        "under_odds": None,
+                        "last_update": updated,
+                        "bookmaker": "DraftKings",
+                        "bookmaker_link": bookmaker.get("link"),
+                    })
+                    if side == "over":
+                        row["over_odds"] = price
+                    else:
+                        row["under_odds"] = price
+    output = []
+    for row in grouped.values():
+        if row.get("over_odds") is None or row.get("under_odds") is None:
+            continue
+        output.append(row)
+    output.sort(key=lambda row: (row.get("game") or "", row.get("player") or ""))
+    return output
+
+
+def _propline_quote(prop):
+    over_odds = prop.get("over_odds")
+    under_odds = prop.get("under_odds")
+    over_probability = _american_probability(over_odds)
+    under_probability = _american_probability(under_odds)
+    if over_probability is None or under_probability is None:
+        return None
+    total = over_probability + under_probability
+    if total <= 0:
+        return None
+    return {
+        "over_probability": over_probability / total,
+        "under_probability": under_probability / total,
+        "over_odds": over_odds,
+        "under_odds": under_odds,
+        "over_book": "DraftKings",
+        "under_book": "DraftKings",
+        "books_used": ["DraftKings"],
+    }
+
+
 @app.get("/api/proprietary-market-board")
 def proprietary_market_board(market: str = "rebounds"):
-    global _BP_RATE_LIMIT_UNTIL
     market = market.lower().strip()
     if market not in STAT_FIELDS:
-        raise HTTPException(status_code=400, detail="Use rebounds, assists, steals, or threes.")
+        raise HTTPException(status_code=400, detail="Use points, rebounds, assists, steals, or threes.")
     now = time.time()
     cached_board = _BP_BOARD_CACHE.get(market)
     injury_feed = _load_official_injury_feed()
-    # The points-board request owns the one-per-cache-window BALLDONTLIE fetch.
-    # Other prop markets reuse that cached schedule instead of consuming more free-tier calls.
-    bdl_games = _load_balldontlie_games(allow_fetch=False)
+    bdl_games = _load_balldontlie_games(allow_fetch=(market == "points"))
     if cached_board and now - cached_board[0] < _BP_BOARD_TTL_SECONDS:
         cached_result = json.loads(json.dumps(cached_board[1]))
         for cached_prop in cached_result.get("props") or []:
@@ -1505,44 +1777,31 @@ def proprietary_market_board(market: str = "rebounds"):
         cached_result["injury_feed"] = injury_feed.get("meta", {})
         cached_result["balldontlie"] = {key: value for key, value in bdl_games.items() if key != "games"}
         return JSONResponse(cached_result)
-    api_key = os.getenv("BETTINGPROS_API_KEY", "").strip()
-    if not api_key:
-        raise HTTPException(status_code=503, detail="BettingPros lines unavailable: API key missing.")
-    market_id = BP_MARKETS[market]
-    bp_payload, props_source = _bp_fetch_props(market, 50)
+
+    events, props_source, quota = _propline_fetch_events()
+    props = _propline_market_props(events, market)
     field, label = STAT_FIELDS[market]
     output, failures = [], []
-    props = bp_payload.get("props") or [] if isinstance(bp_payload, dict) else []
-    offers_by_event = {}
     for raw in props:
-        participant = raw.get("participant") or {}
-        player_obj = participant.get("player") or {}
-        event = raw.get("event") or {}
-        event_id = event.get("id") or raw.get("event_id")
-        if event_id and str(event_id) not in offers_by_event:
-            offers_by_event[str(event_id)] = _bp_event_offers(event_id, market)
-        over, under = raw.get("over") or {}, raw.get("under") or {}
-        name = participant.get("name") or raw.get("player_name") or (raw.get("player") if isinstance(raw.get("player"), str) else None) or player_obj.get("name") or player_obj.get("full_name")
+        name = raw.get("player")
         if not name:
             continue
-        quote = _bp_two_book_market(offers_by_event.get(str(event_id), []), name) if event_id else None
-        line = quote["line"] if quote else over.get("line", under.get("line", raw.get("line", raw.get("line_value"))))
         try:
-            line = float(line)
-        except (TypeError, ValueError):
-            continue
-        over_odds = quote["over_odds"] if quote else over.get("odds", raw.get("over_odds"))
-        under_odds = quote["under_odds"] if quote else under.get("odds", raw.get("under_odds"))
-        try:
+            line = float(raw.get("line"))
+            quote = _propline_quote(raw)
             athlete_id = _espn_player_id(name)
             if not athlete_id:
                 failures.append(name + ": ESPN player match unavailable")
                 continue
             values, sample_label, player_minutes = _player_history(athlete_id, field, label)
-            team_for_dvp = player_obj.get("team") or participant.get("team_abbreviation") or participant.get("team") or ""
-            event_matchup = event.get("name") or raw.get("event_name") or raw.get("matchup") or _bp_event_matchup(event_id)
+            team_for_dvp = raw.get("team") or ""
+            event_matchup = raw.get("game") or ""
             matchup_adjustment = _dvp_matchup_adjustment(athlete_id, team_for_dvp, event_matchup, market, name)
-            model = _simulate_market(values, line, None, None, _norm_player_name(name) + market, minutes=player_minutes, market=market, matchup_adjustment=matchup_adjustment)
+            model = _simulate_market(
+                values, line, None, None, _norm_player_name(name) + market,
+                minutes=player_minutes, market=market,
+                matchup_adjustment=matchup_adjustment,
+            )
             if not model:
                 failures.append(name + ": fewer than five valid game logs")
                 continue
@@ -1555,11 +1814,8 @@ def proprietary_market_board(market: str = "rebounds"):
                 model["best_probability"] = None
                 model["best_odds"] = None
                 model["edge_pp"] = None
-                model["blend_method"] = "No verified DK/FD two-sided quote at a matching line; no bet rating"
+                model["blend_method"] = "No verified two-sided DraftKings quote; no bet rating"
 
-            # Apply the same minimum sample rule used by the points board.
-            # A small sample can still produce a visible projection, but never
-            # a positive-EV recommendation or a Top 5 EV entry.
             sample_size = int(model.get("sample_size") or len(values))
             if sample_size < 8:
                 model["confidence"] = "low"
@@ -1575,12 +1831,23 @@ def proprietary_market_board(market: str = "rebounds"):
                 )
             else:
                 model.setdefault("confidence", "provisional")
+
             market_prop = {
                 "player": name,
-                "team": player_obj.get("team") or participant.get("team_abbreviation") or participant.get("team") or "",
+                "team": raw.get("team") or "",
                 "game": event_matchup,
-                "market": market, "line": line, "over_odds": over_odds, "under_odds": under_odds,
-                "sample_label": sample_label, "athlete_id": athlete_id, "games_used": len(values),
+                "market": market,
+                "line": line,
+                "over_odds": raw.get("over_odds"),
+                "under_odds": raw.get("under_odds"),
+                "sample_label": sample_label,
+                "athlete_id": athlete_id,
+                "games_used": len(values),
+                "event_id": raw.get("event_id"),
+                "line_source": "DraftKings via PropLine",
+                "line_updated_at": raw.get("last_update"),
+                "bookmaker_link": raw.get("bookmaker_link"),
+                "market_books": ["DraftKings"],
                 "position": (matchup_adjustment or {}).get("position"),
                 "defense_vs_position": matchup_adjustment,
                 **model,
@@ -1590,18 +1857,26 @@ def proprietary_market_board(market: str = "rebounds"):
             output.append(market_prop)
         except Exception as exc:
             failures.append(name + ": " + type(exc).__name__ + ": " + str(exc)[:180])
-    output.sort(key=lambda x: (x.get("expected_value_pct") is None, -(x.get("expected_value_pct") or -999)))
+
+    output.sort(key=lambda row: (
+        row.get("expected_value_pct") is None,
+        -(row.get("expected_value_pct") or -999),
+    ))
     try:
         prediction_ledger.initialize()
     except Exception:
         pass
     result = {
         "market": market,
-        "source": "ESPN game-log distribution + BettingPros DraftKings/FanDuel no-vig market blend",
-        "blend": "50/50 logarithmic opinion pool (provisional pending historical calibration)",
-        "line_count": len(props), "projected_count": len(output), "props": output,
+        "source": "ESPN game-log distribution + DraftKings odds via PropLine",
+        "blend": "50/50 logarithmic model/DraftKings market probability pool (provisional pending calibration)",
+        "line_count": len(props),
+        "projected_count": len(output),
+        "props": output,
         "unavailable": failures[:20],
         "cache_ttl_seconds": _BP_BOARD_TTL_SECONDS,
+        "prop_line_cache_source": props_source,
+        "prop_line_quota": quota,
         "injury_feed": injury_feed.get("meta", {}),
         "balldontlie": {key: value for key, value in bdl_games.items() if key != "games"},
     }
@@ -1682,6 +1957,216 @@ def _quarter_name_key(value):
     return "".join(ch.lower() for ch in str(value or "") if ch.isalnum())
 
 
+_ESPN_LIVE_SUMMARY_CACHE = {}
+
+def _fetch_live_summary(event_id):
+    """Fetch and briefly cache one ESPN live game summary for box-score enrichment."""
+    key = str(event_id or "").strip()
+    if not key:
+        return {}
+    now = time.time()
+    cached = _ESPN_LIVE_SUMMARY_CACHE.get(key)
+    if cached and now - cached.get("at", 0.0) < 20:
+        return cached.get("data") or {}
+    url = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/summary?" + urlencode({"event": key})
+    error = None
+    try:
+        summary = _get_json(url, timeout=8)
+        if not isinstance(summary, dict):
+            error = "unexpected_response_type"
+            summary = {}
+    except Exception as exc:
+        error = type(exc).__name__ + ": " + str(exc)[:180]
+        summary = {}
+    _ESPN_LIVE_SUMMARY_CACHE[key] = {"at": now, "data": summary, "error": error}
+    # Keep the process-local cache bounded on busy slates.
+    if len(_ESPN_LIVE_SUMMARY_CACHE) > 40:
+        oldest = sorted(_ESPN_LIVE_SUMMARY_CACHE, key=lambda item: _ESPN_LIVE_SUMMARY_CACHE[item].get("at", 0.0))[:10]
+        for item in oldest:
+            _ESPN_LIVE_SUMMARY_CACHE.pop(item, None)
+    return summary
+
+
+@app.get("/api/live-stats-diagnostic")
+def live_stats_diagnostic():
+    """Inspect ESPN summary availability and schema without returning player data."""
+    try:
+        feed_request = Request(LIVE_UPSTREAM + "/api/live-stats", headers={
+            "User-Agent": "Mozilla/5.0 ColtsNBAEdge/1.0",
+            "Accept": "application/json",
+            **({"x-vercel-protection-bypass": os.getenv("VERCEL_AUTOMATION_BYPASS_SECRET")} if os.getenv("VERCEL_AUTOMATION_BYPASS_SECRET") else {}),
+        })
+        with urlopen(feed_request, timeout=12) as response:
+            upstream = json.loads(response.read().decode("utf-8", "replace"))
+    except Exception as exc:
+        return JSONResponse({"ok": False, "stage": "live_feed", "error": type(exc).__name__ + ": " + str(exc)[:180]}, status_code=502)
+    games = upstream.get("games") if isinstance(upstream, dict) else []
+    checked = []
+    for game in (games or []):
+        if not isinstance(game, dict) or str(game.get("state") or "").lower() not in ("in", "post", "final"):
+            continue
+        event_id = game.get("event_id") or game.get("id")
+        summary = _fetch_live_summary(event_id)
+        cached = _ESPN_LIVE_SUMMARY_CACHE.get(str(event_id), {})
+        boxscore = summary.get("boxscore") if isinstance(summary, dict) else None
+        team_blocks = boxscore.get("players") if isinstance(boxscore, dict) else None
+        team_sample = next((x for x in (team_blocks or []) if isinstance(x, dict)), None) if isinstance(team_blocks, list) else None
+        statistics = team_sample.get("statistics") if isinstance(team_sample, dict) else None
+        group_sample = next((x for x in statistics if isinstance(x, dict)), None) if isinstance(statistics, list) else None
+        checked.append({
+            "event_id": str(event_id or ""),
+            "game_state": game.get("state"),
+            "summary_keys": sorted(summary.keys())[:35] if isinstance(summary, dict) else [],
+            "fetch_error": cached.get("error"),
+            "boxscore_type": type(boxscore).__name__ if boxscore is not None else None,
+            "boxscore_keys": sorted(boxscore.keys())[:25] if isinstance(boxscore, dict) else [],
+            "players_type": type(team_blocks).__name__ if team_blocks is not None else None,
+            "team_block_keys": sorted(team_sample.keys())[:20] if team_sample else [],
+            "statistics_type": type(statistics).__name__ if statistics is not None else None,
+            "stat_group_keys": sorted(group_sample.keys())[:20] if group_sample else [],
+            "stat_labels": (group_sample.get("names") or group_sample.get("labels") or [])[:30] if group_sample else [],
+            "athlete_row_keys": sorted((group_sample.get("athletes") or [{}])[0].keys()) if group_sample and group_sample.get("athletes") else [],
+            "athlete_sample": ((group_sample.get("athletes") or [{}])[0]) if group_sample and group_sample.get("athletes") else None,
+        })
+        if len(checked) >= 3:
+            break
+    return JSONResponse({"ok": True, "game_count": len(games or []), "checked": checked})
+
+def _enrich_live_boxscores(payload):
+    """Merge verified ESPN box-score stats and minutes into the live player maps."""
+    if not isinstance(payload, dict):
+        return payload
+    by_id = payload.setdefault("players_by_id", {})
+    by_name = payload.setdefault("players_by_name", {})
+    if not isinstance(by_id, dict) or not isinstance(by_name, dict):
+        payload["live_enrichment"] = {"ok": False, "error": "player_maps_invalid"}
+        return payload
+
+    aliases = {
+        "MIN": "minutes_played", "MINUTES": "minutes_played",
+        "PTS": "points", "POINTS": "points",
+        "REB": "rebounds", "REBOUNDS": "rebounds",
+        "AST": "assists", "ASSISTS": "assists",
+        "STL": "steals", "STEALS": "steals",
+        "BLK": "blocks", "BLOCKS": "blocks",
+        "3PT": "three_points_made", "3PM": "three_points_made",
+        "3PTM": "three_points_made", "3FGM": "three_points_made",
+    }
+    field_counts = {field: 0 for field in set(aliases.values())}
+    games_checked = 0
+    athlete_rows = 0
+    athletes_enriched = set()
+    errors = []
+
+    for game in payload.get("games") or []:
+        if not isinstance(game, dict) or str(game.get("state") or "").lower() not in ("in", "post", "final"):
+            continue
+        event_id = game.get("event_id") or game.get("id")
+        if not event_id:
+            continue
+        games_checked += 1
+        summary = _fetch_live_summary(event_id)
+        boxscore = summary.get("boxscore") if isinstance(summary, dict) else None
+        team_blocks = boxscore.get("players") if isinstance(boxscore, dict) else None
+        if not isinstance(team_blocks, list):
+            cached = _ESPN_LIVE_SUMMARY_CACHE.get(str(event_id), {})
+            if cached.get("error"):
+                errors.append(str(event_id) + ": " + cached["error"])
+            continue
+
+        for team_block in team_blocks:
+            if not isinstance(team_block, dict):
+                continue
+            for stat_group in team_block.get("statistics") or []:
+                if not isinstance(stat_group, dict):
+                    continue
+                labels = stat_group.get("names")
+                if not isinstance(labels, list) or not labels:
+                    labels = stat_group.get("labels")
+                # ESPN's v2 summary uses "keys" for the stat-column labels
+                # (e.g. MIN, FG, 3PT, FT, REB, AST, STL, BLK, PTS).
+                if not isinstance(labels, list) or not labels:
+                    labels = stat_group.get("keys") or []
+                if not isinstance(labels, list):
+                    continue
+                indexes = {}
+                for index, label in enumerate(labels):
+                    key = str(label or "").strip().upper().replace(" ", "")
+                    if key in aliases:
+                        indexes[index] = aliases[key]
+                athlete_list = stat_group.get("athletes") or []
+                if not isinstance(athlete_list, list):
+                    continue
+
+                for athlete_row in athlete_list:
+                    if not isinstance(athlete_row, dict):
+                        continue
+                    athlete_rows += 1
+                    athlete = athlete_row.get("athlete") or {}
+                    if not isinstance(athlete, dict):
+                        athlete = {}
+                    athlete_id = str(athlete.get("id") or athlete_row.get("id") or "").strip()
+                    name = str(athlete.get("displayName") or athlete.get("fullName") or athlete.get("name") or "").strip()
+                    values = athlete_row.get("stats") or []
+                    if not isinstance(values, list) or not (athlete_id or name):
+                        continue
+                    updates = {}
+                    for index, field in indexes.items():
+                        if index >= len(values):
+                            continue
+                        raw = str(values[index] or "").strip()
+                        if not raw or raw in ("-", "--"):
+                            continue
+                        try:
+                            if field == "minutes_played" and ":" in raw:
+                                mm, ss = raw.split(":", 1)
+                                value = float(mm) + float(ss) / 60.0
+                            elif field == "three_points_made" and "-" in raw:
+                                value = float(raw.split("-", 1)[0])
+                            else:
+                                value = float(raw)
+                        except (TypeError, ValueError):
+                            continue
+                        if math.isfinite(value) and value >= 0:
+                            updates[field] = round(value, 2)
+                    if not updates:
+                        continue
+
+                    if athlete_id:
+                        target = by_id.setdefault(athlete_id, {})
+                        if not isinstance(target, dict):
+                            target = by_id[athlete_id] = {}
+                        target.update(updates)
+                        target.setdefault("player", name or target.get("player") or "")
+                        target["athlete_id"] = athlete_id
+                        target["game_id"] = str(event_id)
+                    if name:
+                        name_key = _quarter_name_key(name)
+                        target = by_name.setdefault(name_key, {})
+                        if not isinstance(target, dict):
+                            target = by_name[name_key] = {}
+                        target.update(updates)
+                        target.setdefault("player", name)
+                        if athlete_id:
+                            target["athlete_id"] = athlete_id
+                        target["game_id"] = str(event_id)
+                    if athlete_id or name:
+                        athletes_enriched.add(athlete_id or _quarter_name_key(name))
+                    for field in updates:
+                        field_counts[field] += 1
+
+    payload["players_by_id"] = by_id
+    payload["players_by_name"] = by_name
+    payload["live_enrichment"] = {
+        "ok": True,
+        "games_checked": games_checked,
+        "athlete_rows_seen": athlete_rows,
+        "athletes_enriched": len(athletes_enriched),
+        "field_updates": field_counts,
+        "errors": errors[:3],
+    }
+    return payload
+
 def _enrich_live_quarters(payload):
     """Attach player quarter point totals only when ESPN supplies actual scoring plays."""
     if not isinstance(payload, dict):
@@ -1705,12 +2190,8 @@ def _enrich_live_quarters(payload):
         event_id = game.get("event_id") or game.get("id")
         if not event_id:
             continue
-        try:
-            summary_url = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/summary?" + urlencode({"event": str(event_id)})
-            req = Request(summary_url, headers={"User-Agent": "Mozilla/5.0 ColtNBAEdge/1.0", "Accept": "application/json"})
-            with urlopen(req, timeout=5) as response:
-                summary = json.loads(response.read().decode("utf-8", "replace"))
-        except Exception:
+        summary = _fetch_live_summary(event_id)
+        if not summary:
             continue
         plays = summary.get("scoringPlays") or []
         if not plays:
@@ -1762,6 +2243,155 @@ def _enrich_live_quarters(payload):
             if qpoints is not None:
                 player["points_by_quarter"] = qpoints
     return payload
+
+
+
+_TANK01_DVP_PROBE_CACHE = {"at": 0.0, "data": None}
+_TANK01_CACHE_TTL = 21600
+_TANK01_HOST = "tank01-fantasy-stats.p.rapidapi.com"
+
+
+def _tank01_request(path, params=None, timeout=15):
+    """Call Tank01 through RapidAPI without ever exposing credentials."""
+    api_key = os.getenv("TANK01_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError("TANK01_API_KEY is not configured.")
+    query = urlencode(params or {})
+    url = "https://" + _TANK01_HOST + path + (("?" + query) if query else "")
+    request = Request(url, headers={
+        "X-RapidAPI-Key": api_key,
+        "X-RapidAPI-Host": _TANK01_HOST,
+        "Accept": "application/json",
+        "User-Agent": "ColtsNBAEdge/1.0",
+    })
+    with urlopen(request, timeout=timeout) as response:
+        payload = json.loads(response.read().decode("utf-8", "replace"))
+        headers = response.headers
+    if not isinstance(payload, dict):
+        raise ValueError("Tank01 returned an unexpected response type.")
+    status_code = payload.get("statusCode")
+    if status_code not in (None, 200, "200"):
+        raise RuntimeError("Tank01 endpoint returned status " + str(status_code) + ".")
+    if payload.get("error"):
+        raise RuntimeError("Tank01 endpoint error: " + str(payload.get("error"))[:160])
+    return payload, headers
+
+
+@app.get("/api/tank01-dvp-probe")
+def tank01_dvp_probe():
+    """Safe first-call diagnostic: validates Tank01 and reports schema keys only."""
+    now = time.time()
+    cached = _TANK01_DVP_PROBE_CACHE.get("data")
+    if cached and now - _TANK01_DVP_PROBE_CACHE.get("at", 0.0) < 900:
+        return JSONResponse(cached)
+    if not os.getenv("TANK01_API_KEY", "").strip():
+        return JSONResponse({
+            "configured": False, "authenticated": False,
+            "message": "TANK01_API_KEY is not configured in this deployment."
+        }, status_code=503)
+    try:
+        payload, headers = _tank01_request(
+            "/getNBATeams", {"teamStats": "true"}, timeout=20
+        )
+        body = payload.get("body")
+        if isinstance(body, dict):
+            teams = list(body.values()) if body and all(isinstance(v, dict) for v in body.values()) else []
+        elif isinstance(body, list):
+            teams = body
+        else:
+            teams = []
+        sample = next((team for team in teams if isinstance(team, dict) and team.get("defensiveStats")), None)
+        defensive = sample.get("defensiveStats") if sample else None
+        schema = {
+            "team_keys": sorted(sample.keys()) if sample else [],
+            "defensive_stats_type": type(defensive).__name__ if defensive is not None else None,
+            "defensive_stats_keys": sorted(defensive.keys()) if isinstance(defensive, dict) else [],
+            "defensive_stats_sample_keys": {
+                str(key): sorted(value.keys()) if isinstance(value, dict) else type(value).__name__
+                for key, value in list((defensive or {}).items())[:8]
+            } if isinstance(defensive, dict) else {},
+            "defensive_stats_sample_values": {
+                str(key): {str(pos): value for pos, value in list(item.items())[:6]}
+                for key, item in list((defensive or {}).items())[:8]
+                if isinstance(item, dict)
+            } if isinstance(defensive, dict) else {},
+            "games_played": defensive.get("gamesPlayed") if isinstance(defensive, dict) else None,
+        }
+        output = {
+            "configured": True,
+            "authenticated": bool(teams),
+            "source": "Tank01 RapidAPI",
+            "endpoint_tested": "/getNBATeams?teamStats=true",
+            "team_count": len(teams),
+            "teams_with_defensive_stats": sum(
+                1 for team in teams if isinstance(team, dict) and team.get("defensiveStats")
+            ),
+            "schema": schema,
+            "rate_limit_remaining": headers.get("x-ratelimit-requests-remaining"),
+            "tested_at": datetime.now(timezone.utc).isoformat(),
+            "message": "Tank01 authentication succeeded; schema inspection completed."
+                if sample else "Tank01 responded, but no team defensiveStats object was found.",
+        }
+        _TANK01_DVP_PROBE_CACHE.update({"at": now, "data": output})
+        return JSONResponse(output)
+    except HTTPError as exc:
+        message = "RapidAPI rejected the Tank01 request." if exc.code in (401, 403) else "Tank01 returned HTTP " + str(exc.code) + "."
+        return JSONResponse({
+            "configured": True, "authenticated": False, "http_status": exc.code,
+            "endpoint_tested": "/getNBATeams?teamStats=true", "message": message,
+        }, status_code=502)
+    except Exception as exc:
+        return JSONResponse({
+            "configured": True, "authenticated": False,
+            "error_type": type(exc).__name__,
+            "message": str(exc)[:220],
+        }, status_code=502)
+
+
+
+@app.get("/api/tank01-dvp-status")
+def tank01_dvp_status():
+    """Report availability and sample size for Tank01 current-season positional tables."""
+    try:
+        tables, meta = _fetch_tank01_dvp_tables()
+        ready = all(len(table) >= 150 for table in tables.values())
+        active_tables = {}
+        active_sources = {}
+        for market in ("PTS", "REB", "AST", "STL", "3PM"):
+            try:
+                table = _fetch_dvp_table(market)
+                active_tables[market] = len(table)
+                active_sources[market] = _DVP_STAT_CACHE.get(market, {}).get("season")
+            except Exception as source_error:
+                active_tables[market] = 0
+                active_sources[market] = "unavailable: " + type(source_error).__name__
+        all_active = all(count >= 120 for count in active_tables.values())
+        return JSONResponse({
+            "configured": True,
+            "authenticated": True,
+            "tank01_source": meta.get("source"),
+            "tank01_current_season_ready": ready,
+            "tank01_min_games_played_per_team": meta.get("min_games_played"),
+            "tank01_max_games_played_per_team": meta.get("max_games_played"),
+            "tank01_teams": meta.get("team_count"),
+            "tank01_position_rows_by_market": {market: len(table) for market, table in tables.items()},
+            "active_dvp_tables_ready": all_active,
+            "active_dvp_rows_by_market": active_tables,
+            "active_dvp_source_by_market": active_sources,
+            "markets": list(tables.keys()),
+            "fallback_policy": "Use current-season Tank01 DVP immediately when all 30 teams and five positions are present; sample sizes are reported for transparency.",
+            "rate_limit_remaining": meta.get("rate_limit_remaining"),
+            "message": "Tank01 current-season DVP is active, with early-season sample sizes disclosed." if ready and all_active
+                else "Tank01 feed is authenticated, but one or more current-season positional tables are incomplete."
+        })
+    except Exception as exc:
+        return JSONResponse({
+            "configured": bool(os.getenv("TANK01_API_KEY", "").strip()),
+            "authenticated": False,
+            "error_type": type(exc).__name__,
+            "message": str(exc)[:220],
+        }, status_code=502)
+
 
 @app.get("/api/model/diagnostics")
 def model_diagnostics():
@@ -1840,18 +2470,30 @@ def _run_pending_settlements():
             athlete_id = str(snap.get("athlete_id") or "").strip()
             market = str(candidate.get("market") or "").lower()
             mapping = market_fields.get(market)
-            game = str(snap.get("game") or "").upper().replace(" ", "")
+            game = str(snap.get("game") or "")
             created_date = str(candidate.get("created_date") or "")
-            # Provider labels may append weekday/tipoff text, e.g. CHA@WASFRI7:00.
-            # Match only the leading two team abbreviations before validating ESPN.
-            matchup = re.match(r"^([A-Z]{2,3})@([A-Z]{2,3})", game)
-            if not athlete_id.isdigit() or not mapping or not created_date or not matchup:
-                result["skipped"] += 1
-                continue
-            expected_teams = {
-                team_aliases.get(code, code) for code in matchup.groups()
-            }
-            if len(expected_teams) != 2:
+            # Some board feeds omit the matchup string. In that case, a verified
+            # player ID plus the saved team and an ESPN event containing that team
+            # is sufficient; never settle by player name alone.
+            matchup = re.match(
+                r"^([A-Z]{2,3})@([A-Z]{2,3})",
+                game.upper().replace(" ", "")
+            )
+            expected_teams = _team_codes_from_game(game)
+            if len(expected_teams) != 2 and matchup:
+                expected_teams = {
+                    team_aliases.get(code, code) for code in matchup.groups()
+                }
+            candidate_team = _canonical_team_code(
+                snap.get("team") or snap.get("roster_team")
+            )
+            if not expected_teams and candidate_team:
+                expected_teams = {candidate_team}
+            if (
+                not athlete_id.isdigit()
+                or not mapping
+                or not created_date
+            ):
                 result["skipped"] += 1
                 continue
             field, label = mapping
@@ -1874,7 +2516,20 @@ def _run_pending_settlements():
                     # Picks may be entered up to two days before tipoff.
                     if not (created <= game_date <= created + timedelta(days=2)):
                         continue
-                    if matchup_for_event(event_id) == expected_teams:
+                    event_teams = matchup_for_event(event_id)
+                    if not event_teams:
+                        continue
+                    # If the saved pick included both teams, require an exact
+                    # matchup. If it only included the player's team, require
+                    # that team to be one of the two verified event participants.
+                    if (
+                        not expected_teams
+                        or event_teams == expected_teams
+                        or (
+                            len(expected_teams) == 1
+                            and expected_teams.issubset(event_teams)
+                        )
+                    ):
                         possible.append(row)
                 # More than one possible event is ambiguous; do not settle it.
                 if len(possible) != 1:
@@ -2244,6 +2899,7 @@ async def api_proxy(path: str, request: FastRequest):
             if path == "live-stats" and "json" in media_type.lower():
                 try:
                     live_payload = json.loads(response_body.decode("utf-8", "replace"))
+                    live_payload = _enrich_live_boxscores(live_payload)
                     live_payload = _enrich_live_quarters(live_payload)
                     response_body = json.dumps(live_payload, separators=(",", ":")).encode("utf-8")
                 except Exception:
