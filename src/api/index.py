@@ -1969,13 +1969,16 @@ def _fetch_live_summary(event_id):
     if cached and now - cached.get("at", 0.0) < 20:
         return cached.get("data") or {}
     url = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/summary?" + urlencode({"event": key})
+    error = None
     try:
-        summary = _get_json(url, timeout=5)
+        summary = _get_json(url, timeout=8)
         if not isinstance(summary, dict):
+            error = "unexpected_response_type"
             summary = {}
-    except Exception:
+    except Exception as exc:
+        error = type(exc).__name__ + ": " + str(exc)[:180]
         summary = {}
-    _ESPN_LIVE_SUMMARY_CACHE[key] = {"at": now, "data": summary}
+    _ESPN_LIVE_SUMMARY_CACHE[key] = {"at": now, "data": summary, "error": error}
     # Keep the process-local cache bounded on busy slates.
     if len(_ESPN_LIVE_SUMMARY_CACHE) > 40:
         oldest = sorted(_ESPN_LIVE_SUMMARY_CACHE, key=lambda item: _ESPN_LIVE_SUMMARY_CACHE[item].get("at", 0.0))[:10]
@@ -1983,6 +1986,43 @@ def _fetch_live_summary(event_id):
             _ESPN_LIVE_SUMMARY_CACHE.pop(item, None)
     return summary
 
+
+@app.get("/api/live-stats-diagnostic")
+def live_stats_diagnostic():
+    """Inspect ESPN summary availability and schema without returning player data."""
+    try:
+        upstream = _get_json(LIVE_UPSTREAM + "/api/live-stats", timeout=12)
+    except Exception as exc:
+        return JSONResponse({"ok": False, "stage": "live_feed", "error": type(exc).__name__ + ": " + str(exc)[:180]}, status_code=502)
+    games = upstream.get("games") if isinstance(upstream, dict) else []
+    checked = []
+    for game in (games or []):
+        if not isinstance(game, dict) or str(game.get("state") or "").lower() not in ("in", "post", "final"):
+            continue
+        event_id = game.get("event_id") or game.get("id")
+        summary = _fetch_live_summary(event_id)
+        cached = _ESPN_LIVE_SUMMARY_CACHE.get(str(event_id), {})
+        boxscore = summary.get("boxscore") if isinstance(summary, dict) else None
+        team_blocks = boxscore.get("players") if isinstance(boxscore, dict) else None
+        team_sample = next((x for x in (team_blocks or []) if isinstance(x, dict)), None) if isinstance(team_blocks, list) else None
+        statistics = team_sample.get("statistics") if isinstance(team_sample, dict) else None
+        group_sample = next((x for x in statistics if isinstance(x, dict)), None) if isinstance(statistics, list) else None
+        checked.append({
+            "event_id": str(event_id or ""),
+            "game_state": game.get("state"),
+            "summary_keys": sorted(summary.keys())[:35] if isinstance(summary, dict) else [],
+            "fetch_error": cached.get("error"),
+            "boxscore_type": type(boxscore).__name__ if boxscore is not None else None,
+            "boxscore_keys": sorted(boxscore.keys())[:25] if isinstance(boxscore, dict) else [],
+            "players_type": type(team_blocks).__name__ if team_blocks is not None else None,
+            "team_block_keys": sorted(team_sample.keys())[:20] if team_sample else [],
+            "statistics_type": type(statistics).__name__ if statistics is not None else None,
+            "stat_group_keys": sorted(group_sample.keys())[:20] if group_sample else [],
+            "stat_labels": (group_sample.get("names") or group_sample.get("labels") or [])[:30] if group_sample else [],
+        })
+        if len(checked) >= 3:
+            break
+    return JSONResponse({"ok": True, "game_count": len(games or []), "checked": checked})
 
 def _enrich_live_boxscores(payload):
     """Merge verified ESPN box-score stats and minutes into the live player maps."""
