@@ -2025,6 +2025,8 @@ def live_stats_diagnostic():
             "statistics_type": type(statistics).__name__ if statistics is not None else None,
             "stat_group_keys": sorted(group_sample.keys())[:20] if group_sample else [],
             "stat_labels": (group_sample.get("names") or group_sample.get("labels") or [])[:30] if group_sample else [],
+            "athlete_row_keys": sorted((group_sample.get("athletes") or [{}])[0].keys()) if group_sample and group_sample.get("athletes") else [],
+            "athlete_sample": ((group_sample.get("athletes") or [{}])[0]) if group_sample and group_sample.get("athletes") else None,
         })
         if len(checked) >= 3:
             break
