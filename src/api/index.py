@@ -1991,7 +1991,13 @@ def _fetch_live_summary(event_id):
 def live_stats_diagnostic():
     """Inspect ESPN summary availability and schema without returning player data."""
     try:
-        upstream = _get_json(LIVE_UPSTREAM + "/api/live-stats", timeout=12)
+        feed_request = Request(LIVE_UPSTREAM + "/api/live-stats", headers={
+            "User-Agent": "Mozilla/5.0 ColtsNBAEdge/1.0",
+            "Accept": "application/json",
+            **({"x-vercel-protection-bypass": os.getenv("VERCEL_AUTOMATION_BYPASS_SECRET")} if os.getenv("VERCEL_AUTOMATION_BYPASS_SECRET") else {}),
+        })
+        with urlopen(feed_request, timeout=12) as response:
+            upstream = json.loads(response.read().decode("utf-8", "replace"))
     except Exception as exc:
         return JSONResponse({"ok": False, "stage": "live_feed", "error": type(exc).__name__ + ": " + str(exc)[:180]}, status_code=502)
     games = upstream.get("games") if isinstance(upstream, dict) else []
