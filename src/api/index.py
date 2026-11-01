@@ -1957,6 +1957,131 @@ def _quarter_name_key(value):
     return "".join(ch.lower() for ch in str(value or "") if ch.isalnum())
 
 
+_ESPN_LIVE_SUMMARY_CACHE = {}
+
+def _fetch_live_summary(event_id):
+    """Fetch and briefly cache one ESPN live game summary for box-score enrichment."""
+    key = str(event_id or "").strip()
+    if not key:
+        return {}
+    now = time.time()
+    cached = _ESPN_LIVE_SUMMARY_CACHE.get(key)
+    if cached and now - cached.get("at", 0.0) < 20:
+        return cached.get("data") or {}
+    url = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/summary?" + urlencode({"event": key})
+    try:
+        summary = _get_json(url, timeout=5)
+        if not isinstance(summary, dict):
+            summary = {}
+    except Exception:
+        summary = {}
+    _ESPN_LIVE_SUMMARY_CACHE[key] = {"at": now, "data": summary}
+    # Keep the process-local cache bounded on busy slates.
+    if len(_ESPN_LIVE_SUMMARY_CACHE) > 40:
+        oldest = sorted(_ESPN_LIVE_SUMMARY_CACHE, key=lambda item: _ESPN_LIVE_SUMMARY_CACHE[item].get("at", 0.0))[:10]
+        for item in oldest:
+            _ESPN_LIVE_SUMMARY_CACHE.pop(item, None)
+    return summary
+
+
+def _enrich_live_boxscores(payload):
+    """Merge verified ESPN box-score stats and minutes into the live player maps."""
+    if not isinstance(payload, dict):
+        return payload
+    by_id = payload.get("players_by_id") or {}
+    by_name = payload.get("players_by_name") or {}
+    if not isinstance(by_id, dict) or not isinstance(by_name, dict):
+        return payload
+    games = payload.get("games") or []
+    for game in games:
+        if not isinstance(game, dict) or str(game.get("state") or "").lower() not in ("in", "post", "final"):
+            continue
+        event_id = game.get("event_id") or game.get("id")
+        summary = _fetch_live_summary(event_id)
+        boxscore = summary.get("boxscore") or {}
+        teams = boxscore.get("players") or []
+        for team_block in teams:
+            if not isinstance(team_block, dict):
+                continue
+            for stat_group in team_block.get("statistics") or []:
+                if not isinstance(stat_group, dict):
+                    continue
+                labels = stat_group.get("names") or stat_group.get("labels") or []
+                if not isinstance(labels, list):
+                    continue
+                indexes = {}
+                aliases = {
+                    "MIN": "minutes_played", "MINUTES": "minutes_played",
+                    "PTS": "points", "POINTS": "points",
+                    "REB": "rebounds", "REBOUNDS": "rebounds",
+                    "AST": "assists", "ASSISTS": "assists",
+                    "STL": "steals", "STEALS": "steals",
+                    "BLK": "blocks", "BLOCKS": "blocks",
+                    "3PT": "three_points_made", "3PM": "three_points_made",
+                    "3PTM": "three_points_made", "3FGM": "three_points_made",
+                }
+                for index, label in enumerate(labels):
+                    key = str(label or "").strip().upper().replace(" ", "")
+                    if key in aliases:
+                        indexes[index] = aliases[key]
+                for athlete_row in stat_group.get("athletes") or []:
+                    if not isinstance(athlete_row, dict):
+                        continue
+                    athlete = athlete_row.get("athlete") or {}
+                    if not isinstance(athlete, dict):
+                        athlete = {}
+                    athlete_id = str(athlete.get("id") or athlete_row.get("id") or "").strip()
+                    name = str(athlete.get("displayName") or athlete.get("fullName") or athlete.get("name") or "").strip()
+                    values = athlete_row.get("stats") or []
+                    if not isinstance(values, list) or not (athlete_id or name):
+                        continue
+                    updates = {}
+                    for index, field in indexes.items():
+                        if index >= len(values):
+                            continue
+                        raw = str(values[index] or "").strip()
+                        if field == "minutes_played":
+                            # ESPN may report MM:SS; convert to decimal minutes.
+                            if ":" in raw:
+                                try:
+                                    mm, ss = raw.split(":", 1)
+                                    value = float(mm) + float(ss) / 60.0
+                                except (TypeError, ValueError):
+                                    continue
+                            else:
+                                try:
+                                    value = float(raw)
+                                except (TypeError, ValueError):
+                                    continue
+                        else:
+                            try:
+                                value = float(raw)
+                            except (TypeError, ValueError):
+                                continue
+                        if math.isfinite(value) and value >= 0:
+                            updates[field] = round(value, 2)
+                    if not updates:
+                        continue
+                    if athlete_id:
+                        target = by_id.setdefault(athlete_id, {})
+                        target.update(updates)
+                        if name:
+                            target.setdefault("player", name)
+                        target["athlete_id"] = athlete_id
+                        target["game_id"] = str(event_id)
+                    if name:
+                        name_key = _quarter_name_key(name)
+                        target = by_name.setdefault(name_key, {})
+                        target.update(updates)
+                        target.setdefault("player", name)
+                        if athlete_id:
+                            target["athlete_id"] = athlete_id
+                        target["game_id"] = str(event_id)
+    payload["players_by_id"] = by_id
+    payload["players_by_name"] = by_name
+    return payload
+
+
 def _enrich_live_quarters(payload):
     """Attach player quarter point totals only when ESPN supplies actual scoring plays."""
     if not isinstance(payload, dict):
@@ -1980,12 +2105,8 @@ def _enrich_live_quarters(payload):
         event_id = game.get("event_id") or game.get("id")
         if not event_id:
             continue
-        try:
-            summary_url = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/summary?" + urlencode({"event": str(event_id)})
-            req = Request(summary_url, headers={"User-Agent": "Mozilla/5.0 ColtNBAEdge/1.0", "Accept": "application/json"})
-            with urlopen(req, timeout=5) as response:
-                summary = json.loads(response.read().decode("utf-8", "replace"))
-        except Exception:
+        summary = _fetch_live_summary(event_id)
+        if not summary:
             continue
         plays = summary.get("scoringPlays") or []
         if not plays:
@@ -2668,6 +2789,7 @@ async def api_proxy(path: str, request: FastRequest):
             if path == "live-stats" and "json" in media_type.lower():
                 try:
                     live_payload = json.loads(response_body.decode("utf-8", "replace"))
+                    live_payload = _enrich_live_boxscores(live_payload)
                     live_payload = _enrich_live_quarters(live_payload)
                     response_body = json.dumps(live_payload, separators=(",", ":")).encode("utf-8")
                 except Exception:
