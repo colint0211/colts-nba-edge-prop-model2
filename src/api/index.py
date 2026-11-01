@@ -2470,18 +2470,30 @@ def _run_pending_settlements():
             athlete_id = str(snap.get("athlete_id") or "").strip()
             market = str(candidate.get("market") or "").lower()
             mapping = market_fields.get(market)
-            game = str(snap.get("game") or "").upper().replace(" ", "")
+            game = str(snap.get("game") or "")
             created_date = str(candidate.get("created_date") or "")
-            # Provider labels may append weekday/tipoff text, e.g. CHA@WASFRI7:00.
-            # Match only the leading two team abbreviations before validating ESPN.
-            matchup = re.match(r"^([A-Z]{2,3})@([A-Z]{2,3})", game)
-            if not athlete_id.isdigit() or not mapping or not created_date or not matchup:
-                result["skipped"] += 1
-                continue
-            expected_teams = {
-                team_aliases.get(code, code) for code in matchup.groups()
-            }
-            if len(expected_teams) != 2:
+            # Some board feeds omit the matchup string. In that case, a verified
+            # player ID plus the saved team and an ESPN event containing that team
+            # is sufficient; never settle by player name alone.
+            matchup = re.match(
+                r"^([A-Z]{2,3})@([A-Z]{2,3})",
+                game.upper().replace(" ", "")
+            )
+            expected_teams = (
+                {team_aliases.get(code, code) for code in matchup.groups()}
+                if matchup else set()
+            )
+            candidate_team = _canonical_team_code(
+                snap.get("team") or snap.get("roster_team")
+            )
+            if not expected_teams and candidate_team:
+                expected_teams = {candidate_team}
+            if (
+                not athlete_id.isdigit()
+                or not mapping
+                or not created_date
+                or not expected_teams
+            ):
                 result["skipped"] += 1
                 continue
             field, label = mapping
@@ -2504,7 +2516,19 @@ def _run_pending_settlements():
                     # Picks may be entered up to two days before tipoff.
                     if not (created <= game_date <= created + timedelta(days=2)):
                         continue
-                    if matchup_for_event(event_id) == expected_teams:
+                    event_teams = matchup_for_event(event_id)
+                    if not event_teams:
+                        continue
+                    # If the saved pick included both teams, require an exact
+                    # matchup. If it only included the player's team, require
+                    # that team to be one of the two verified event participants.
+                    if (
+                        event_teams == expected_teams
+                        or (
+                            len(expected_teams) == 1
+                            and expected_teams.issubset(event_teams)
+                        )
+                    ):
                         possible.append(row)
                 # More than one possible event is ambiguous; do not settle it.
                 if len(possible) != 1:
