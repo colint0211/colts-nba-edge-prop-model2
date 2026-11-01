@@ -2082,7 +2082,11 @@ def _enrich_live_boxscores(payload):
                     continue
                 labels = stat_group.get("names")
                 if not isinstance(labels, list) or not labels:
-                    labels = stat_group.get("labels") or []
+                    labels = stat_group.get("labels")
+                # ESPN's v2 summary uses "keys" for the stat-column labels
+                # (e.g. MIN, FG, 3PT, FT, REB, AST, STL, BLK, PTS).
+                if not isinstance(labels, list) or not labels:
+                    labels = stat_group.get("keys") or []
                 if not isinstance(labels, list):
                     continue
                 indexes = {}
