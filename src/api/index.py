@@ -2479,10 +2479,11 @@ def _run_pending_settlements():
                 r"^([A-Z]{2,3})@([A-Z]{2,3})",
                 game.upper().replace(" ", "")
             )
-            expected_teams = (
-                {team_aliases.get(code, code) for code in matchup.groups()}
-                if matchup else set()
-            )
+            expected_teams = _team_codes_from_game(game)
+            if len(expected_teams) != 2 and matchup:
+                expected_teams = {
+                    team_aliases.get(code, code) for code in matchup.groups()
+                }
             candidate_team = _canonical_team_code(
                 snap.get("team") or snap.get("roster_team")
             )
@@ -2492,7 +2493,6 @@ def _run_pending_settlements():
                 not athlete_id.isdigit()
                 or not mapping
                 or not created_date
-                or not expected_teams
             ):
                 result["skipped"] += 1
                 continue
@@ -2523,7 +2523,8 @@ def _run_pending_settlements():
                     # matchup. If it only included the player's team, require
                     # that team to be one of the two verified event participants.
                     if (
-                        event_teams == expected_teams
+                        not expected_teams
+                        or event_teams == expected_teams
                         or (
                             len(expected_teams) == 1
                             and expected_teams.issubset(event_teams)
