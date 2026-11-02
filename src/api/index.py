@@ -1624,7 +1624,7 @@ def _propline_fetch_events():
 
     params = urlencode({
         "markets": ",".join(_PROPLINE_MARKETS.values()),
-        "bookmakers": "draftkings",
+        "bookmakers": "draftkings,fanduel",
         "includeLinks": "true",
         "max_age": 300,
     })
@@ -1692,7 +1692,10 @@ def _propline_market_props(events, market):
         home = str(event.get("home_team") or "")
         matchup = (away + " @ " + home).strip(" @")
         for bookmaker in event.get("bookmakers") or []:
-            if not isinstance(bookmaker, dict) or str(bookmaker.get("key") or "").lower() != "draftkings":
+            if not isinstance(bookmaker, dict):
+                continue
+            bookmaker_key = str(bookmaker.get("key") or "").lower()
+            if bookmaker_key not in ("draftkings", "fanduel"):
                 continue
             for market_row in bookmaker.get("markets") or []:
                 if not isinstance(market_row, dict) or market_row.get("key") != market_key:
@@ -1739,15 +1742,32 @@ def _propline_market_props(events, market):
                         "over_odds": None,
                         "under_odds": None,
                         "last_update": updated,
-                        "bookmaker": "DraftKings",
+                        "bookmaker": bookmaker.get("title") or bookmaker_key.title(),
                         "bookmaker_link": bookmaker.get("link"),
+                        "book_prices": {"over": {}, "under": {}},
+                        "book_names": {},
+                        "book_links": {},
                     })
-                    if side == "over":
-                        row["over_odds"] = price
-                    else:
-                        row["under_odds"] = price
+                    row["book_prices"][side][bookmaker_key] = price
+                    row["book_names"][bookmaker_key] = bookmaker.get("title") or bookmaker_key.title()
+                    if bookmaker.get("link"):
+                        row["book_links"][bookmaker_key] = bookmaker.get("link")
     output = []
     for row in grouped.values():
+        for side in ("over", "under"):
+            prices = row.get("book_prices", {}).get(side, {})
+            if prices:
+                best_key, best_price = max(prices.items(), key=lambda item: float(item[1]) if float(item[1]) > 0 else 100.0 / abs(float(item[1])))
+                row[side + "_odds"] = best_price
+                row["best_" + side + "_book"] = row.get("book_names", {}).get(best_key, best_key.title())
+        row["market_books"] = sorted(set(row.get("book_names", {}).values()))
+        selected_book = None
+        for side in ("over", "under"):
+            name = row.get("best_" + side + "_book")
+            if name:
+                selected_book = next((key for key, value in row.get("book_names", {}).items() if value == name), selected_book)
+        if selected_book and row.get("book_links", {}).get(selected_book):
+            row["bookmaker_link"] = row["book_links"][selected_book]
         if row.get("over_odds") is None or row.get("under_odds") is None:
             continue
         output.append(row)
@@ -1770,9 +1790,9 @@ def _propline_quote(prop):
         "under_probability": under_probability / total,
         "over_odds": over_odds,
         "under_odds": under_odds,
-        "over_book": "DraftKings",
-        "under_book": "DraftKings",
-        "books_used": ["DraftKings"],
+        "over_book": prop.get("best_over_book") or "Sportsbook",
+        "under_book": prop.get("best_under_book") or "Sportsbook",
+        "books_used": prop.get("market_books") or ["Sportsbook"],
     }
 
 
@@ -1805,12 +1825,15 @@ def proprietary_market_board(market: str = "rebounds"):
         try:
             line = float(raw.get("line"))
             quote = _propline_quote(raw)
-            athlete_id = _espn_player_id(name)
+            team_codes = _team_codes_from_game(event_matchup)
+            roster_athlete_id, roster_team = _espn_roster_player_id(name, team_codes)
+            athlete_id = roster_athlete_id or _espn_player_id(name)
             if not athlete_id:
                 failures.append(name + ": ESPN player match unavailable")
                 continue
+            resolved_team = _canonical_team_code(raw.get("team")) or roster_team or ""
             values, sample_label, player_minutes = _player_history(athlete_id, field, label)
-            team_for_dvp = raw.get("team") or ""
+            team_for_dvp = resolved_team
             event_matchup = raw.get("game") or ""
             matchup_adjustment = _dvp_matchup_adjustment(athlete_id, team_for_dvp, event_matchup, market, name)
             model = _simulate_market(
@@ -1845,12 +1868,24 @@ def proprietary_market_board(market: str = "rebounds"):
                     "Projection only: fewer than 8 verified regular-season games. "
                     "EV ranking is disabled until the sample grows."
                 )
+            elif model.get("projected_minutes") is not None and float(model["projected_minutes"]) < 15.0:
+                model["confidence"] = "low"
+                model["recommendation"] = "PASS"
+                model["expected_value_pct"] = None
+                model["best_side"] = None
+                model["best_probability"] = None
+                model["best_odds"] = None
+                model["edge_pp"] = None
+                model["probability_note"] = (
+                    "Projection only: projected playing time is below 15 minutes. "
+                    "EV ranking is disabled because a low-minute role is too volatile."
+                )
             else:
                 model.setdefault("confidence", "provisional")
 
             market_prop = {
                 "player": name,
-                "team": raw.get("team") or "",
+                "team": resolved_team,
                 "game": event_matchup,
                 "market": market,
                 "line": line,
@@ -1863,7 +1898,7 @@ def proprietary_market_board(market: str = "rebounds"):
                 "line_source": "DraftKings via PropLine",
                 "line_updated_at": raw.get("last_update"),
                 "bookmaker_link": raw.get("bookmaker_link"),
-                "market_books": ["DraftKings"],
+                "market_books": raw.get("market_books") or ["Sportsbook"],
                 "position": (matchup_adjustment or {}).get("position"),
                 "defense_vs_position": matchup_adjustment,
                 **model,
