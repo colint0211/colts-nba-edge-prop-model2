@@ -11,7 +11,23 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 from fastapi import FastAPI, Request as FastRequest, HTTPException
-from fastapi.responses import HTMLResponse, Response, JSONResponse
+from fastapi.responses import HTMLResponse, Response, JSONResponse as StarletteJSONResponse
+
+def _json_safe(value):
+    """Convert nested values to strict JSON-compatible types before responding."""
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, (set, frozenset)):
+        return sorted((_json_safe(item) for item in value), key=lambda item: str(item))
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    return value
+
+class JSONResponse(StarletteJSONResponse):
+    def render(self, content):
+        return super().render(_json_safe(content))
 from . import prediction_ledger
 from pathlib import Path
 from html.parser import HTMLParser
@@ -1770,7 +1786,7 @@ def proprietary_market_board(market: str = "rebounds"):
     injury_feed = _load_official_injury_feed()
     bdl_games = _load_balldontlie_games(allow_fetch=(market == "points"))
     if cached_board and now - cached_board[0] < _BP_BOARD_TTL_SECONDS:
-        cached_result = json.loads(json.dumps(cached_board[1]))
+        cached_result = _json_safe(cached_board[1])
         for cached_prop in cached_result.get("props") or []:
             _apply_official_injury(cached_prop, injury_feed)
             _apply_balldontlie_game(cached_prop, bdl_games)
