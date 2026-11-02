@@ -1804,6 +1804,47 @@ def _propline_quote(prop):
     }
 
 
+def _snapshot_daily_market_top5(market, props):
+    """Freeze the first eligible positive-EV Top 5 for this market and ET slate date."""
+    try:
+        slate_date = datetime.now(ZoneInfo("America/New_York")).date().isoformat()
+        eligible = []
+        for prop in props or []:
+            if not isinstance(prop, dict):
+                continue
+            if prop.get("recommendation") not in ("VALUE CANDIDATE", "LEAN / VERIFY"):
+                continue
+            if prop.get("injury_blocked") or prop.get("injury_flag"):
+                continue
+            try:
+                ev = float(prop.get("expected_value_pct"))
+                sample = int(prop.get("sample_size") or prop.get("games_used") or 0)
+                minutes = float(prop.get("projected_minutes"))
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if not math.isfinite(ev) or ev <= 0 or sample < 8 or minutes < 15:
+                continue
+            if prop.get("best_side") not in ("OVER", "UNDER") or prop.get("best_odds") is None:
+                continue
+            eligible.append(prop)
+        eligible.sort(key=lambda item: float(item.get("expected_value_pct") or 0), reverse=True)
+        selected, seen = [], set()
+        for prop in eligible:
+            key = (_norm_player_name(prop.get("player")), str(prop.get("game") or "").casefold())
+            if key in seen:
+                continue
+            seen.add(key)
+            selected.append(prop)
+            if len(selected) == 5:
+                break
+        if selected:
+            prediction_ledger.initialize()
+            prediction_ledger.save_daily_top_five(selected, market, slate_date)
+    except Exception:
+        # The live board must remain available even if ledger storage is unavailable.
+        return
+
+
 @app.get("/api/proprietary-market-board")
 def proprietary_market_board(market: str = "rebounds"):
     market = market.lower().strip()
@@ -1820,6 +1861,7 @@ def proprietary_market_board(market: str = "rebounds"):
             _apply_balldontlie_game(cached_prop, bdl_games)
         cached_result["injury_feed"] = injury_feed.get("meta", {})
         cached_result["balldontlie"] = {key: value for key, value in bdl_games.items() if key != "games"}
+        _snapshot_daily_market_top5(market, cached_result.get("props") or [])
         return JSONResponse(cached_result)
 
     events, props_source, quota = _propline_fetch_events()
@@ -1940,6 +1982,7 @@ def proprietary_market_board(market: str = "rebounds"):
         "injury_feed": injury_feed.get("meta", {}),
         "balldontlie": {key: value for key, value in bdl_games.items() if key != "games"},
     }
+    _snapshot_daily_market_top5(market, output)
     _BP_BOARD_CACHE[market] = (time.time(), result)
     return JSONResponse(result)
 
