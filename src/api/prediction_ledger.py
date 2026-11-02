@@ -470,22 +470,49 @@ def save_daily_top_five(rows, market, slate_date):
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", slate_date):
         raise ValueError("Invalid slate date")
     with _connect() as conn:
-        existing = conn.execute(
-            "SELECT COUNT(*) FROM nba_predictions WHERE market=%s AND snapshot->>'daily_top5'='true' AND snapshot->>'slate_date'=%s",
+        existing_rows = conn.execute(
+            """
+            SELECT player, event, event_id
+            FROM nba_predictions
+            WHERE market=%s AND snapshot->>'daily_top5'='true'
+              AND snapshot->>'slate_date'=%s
+            ORDER BY id
+            """,
             (market, slate_date),
-        ).fetchone()[0]
-    if existing:
-        return {"saved": 0, "skipped": len(rows or []), "already_saved": True}
+        ).fetchall()
+    existing_keys = {
+        (
+            str(player or "").strip().casefold(),
+            str(event_id or "").strip().casefold() or str(event or "").strip().casefold(),
+        )
+        for player, event, event_id in existing_rows
+    }
+    remaining = max(0, 5 - len(existing_rows))
+    if remaining == 0:
+        return {"saved": 0, "skipped": len(rows or []), "already_saved": True, "filled": 5}
     selected = []
-    for row in (rows or [])[:5]:
-        if isinstance(row, dict):
-            item = dict(row)
-            item["market"] = market
-            item["daily_top5"] = True
-            item["slate_date"] = slate_date
-            selected.append(item)
+    selected_keys = set()
+    for row in (rows or []):
+        if not isinstance(row, dict):
+            continue
+        item = dict(row)
+        player_key = str(item.get("player") or "").strip().casefold()
+        event_key = str(item.get("event_id") or item.get("game_id") or "").strip().casefold()
+        if not event_key:
+            event_key = str(item.get("game") or "").strip().casefold()
+        key = (player_key, event_key)
+        if not player_key or key in existing_keys or key in selected_keys:
+            continue
+        item["market"] = market
+        item["daily_top5"] = True
+        item["slate_date"] = slate_date
+        selected.append(item)
+        selected_keys.add(key)
+        if len(selected) >= remaining:
+            break
     result = save_predictions(selected, market)
-    result["already_saved"] = False
+    result["already_saved"] = bool(existing_rows)
+    result["filled"] = min(5, len(existing_rows) + result.get("saved", 0))
     return result
 
 
