@@ -1080,9 +1080,17 @@ def _player_history(athlete_id, field, label):
     current_minutes = _gamelog_records(athlete_id, "minutes", "MIN", 2027)
     prior_stats = []
     prior_minutes = []
-    if len(current_stats) < 5:
+    # Steals are especially sparse early in the season. When fewer than eight
+    # current-season games exist, blend a capped prior-season sample rather
+    # than relaxing the EV eligibility threshold or pretending the sample is
+    # current-season data. Other markets retain the established <5 fallback.
+    prior_trigger = 8 if field == "steals" else 5
+    if len(current_stats) < prior_trigger:
         prior_stats = _gamelog_records(athlete_id, field, label, 2026)
         prior_minutes = _gamelog_records(athlete_id, "minutes", "MIN", 2026)
+        if field == "steals":
+            prior_stats = prior_stats[-8:]
+            prior_minutes = prior_minutes[-8:]
 
     def pair_records(stats, mins):
         minute_by_event = {r["event_id"]: r for r in mins if r.get("event_id")}
@@ -1124,10 +1132,11 @@ def _player_history(athlete_id, field, label):
     paired = pair_records(current_stats, current_minutes)
     used_prior = False
     history_stats = list(current_stats)
-    if len(current_stats) < 5 and prior_stats:
-        # Prior-season scoring records remain valid even if ESPN's separate
-        # stat/minute categories cannot be joined. Minutes are optional; never
-        # throw away verified scoring history solely because that join failed.
+    if len(current_stats) < prior_trigger and prior_stats:
+        # Prior-season records are a limited prior, not additional current-
+        # season evidence. For steals, cap the prior contribution at eight
+        # games and keep current-season rows newest in the combined sequence.
+        # Minutes remain optional and are joined only by event ID or date.
         history_stats = list(prior_stats) + history_stats
         prior_pairs = pair_records(prior_stats, prior_minutes)
         paired = prior_pairs + paired
