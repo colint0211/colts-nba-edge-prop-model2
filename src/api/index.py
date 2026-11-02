@@ -1825,6 +1825,7 @@ def proprietary_market_board(market: str = "rebounds"):
         try:
             line = float(raw.get("line"))
             quote = _propline_quote(raw)
+            event_matchup = raw.get("game") or ""
             team_codes = _team_codes_from_game(event_matchup)
             roster_athlete_id, roster_team = _espn_roster_player_id(name, team_codes)
             athlete_id = roster_athlete_id or _espn_player_id(name)
