@@ -1895,7 +1895,7 @@ def proprietary_market_board(market: str = "rebounds"):
                 "athlete_id": athlete_id,
                 "games_used": len(values),
                 "event_id": raw.get("event_id"),
-                "line_source": "DraftKings via PropLine",
+                "line_source": "DraftKings/FanDuel via PropLine",
                 "line_updated_at": raw.get("last_update"),
                 "bookmaker_link": raw.get("bookmaker_link"),
                 "market_books": raw.get("market_books") or ["Sportsbook"],
