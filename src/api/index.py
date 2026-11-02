@@ -729,13 +729,21 @@ def _espn_roster_player_id(name, team_codes):
             _ESPN_ROSTER_CACHE[team_code] = found
 
         for athlete_id, athlete_name in _ESPN_ROSTER_CACHE[team_code].items():
-            if _norm_player_name(athlete_name) == normalized_name:
-                matches[(athlete_id, team_code.upper())] = athlete_name
+            candidate_key = _norm_player_name(athlete_name)
+            score = SequenceMatcher(None, normalized_name, candidate_key).ratio()
+            if candidate_key == normalized_name:
+                score = 1.0
+            if score >= 0.86:
+                matches[(athlete_id, team_code.upper())] = (athlete_name, score)
 
-    if len(matches) == 1:
-        athlete_id, team_code = next(iter(matches))
-        canonical = {"NYK": "NYK", "GSW": "GSW"}.get(team_code, team_code)
-        return athlete_id, canonical
+    ranked = sorted(matches.items(), key=lambda item: item[1][1], reverse=True)
+    if ranked:
+        (athlete_id, team_code), (_, best_score) = ranked[0]
+        second_score = ranked[1][1][1] if len(ranked) > 1 else 0.0
+        # Accept fuzzy aliases only when the best roster match is clearly unique.
+        if best_score >= 0.86 and (len(ranked) == 1 or best_score - second_score >= 0.06):
+            canonical = {"NYK": "NYK", "GSW": "GSW"}.get(team_code, team_code)
+            return athlete_id, canonical
     return None, None
 
 def _get_json(url, timeout=12):
@@ -1920,8 +1928,8 @@ def proprietary_market_board(market: str = "rebounds"):
         pass
     result = {
         "market": market,
-        "source": "ESPN game-log distribution + DraftKings odds via PropLine",
-        "blend": "50/50 logarithmic model/DraftKings market probability pool (provisional pending calibration)",
+        "source": "ESPN game-log distribution + DraftKings/FanDuel odds via PropLine",
+        "blend": "50/50 logarithmic model/best available DraftKings-FanDuel market probability pool (provisional pending calibration)",
         "line_count": len(props),
         "projected_count": len(output),
         "props": output,
