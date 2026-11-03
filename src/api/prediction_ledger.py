@@ -115,11 +115,19 @@ def save_predictions(rows, market=None):
 
             model_probability = _number(
                 prediction.get(
-                    "model_over_probability"
+                    "raw_model_over_probability"
                     if side == "OVER"
-                    else "model_under_probability"
+                    else "raw_model_under_probability"
                 )
             )
+            if model_probability is None:
+                model_probability = _number(
+                    prediction.get(
+                        "model_over_probability"
+                        if side == "OVER"
+                        else "model_under_probability"
+                    )
+                )
             market_probability = _number(
                 prediction.get(
                     "market_over_probability"
