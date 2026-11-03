@@ -1583,12 +1583,30 @@ def _apply_historical_calibration(model, market):
     raw_over = max(0.0, min(1.0, float(model.get("over_probability") or 0.0) / 100.0 / mass))
     bins = profile.get("bins") or []
     eligible = [b for b in bins if b.get("count", 0) >= 20]
-    if not eligible:
+    if len(eligible) < 3:
         model["calibration_status"] = "collecting data"
         model["calibration_applied"] = False
+        model["calibration_minimum_populated_bins"] = 3
         return model
-    centers = [(float(b["predicted"]), float(b["observed"])) for b in eligible]
-    centers.sort()
+    # Weighted pool-adjacent-violators keeps the learned mapping monotonic.
+    blocks = []
+    for b in sorted(eligible, key=lambda item: float(item["predicted"])):
+        blocks.append({
+            "x_sum": float(b["predicted"]) * int(b["count"]),
+            "y_sum": float(b["observed"]) * int(b["count"]),
+            "weight": int(b["count"]),
+        })
+        while len(blocks) >= 2:
+            left, right = blocks[-2], blocks[-1]
+            if left["y_sum"] / left["weight"] <= right["y_sum"] / right["weight"]:
+                break
+            merged = {
+                "x_sum": left["x_sum"] + right["x_sum"],
+                "y_sum": left["y_sum"] + right["y_sum"],
+                "weight": left["weight"] + right["weight"],
+            }
+            blocks[-2:] = [merged]
+    centers = [(b["x_sum"] / b["weight"], b["y_sum"] / b["weight"]) for b in blocks]
     if raw_over <= centers[0][0]:
         calibrated_over = centers[0][1]
     elif raw_over >= centers[-1][0]:
