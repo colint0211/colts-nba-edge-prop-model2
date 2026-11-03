@@ -1919,6 +1919,8 @@ def _snapshot_daily_market_top5(market, props):
             key=lambda item: float(item.get("expected_value_pct") if item.get("expected_value_pct") is not None else -1e9),
             reverse=True,
         )
+        if not ordered:
+            return []
         frozen = prediction_ledger.freeze_daily_slate(market, slate_date, ordered)
         candidates = frozen.get("candidates") or []
         eligible = []
@@ -1968,7 +1970,7 @@ def proprietary_market_board(market: str = "rebounds"):
         frozen_slate = prediction_ledger.get_daily_slate(market, today_et)
     except Exception:
         frozen_slate = None
-    if frozen_slate:
+    if frozen_slate and frozen_slate.get("candidates"):
         frozen_props = [dict(p) for p in (frozen_slate.get("candidates") or []) if isinstance(p, dict)]
         for prop in frozen_props:
             _apply_official_injury(prop, injury_feed)
@@ -2000,7 +2002,7 @@ def proprietary_market_board(market: str = "rebounds"):
         cached_result["props"] = frozen_candidates
         cached_result["line_count"] = len(frozen_candidates)
         cached_result["projected_count"] = len(frozen_candidates)
-        cached_result["daily_frozen"] = True
+        cached_result["daily_frozen"] = bool(frozen_candidates)
         cached_result["daily_slate_date"] = datetime.now(ZoneInfo("America/New_York")).date().isoformat()
         cached_result["daily_slate_rule"] = "Fixed for the day; only confirmed injury status is refreshed."
         return JSONResponse(cached_result)
@@ -2128,7 +2130,7 @@ def proprietary_market_board(market: str = "rebounds"):
     result["props"] = frozen_candidates
     result["line_count"] = len(frozen_candidates)
     result["projected_count"] = len(frozen_candidates)
-    result["daily_frozen"] = True
+    result["daily_frozen"] = bool(frozen_candidates)
     result["daily_slate_date"] = datetime.now(ZoneInfo("America/New_York")).date().isoformat()
     result["daily_slate_rule"] = "Fixed for the day; only confirmed injury status is refreshed."
     _BP_BOARD_CACHE[market] = (time.time(), result)
