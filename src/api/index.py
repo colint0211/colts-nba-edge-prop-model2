@@ -1996,7 +1996,13 @@ def proprietary_market_board(market: str = "rebounds"):
             _apply_balldontlie_game(cached_prop, bdl_games)
         cached_result["injury_feed"] = injury_feed.get("meta", {})
         cached_result["balldontlie"] = {key: value for key, value in bdl_games.items() if key != "games"}
-        _snapshot_daily_market_top5(market, cached_result.get("props") or [])
+        frozen_candidates = _snapshot_daily_market_top5(market, cached_result.get("props") or [])
+        cached_result["props"] = frozen_candidates
+        cached_result["line_count"] = len(frozen_candidates)
+        cached_result["projected_count"] = len(frozen_candidates)
+        cached_result["daily_frozen"] = True
+        cached_result["daily_slate_date"] = datetime.now(ZoneInfo("America/New_York")).date().isoformat()
+        cached_result["daily_slate_rule"] = "Fixed for the day; only confirmed injury status is refreshed."
         return JSONResponse(cached_result)
 
     events, props_source, quota = _propline_fetch_events()
