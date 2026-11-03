@@ -2374,7 +2374,6 @@ def live_stats():
     enrichment_error = None
     try:
         payload = _enrich_live_boxscores(payload)
-        payload = _enrich_live_quarters(payload)
     except Exception as exc:
         # Keep the scoreboard alive even if an upstream box-score schema changes.
         enrichment_error = type(exc).__name__ + ": " + str(exc)[:160]
