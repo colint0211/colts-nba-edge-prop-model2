@@ -1551,6 +1551,65 @@ def _log_pool(model_p, market_p, weight=0.5):
     other = math.exp((1-weight)*math.log(1-a) + weight*math.log(1-b))
     return z / (z + other)
 
+
+
+_CALIBRATION_PROFILE_CACHE = {"at": 0.0, "data": {}}
+_CALIBRATION_PROFILE_TTL = 300
+
+
+def _calibration_profile(market):
+    now = time.time()
+    cached = _CALIBRATION_PROFILE_CACHE.get("data") or {}
+    if now - _CALIBRATION_PROFILE_CACHE.get("at", 0.0) < _CALIBRATION_PROFILE_TTL and market in cached:
+        return cached[market]
+    profile = prediction_ledger.calibration_profile(market)
+    cached[market] = profile
+    _CALIBRATION_PROFILE_CACHE.update({"at": now, "data": cached})
+    return profile
+
+
+def _apply_historical_calibration(model, market):
+    """Apply a market-specific empirical reliability correction only when evidence is adequate."""
+    profile = _calibration_profile(market)
+    model["calibration_sample_size"] = profile.get("sample_size", 0)
+    model["calibration_bins"] = profile.get("bins", [])
+    if not profile.get("ready"):
+        model["calibration_status"] = "collecting data"
+        model["calibration_applied"] = False
+        model["calibration_minimum_sample_size"] = profile.get("minimum_sample_size", 100)
+        return model
+    push = max(0.0, min(0.25, float(model.get("push_probability") or 0.0) / 100.0))
+    mass = max(1e-9, 1.0 - push)
+    raw_over = max(0.0, min(1.0, float(model.get("over_probability") or 0.0) / 100.0 / mass))
+    bins = profile.get("bins") or []
+    eligible = [b for b in bins if b.get("count", 0) >= 20]
+    if not eligible:
+        model["calibration_status"] = "collecting data"
+        model["calibration_applied"] = False
+        return model
+    centers = [(float(b["predicted"]), float(b["observed"])) for b in eligible]
+    centers.sort()
+    if raw_over <= centers[0][0]:
+        calibrated_over = centers[0][1]
+    elif raw_over >= centers[-1][0]:
+        calibrated_over = centers[-1][1]
+    else:
+        calibrated_over = raw_over
+        for (x0, y0), (x1, y1) in zip(centers, centers[1:]):
+            if x0 <= raw_over <= x1:
+                weight = (raw_over - x0) / max(1e-9, x1 - x0)
+                calibrated_over = y0 + weight * (y1 - y0)
+                break
+    calibrated_over = max(0.01, min(0.99, calibrated_over))
+    model["raw_over_probability"] = model.get("over_probability")
+    model["raw_under_probability"] = model.get("under_probability")
+    model["over_probability"] = round(calibrated_over * mass * 100, 2)
+    model["under_probability"] = round((1.0 - calibrated_over) * mass * 100, 2)
+    model["calibration_status"] = "historically calibrated"
+    model["calibration_applied"] = True
+    model["calibration_method"] = "market-specific side-normalized empirical reliability map"
+    return model
+
 def _score_blended_market(model, market_quote):
     """
     Logarithmic opinion pool on the conditional Over/Under probabilities.
@@ -1814,9 +1873,26 @@ def _propline_quote(prop):
 
 
 def _snapshot_daily_market_top5(market, props):
-    """Freeze the first eligible positive-EV Top 5 for this market and ET slate date."""
+    """Freeze the first eligible positive-EV Top 5 and collect one forecast per market/player/event/line."""
     try:
         slate_date = datetime.now(ZoneInfo("America/New_York")).date().isoformat()
+        calibration_rows = []
+        for prop in props or []:
+            if not isinstance(prop, dict) or prop.get("best_side") not in ("OVER", "UNDER"):
+                continue
+            if prop.get("best_odds") is None or prop.get("best_probability") is None:
+                continue
+            sample = int(prop.get("sample_size") or prop.get("games_used") or 0)
+            if sample < 4:
+                continue
+            item = dict(prop)
+            item["market"] = market
+            item["calibration_sample"] = True
+            item["slate_date"] = slate_date
+            calibration_rows.append(item)
+        if calibration_rows:
+            prediction_ledger.initialize()
+            prediction_ledger.save_predictions(calibration_rows, market)
         eligible = []
         for prop in props or []:
             if not isinstance(prop, dict):
@@ -1904,6 +1980,7 @@ def proprietary_market_board(market: str = "rebounds"):
             if not model:
                 failures.append(name + ": fewer than five valid game logs")
                 continue
+            model = _apply_historical_calibration(model, market)
             if quote:
                 model = _score_blended_market(model, quote)
             else:
@@ -2503,6 +2580,27 @@ def tank01_dvp_status():
             "error_type": type(exc).__name__,
             "message": str(exc)[:220],
         }, status_code=502)
+
+
+@app.get("/api/model/calibration")
+def model_calibration(market: str = "all"):
+    """Return actual settled calibration evidence, without inventing estimates."""
+    selected = market.lower().strip()
+    if selected != "all" and selected not in STAT_FIELDS:
+        raise HTTPException(status_code=400, detail="Use points, rebounds, assists, steals, threes, or all.")
+    try:
+        prediction_ledger.initialize()
+        if selected == "all":
+            profiles = prediction_ledger.calibration_profile("all")
+        else:
+            profiles = {selected: prediction_ledger.calibration_profile(selected)}
+        return JSONResponse({
+            "status": "historical calibration active where sample thresholds are met",
+            "minimum_sample_size": 100,
+            "markets": profiles,
+        })
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Calibration history unavailable: " + type(exc).__name__)
 
 
 @app.get("/api/model/diagnostics")
