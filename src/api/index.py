@@ -1894,7 +1894,7 @@ def _propline_quote(prop):
 
 
 def _snapshot_daily_market_top5(market, props):
-    """Freeze the first eligible positive-EV Top 5 and collect one forecast per market/player/event/line."""
+    """Freeze the first complete market candidate board for the Eastern-time slate date."""
     try:
         slate_date = datetime.now(ZoneInfo("America/New_York")).date().isoformat()
         calibration_rows = []
@@ -1911,16 +1911,19 @@ def _snapshot_daily_market_top5(market, props):
             item["calibration_sample"] = True
             item["slate_date"] = slate_date
             calibration_rows.append(item)
+        prediction_ledger.initialize()
         if calibration_rows:
-            prediction_ledger.initialize()
             prediction_ledger.save_predictions(calibration_rows, market)
+        ordered = sorted(
+            [dict(p, market=market) for p in (props or []) if isinstance(p, dict)],
+            key=lambda item: float(item.get("expected_value_pct") if item.get("expected_value_pct") is not None else -1e9),
+            reverse=True,
+        )
+        frozen = prediction_ledger.freeze_daily_slate(market, slate_date, ordered)
+        candidates = frozen.get("candidates") or []
         eligible = []
-        for prop in props or []:
-            if not isinstance(prop, dict):
-                continue
-            if prop.get("recommendation") not in ("VALUE CANDIDATE", "LEAN / VERIFY"):
-                continue
-            if prop.get("injury_blocked") or prop.get("injury_flag"):
+        for prop in candidates:
+            if not isinstance(prop, dict) or prop.get("injury_blocked") or prop.get("injury_flag"):
                 continue
             try:
                 ev = float(prop.get("expected_value_pct"))
@@ -1928,7 +1931,7 @@ def _snapshot_daily_market_top5(market, props):
                 minutes = float(prop.get("projected_minutes"))
             except (TypeError, ValueError, OverflowError):
                 continue
-            if not math.isfinite(ev) or ev <= 0 or sample < 8 or minutes < 15:
+            if not math.isfinite(ev) or sample < 8 or minutes < 15:
                 continue
             if prop.get("best_side") not in ("OVER", "UNDER") or prop.get("best_odds") is None:
                 continue
@@ -1944,11 +1947,10 @@ def _snapshot_daily_market_top5(market, props):
             if len(selected) == 5:
                 break
         if selected:
-            prediction_ledger.initialize()
             prediction_ledger.save_daily_top_five(selected, market, slate_date)
+        return candidates
     except Exception:
-        # The live board must remain available even if ledger storage is unavailable.
-        return
+        return [dict(p) for p in (props or []) if isinstance(p, dict)]
 
 
 @app.get("/api/proprietary-market-board")
@@ -1960,6 +1962,33 @@ def proprietary_market_board(market: str = "rebounds"):
     cached_board = _BP_BOARD_CACHE.get(market)
     injury_feed = _load_official_injury_feed()
     bdl_games = _load_balldontlie_games(allow_fetch=(market == "points"))
+    try:
+        today_et = datetime.now(ZoneInfo("America/New_York")).date().isoformat()
+        prediction_ledger.initialize()
+        frozen_slate = prediction_ledger.get_daily_slate(market, today_et)
+    except Exception:
+        frozen_slate = None
+    if frozen_slate:
+        frozen_props = [dict(p) for p in (frozen_slate.get("candidates") or []) if isinstance(p, dict)]
+        for prop in frozen_props:
+            _apply_official_injury(prop, injury_feed)
+            _apply_balldontlie_game(prop, bdl_games)
+        return JSONResponse({
+            "market": market,
+            "source": "Frozen Eastern-time daily slate · original PropLine/DraftKings snapshot",
+            "line_count": len(frozen_props),
+            "projected_count": len(frozen_props),
+            "props": frozen_props,
+            "daily_frozen": True,
+            "daily_slate_date": today_et,
+            "daily_slate_saved_at": frozen_slate.get("created_at"),
+            "daily_slate_rule": "Fixed for the day; only confirmed injury status is refreshed.",
+            "unavailable": [],
+            "cache_ttl_seconds": _BP_BOARD_TTL_SECONDS,
+            "prop_line_cache_source": "daily-snapshot",
+            "injury_feed": injury_feed.get("meta", {}),
+            "balldontlie": {key: value for key, value in bdl_games.items() if key != "games"},
+        })
     if cached_board and now - cached_board[0] < _BP_BOARD_TTL_SECONDS:
         cached_result = _json_safe(cached_board[1])
         for cached_prop in cached_result.get("props") or []:
@@ -2089,10 +2118,36 @@ def proprietary_market_board(market: str = "rebounds"):
         "injury_feed": injury_feed.get("meta", {}),
         "balldontlie": {key: value for key, value in bdl_games.items() if key != "games"},
     }
-    _snapshot_daily_market_top5(market, output)
+    frozen_candidates = _snapshot_daily_market_top5(market, output)
+    result["props"] = frozen_candidates
+    result["line_count"] = len(frozen_candidates)
+    result["projected_count"] = len(frozen_candidates)
+    result["daily_frozen"] = True
+    result["daily_slate_date"] = datetime.now(ZoneInfo("America/New_York")).date().isoformat()
+    result["daily_slate_rule"] = "Fixed for the day; only confirmed injury status is refreshed."
     _BP_BOARD_CACHE[market] = (time.time(), result)
     return JSONResponse(result)
 
+
+
+@app.get("/api/cron/freeze-daily")
+def cron_freeze_daily(request: FastRequest):
+    """Capture all five market boards during the midnight Eastern hour."""
+    secret = os.getenv("CRON_SECRET", "")
+    if not secret or not secrets.compare_digest(request.headers.get("authorization", ""), "Bearer " + secret):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    now_et = datetime.now(ZoneInfo("America/New_York"))
+    if now_et.hour != 0:
+        return JSONResponse({"status": "outside_freeze_window", "eastern_time": now_et.isoformat()})
+    results = {}
+    for market_name in ("points", "rebounds", "assists", "steals", "threes"):
+        try:
+            response = proprietary_market_board(market_name)
+            payload = json.loads(response.body.decode("utf-8"))
+            results[market_name] = {"frozen": bool(payload.get("daily_frozen")), "candidate_count": len(payload.get("props") or []), "source": payload.get("prop_line_cache_source")}
+        except Exception as exc:
+            results[market_name] = {"frozen": False, "error": type(exc).__name__ + ": " + str(exc)[:160]}
+    return JSONResponse({"status": "completed" if all(v.get("frozen") for v in results.values()) else "partial", "slate_date": now_et.date().isoformat(), "timezone": "America/New_York", "markets": results})
 
 @app.get("/api/bettingpros-books")
 def bettingpros_books():
