@@ -368,7 +368,8 @@ function bpLineCard(p,i){
     '<div class="card-bottom"><span>Model pick: <b>'+esc(p.best_side||'—')+'</b> · '+num(p.edge_pp)+' pp edge</span><span class="ev">'+(p.expected_value_pct==null?'—':(Number(p.expected_value_pct)>0?'+':'')+num(p.expected_value_pct,2)+'% EV')+'</span></div>'+
     '<div class="card-bottom"><span>Simulations: '+esc(p.simulations||50000).toLocaleString()+'</span><span>Odds O '+esc(odds(p.overOdds??p.over_odds))+' / U '+esc(odds(p.underOdds??p.under_odds))+'</span></div>'+
     '<div class="card-bottom"><span>Sportsbook: '+esc((p.market_books||[]).join(', ')||'DraftKings')+'</span><span>Stake: '+(stake==null?'Enter bankroll / no qualifying bet':'$'+num(stake,2)+' (5%)')+'</span></div>'+
-    '<div class="card-bottom"><span>Kelly diagnostic: '+(p.kelly_fraction_pct==null?'—':num(p.kelly_fraction_pct,2)+'%')+'</span><span>50/50 model/DraftKings blend</span></div>'+injurySummary(p)+balldontlieSummary(p)+dvpSummary(p)+lineEditor(p)+'</article>';
+    '<div class="card-bottom"><span>Kelly diagnostic: '+(p.kelly_fraction_pct==null?'—':num(p.kelly_fraction_pct,2)+'%')+'</span><span>50/50 model/DraftKings blend</span></div>'+
+    '<div class="card-bottom"><span>Calibration: '+esc(p.calibration_status||'collecting data')+'</span><span>Settled samples: '+esc(p.calibration_sample_size??0)+'</span></div>'+injurySummary(p)+balldontlieSummary(p)+dvpSummary(p)+lineEditor(p)+'</article>';
 }
 function allModelEV(){
   const all=rankEV(data).map(p=>({...p,market:'points'}));
