@@ -2331,8 +2331,14 @@ def live_stats():
                     continue
                 away_team = away.get("team") or {}
                 home_team = home.get("team") or {}
-                away_code = str(away_team.get("abbreviation") or "").upper()
-                home_code = str(home_team.get("abbreviation") or "").upper()
+                team_aliases = {
+                    "NY": "NYK", "GS": "GSW", "SA": "SAS",
+                    "NO": "NOP", "UTAH": "UTA", "WSH": "WAS",
+                }
+                away_code_raw = str(away_team.get("abbreviation") or "").upper()
+                home_code_raw = str(home_team.get("abbreviation") or "").upper()
+                away_code = team_aliases.get(away_code_raw, away_code_raw)
+                home_code = team_aliases.get(home_code_raw, home_code_raw)
                 if not away_code or not home_code:
                     continue
                 status = competition.get("status") or event.get("status") or {}
