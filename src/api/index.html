@@ -49,12 +49,24 @@ function playerLive(p){
   const id=p.athlete_id==null?'':String(p.athlete_id);
   return (id&&liveData.players_by_id?.[id])||liveData.players_by_name?.[norm(p.player)]||null;
 }
+function liveStatValue(p){
+  const st=playerLive(p)||{},market=String(p.market||"points").toLowerCase();
+  const fields={
+    points:["points","pts"],rebounds:["rebounds","rebound","reb"],
+    assists:["assists","assist","ast"],steals:["steals","steal","stl"],
+    threes:["three_points_made","threePointsMade","three_pointers_made","threePointersMade","threes","3pm","3PTM"]
+  };
+  for(const key of (fields[market]||fields.points)){
+    if(st[key]!=null&&Number.isFinite(Number(st[key])))return Number(st[key]);
+  }
+  return null;
+}
 function grade(p){
-  const g=gameFor(p),st=playerLive(p);
-  if(!g||g.state!=='post'||!st||st.points==null||p.line==null||!p.best_side)return null;
-  const side=String(p.best_side).toUpperCase(),line=Number(p.line),pts=Number(st.points);
-  if(pts===line)return 'PUSH';
-  return (side==='OVER'?pts>line:pts<line)?'HIT':'MISS';
+  const g=gameFor(p),value=liveStatValue(p);
+  if(!g||g.state!=='post'||value==null||p.line==null||!p.best_side)return null;
+  const side=String(p.best_side).toUpperCase(),line=Number(p.line);
+  if(value===line)return 'PUSH';
+  return (side==='OVER'?value>line:value<line)?'HIT':'MISS';
 }
 function isFallback(p){
   const label=String(p.sample_label||p.reason||'').toLowerCase();
@@ -246,6 +258,21 @@ function livePace(p){
   const label=({points:"pts",rebounds:"reb",assists:"ast",steals:"stl",threes:"3PM"})[market]||"stat";
   return {current,minutes,gameMinutesLeft,remainingPlayerMinutes,projected,margin,verdict,label};
 }
+function liveTickerHtml(p){
+  const g=gameFor(p)||{},value=liveStatValue(p),pace=livePace(p);
+  const market=String(p.market||"points").toLowerCase();
+  const label=({points:"PTS",rebounds:"REB",assists:"AST",steals:"STL",threes:"3PM"})[market]||"STAT";
+  const line=Number(p.line),validLine=Number.isFinite(line);
+  const progress=value==null||!validLine||line<=0?0:Math.max(0,Math.min(100,value/line*100));
+  const score=g.away_score!=null&&g.home_score!=null?g.away+" "+g.away_score+" – "+g.home_score+" "+g.home:(g.away&&g.home?g.away+" @ "+g.home:"Score unavailable");
+  const status=g.state==="in"?"LIVE · "+(g.period?"Q"+g.period:"")+(g.clock&&g.clock!=="0:00"?" · "+g.clock+" left":""):g.status||"Waiting for game";
+  const liveValue=value==null?"—":num(value,0);
+  const paceHtml=pace
+    ?'<div class="mini-value">'+num(pace.projected,1)+' '+label+' projected · '+esc(pace.verdict)+'</div><div class="mini-label">'+num(pace.current,0)+' '+label+' in '+num(pace.minutes,1)+' min · '+num(pace.gameMinutesLeft,1)+' game min left · '+num(pace.remainingPlayerMinutes,1)+' expected player min left</div>'
+    :'<div class="mini-value">'+(g.state==="in"?"Calculating live pace":"Waiting for live game")+'</div><div class="mini-label">Pace estimate appears when the matching stat, player minutes and game clock are available.</div>';
+  return '<div class="scorebox"><div><div class="score-label">Live game score</div><div class="score">'+esc(score)+'</div></div><div class="game-status">'+(g.state==="in"?'<span class="live-dot"></span>':'')+esc(status)+'</div></div>'+
+    '<div class="statline" style="margin-top:10px"><div class="mini"><div class="mini-label">Live '+esc(bpMarketLabel(market))+' / prop line</div><div class="mini-value">'+liveValue+' <span>/ '+(validLine?num(line):"—")+' '+label+'</span></div><div class="progress"><span style="width:'+progress+'%"></span></div></div><div class="mini"><div class="mini-label">Live pace / outlook</div>'+paceHtml+'</div></div>';
+}
 function dvpSummary(p){
   const d=p.defense_vs_position;
   if(!d||d.available===false){
@@ -279,7 +306,7 @@ function balldontlieSummary(p){
   return '<div class="card-bottom"><span>Schedule cross-check: <b>BALLDONTLIE</b></span><span>'+esc(detail)+'</span></div>';
 }
 function card(p,i){
-  const g=gameFor(p),st=playerLive(p),gr=grade(p),pts=st&&st.points!=null?Number(st.points):null;
+  const g=gameFor(p),gr=grade(p),pts=liveStatValue(p);
   const line=Number(p.line),progress=pts==null||!Number.isFinite(line)||line<=0?0:Math.max(0,Math.min(100,pts/line*100));
   const fallback=isFallback(p);
   const shownRecommendation=fallback?'PASS · FALLBACK':(p.recommendation||p.model_status||'—');
@@ -364,7 +391,7 @@ function bpLineCard(p,i){
   const label=bpMarketLabel(p.market);
   return '<article class="player-card '+cls+'"><div class="player-top"><div><div class="player-name">'+esc((i+1)+'. '+p.player+(p.team?' ('+p.team+')':''))+'</div><div class="matchup">'+esc(p.game||'NBA player prop')+' · Proprietary ESPN game-log model · DraftKings odds</div></div><span class="decision '+cls+'">'+esc(p.recommendation||'PASS')+'</span></div>'+
     '<div class="scorebox"><div><div class="score-label">'+esc(label)+' line</div><div class="score">'+esc(p.line)+'</div></div><div class="game-status">Over '+esc(odds(p.overOdds??p.over_odds))+'<br>Under '+esc(odds(p.underOdds??p.under_odds))+'</div></div>'+
-    '<div class="statline"><div class="mini"><div class="mini-label">Our projection</div><div class="mini-value">'+num(p.projection,2)+'</div><div class="mini-label">'+esc(p.sample_label||'Game-log sample')+'</div></div><div class="mini"><div class="mini-label">Over / Under / Push</div><div class="mini-value">'+num(p.over_probability,1)+'% / '+num(p.under_probability,1)+'%</div><div class="mini-label">Push '+num(p.push_probability,1)+'%</div></div></div>'+
+    '<div class="statline"><div class="mini"><div class="mini-label">Our projection</div><div class="mini-value">'+num(p.projection,2)+'</div><div class="mini-label">'+esc(p.sample_label||'Game-log sample')+'</div></div><div class="mini"><div class="mini-label">Over / Under / Push</div><div class="mini-value">'+num(p.over_probability,1)+'% / '+num(p.under_probability,1)+'%</div><div class="mini-label">Push '+num(p.push_probability,1)+'%</div></div></div>'+liveTickerHtml(p)+
     '<div class="card-bottom"><span>Model pick: <b>'+esc(p.best_side||'—')+'</b> · '+num(p.edge_pp)+' pp edge</span><span class="ev">'+(p.expected_value_pct==null?'—':(Number(p.expected_value_pct)>0?'+':'')+num(p.expected_value_pct,2)+'% EV')+'</span></div>'+
     '<div class="card-bottom"><span>Simulations: '+esc(p.simulations||50000).toLocaleString()+'</span><span>Odds O '+esc(odds(p.overOdds??p.over_odds))+' / U '+esc(odds(p.underOdds??p.under_odds))+'</span></div>'+
     '<div class="card-bottom"><span>Sportsbook: '+esc((p.market_books||[]).join(', ')||'DraftKings')+'</span><span>Stake: '+(stake==null?'Enter bankroll / no qualifying bet':'$'+num(stake,2)+' (5%)')+'</span></div>'+
