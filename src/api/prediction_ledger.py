@@ -730,7 +730,7 @@ def freeze_daily_slate(market, slate_date, candidates):
     if market not in ("points", "rebounds", "assists", "steals", "threes"):
         raise ValueError("Unsupported market")
     import re
-    if not re.fullmatch(r"\\d{4}-\\d{2}-\\d{2}", slate_date):
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", slate_date):
         raise ValueError("Invalid slate date")
     safe_candidates = [row for row in (candidates or []) if isinstance(row, dict)]
     payload = json.dumps(safe_candidates, default=str, separators=(",", ":"), allow_nan=False)
