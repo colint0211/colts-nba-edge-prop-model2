@@ -2278,6 +2278,13 @@ def _fetch_live_summary(event_id):
     return summary
 
 
+def _safe_live_score(value):
+    try:
+        return int(float(str(value or "0").replace(",", "")))
+    except (TypeError, ValueError, OverflowError):
+        return 0
+
+
 _LOCAL_LIVE_SCOREBOARD_CACHE = {"at": 0.0, "payload": None}
 _LOCAL_LIVE_SCOREBOARD_TTL = 8
 
@@ -2338,8 +2345,8 @@ def live_stats():
                     "away": away_code,
                     "home": home_code,
                     "teams": [away_code, home_code],
-                    "away_score": int(float(away.get("score") or 0)),
-                    "home_score": int(float(home.get("score") or 0)),
+                    "away_score": _safe_live_score(away.get("score")),
+                    "home_score": _safe_live_score(home.get("score")),
                     "state": state,
                     "period": int(status.get("period") or 0),
                     "clock": str(status.get("displayClock") or ""),
@@ -2358,9 +2365,17 @@ def live_stats():
 
     # Work on a fresh copy because enrichment mutates the player maps.
     payload = json.loads(json.dumps(cached))
-    payload = _enrich_live_boxscores(payload)
-    payload = _enrich_live_quarters(payload)
+    enrichment_error = None
+    try:
+        payload = _enrich_live_boxscores(payload)
+        payload = _enrich_live_quarters(payload)
+    except Exception as exc:
+        # Keep the scoreboard alive even if an upstream box-score schema changes.
+        enrichment_error = type(exc).__name__ + ": " + str(exc)[:160]
+        payload.setdefault("players_by_id", {})
+        payload.setdefault("players_by_name", {})
     payload["live_feed_status"] = {
+        "enrichment_error": enrichment_error,
         "source": payload.get("source"),
         "games": len(payload.get("games") or []),
         "players": len(payload.get("players_by_id") or {}),
