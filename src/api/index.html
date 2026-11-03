@@ -40,10 +40,19 @@ const num=(n,d=1)=>n==null||!Number.isFinite(Number(n))?'—':Number(n).toFixed(
 const norm=s=>String(s||'').toLowerCase().replace(/[^a-z0-9]/g,'');
 const bpMarkets=['points','rebounds','assists','steals','threes'];
 function bpMarketLabel(m){return ({points:'Points',rebounds:'Rebounds',assists:'Assists',steals:'Steals',threes:'3-Pointers Made'})[m]||m}
+function normalizeLiveTeam(value){
+  const raw=String(value||'').trim().toUpperCase();
+  const aliases={GS:'GSW',NY:'NYK',NO:'NOP',SA:'SAS',UTAH:'UTA',WSH:'WAS'};
+  return aliases[raw]||raw;
+}
 function gameFor(p){
-  const raw=String(p.game||'').toUpperCase();
-  const teams=raw.split('@').map(x=>x.trim()).sort().join('|');
-  return (liveData.games||[]).find(g=>(g.teams||[]).slice().sort().join('|')===teams);
+  const parts=String(p.game||'').toUpperCase().split('@').map(normalizeLiveTeam);
+  if(parts.length!==2||!parts[0]||!parts[1])return null;
+  const wanted=parts.slice().sort().join('|');
+  return (liveData.games||[]).find(g=>{
+    const teams=(g.teams||[g.away,g.home]).map(normalizeLiveTeam).sort().join('|');
+    return teams===wanted;
+  })||null;
 }
 function playerLive(p){
   const id=p.athlete_id==null?'':String(p.athlete_id);
@@ -238,25 +247,42 @@ function reasoning(p){
 function livePace(p){
   const st=playerLive(p)||{},g=gameFor(p)||{};
   const market=String(p.market||"points").toLowerCase();
-  const fields={points:["points","pts"],rebounds:["rebounds","rebound","reb"],assists:["assists","assist","ast"],steals:["steals","steal","stl"],threes:["three_points_made","threePointsMade","three_pointers_made","threePointersMade","threes","3pm","3PTM"]};
-  const keys=fields[market]||fields.points;
-  let raw=null;for(const key of keys){if(st[key]!=null){raw=st[key];break;}}
+  const fields={
+    points:["points","pts"],rebounds:["rebounds","rebound","reb"],
+    assists:["assists","assist","ast"],steals:["steals","steal","stl"],
+    threes:["three_points_made","threePointsMade","three_pointers_made","threePointersMade","threes","3pm","3PTM"]
+  };
+  let raw=null;
+  for(const key of (fields[market]||fields.points)){if(st[key]!=null){raw=st[key];break;}}
   const current=Number(raw),line=Number(p.line);
   const minutesRaw=st.minutes_played??st.minutesPlayed??st.minutes??st.min??st.minutes_used;
-  const parseClock=v=>{
+  const parseMinutes=v=>{
     if(typeof v==="number"&&Number.isFinite(v))return v;
-    const s=String(v??"").trim(),m=s.match(/^(\d{1,2}):(\d{2})$/);
+    const s=String(v??"").trim(),m=s.match(/^(\d+):(\d{2})$/);
     if(m)return Number(m[1])+Number(m[2])/60;
     const n=Number(s);return Number.isFinite(n)?n:null;
   };
-  const minutes=parseClock(minutesRaw),period=Number(g.period||g.period_number||0);
-  const clock=String(g.clock||g.display_clock||"").trim(),clockMatch=clock.match(/^(\d{1,2}):(\d{2})$/);
-  if(g.state!=="in"||!Number.isFinite(current)||minutes==null||minutes<=0||!Number.isFinite(line)||!clockMatch||period<1)return null;
-  const secondsLeft=Number(clockMatch[1])*60+Number(clockMatch[2]);
-  const gameMinutesLeft=period<=4?Math.max(0,(4-period)*12+secondsLeft/60):secondsLeft/60;
-  const expectedTotalMinutes=Number(p.projected_minutes??p.expected_minutes??st.projected_minutes??st.expected_minutes??34);
+  const minutes=parseMinutes(minutesRaw);
+  const period=Number(g.period||g.period_number||0);
+  const clock=String(g.clock||g.display_clock||"").trim();
+  const mmss=clock.match(/^(\d{1,2}):(\d{2}(?:\.\d+)?)$/);
+  const secondsOnly=clock.match(/^(\d{1,2})\.(\d+)$/);
+  let secondsLeft=null;
+  if(mmss)secondsLeft=Number(mmss[1])*60+Number(mmss[2]);
+  else if(secondsOnly)secondsLeft=Number(secondsOnly[1])+Number("0."+secondsOnly[2]);
+  if(g.state!=="in"||!Number.isFinite(current)||minutes==null||minutes<=0||
+     !Number.isFinite(line)||secondsLeft==null||period<1)return null;
+  const gameMinutesLeft=period<=4
+    ?Math.max(0,(4-period)*12+secondsLeft/60)
+    :Math.max(0,(Math.max(0,period-5)*5)+secondsLeft/60);
+  const modelMinutes=Number(p.projected_minutes??p.projectedMinutes??p.expected_minutes??
+    p.expectedMinutes??p.minutes_projection??p.minutesProjection??
+    st.projected_minutes??st.expected_minutes);
+  const expectedTotalMinutes=Number.isFinite(modelMinutes)&&modelMinutes>minutes
+    ?modelMinutes:Math.max(minutes,Math.min(36,minutes+gameMinutesLeft));
   const remainingPlayerMinutes=Math.max(0,Math.min(gameMinutesLeft,expectedTotalMinutes-minutes));
-  const projected=current+(current/minutes)*remainingPlayerMinutes,margin=projected-line;
+  const projected=current+(current/minutes)*remainingPlayerMinutes;
+  const margin=projected-line;
   const verdict=margin>=0.5?"ON PACE TO HIT":margin<=-0.5?"ON PACE TO MISS":"TOO CLOSE TO CALL";
   const label=({points:"pts",rebounds:"reb",assists:"ast",steals:"stl",threes:"3PM"})[market]||"stat";
   return {current,minutes,gameMinutesLeft,remainingPlayerMinutes,projected,margin,verdict,label};
