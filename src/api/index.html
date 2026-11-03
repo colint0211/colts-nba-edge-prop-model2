@@ -204,7 +204,10 @@ async function updateLive(){
     const r=await fetch('/api/live-stats?ts='+Date.now(),{cache:'no-store'});
     if(!r.ok)throw Error('live endpoint');
     liveData=await r.json();renderGames();
-    el('liveUpdated').textContent='Scores checked '+new Date(liveData.updated_at||Date.now()).toLocaleTimeString();
+    const liveGames=(liveData.games||[]).filter(g=>g.state==='in').length;
+    const playerCount=Object.keys(liveData.players_by_id||{}).length;
+    const enriched=liveData.live_feed_status?.boxscore_enrichment?.athletes_enriched??playerCount;
+    el('liveUpdated').textContent='Live feed '+new Date(liveData.updated_at||Date.now()).toLocaleTimeString()+' · '+liveGames+' live games · '+enriched+' players';
   }catch(_){el('liveUpdated').textContent='Live feed temporarily unavailable'}
 }
 function positionDisplayName(position){
