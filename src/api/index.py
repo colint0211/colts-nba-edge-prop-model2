@@ -1977,7 +1977,7 @@ def proprietary_market_board(market: str = "rebounds"):
     injury_feed = _load_official_injury_feed()
     bdl_games = _load_balldontlie_games(allow_fetch=(market == "points"))
     try:
-        today_et = datetime.now(ZoneInfo("America/New_York")).date().isoformat()
+        today_et = _active_nba_slate_date()
         prediction_ledger.initialize()
         frozen_slate = prediction_ledger.get_daily_slate(market, today_et)
     except Exception:
@@ -1996,7 +1996,7 @@ def proprietary_market_board(market: str = "rebounds"):
             "daily_frozen": True,
             "daily_slate_date": today_et,
             "daily_slate_saved_at": frozen_slate.get("created_at"),
-            "daily_slate_rule": "Fixed for the day; only confirmed injury status is refreshed.",
+            "daily_slate_rule": "Previous slate remains visible until 7:00 a.m. Eastern; then today’s picks are frozen.",
             "unavailable": [],
             "cache_ttl_seconds": _BP_BOARD_TTL_SECONDS,
             "prop_line_cache_source": "daily-snapshot",
@@ -2014,8 +2014,8 @@ def proprietary_market_board(market: str = "rebounds"):
         if frozen_candidates is not None:
             cached_result["props"] = frozen_candidates
         cached_result["daily_frozen"] = frozen_candidates is not None
-        cached_result["daily_slate_date"] = datetime.now(ZoneInfo("America/New_York")).date().isoformat()
-        cached_result["daily_slate_rule"] = "Fixed for the day; only confirmed injury status is refreshed."
+        cached_result["daily_slate_date"] = _active_nba_slate_date()
+        cached_result["daily_slate_rule"] = "Previous slate remains visible until 7:00 a.m. Eastern; then today’s picks are frozen."
         return JSONResponse(cached_result)
 
     events, props_source, quota = _propline_fetch_events()
@@ -2143,8 +2143,8 @@ def proprietary_market_board(market: str = "rebounds"):
         result["line_count"] = len(frozen_candidates)
         result["projected_count"] = len(frozen_candidates)
     result["daily_frozen"] = frozen_candidates is not None
-    result["daily_slate_date"] = datetime.now(ZoneInfo("America/New_York")).date().isoformat()
-    result["daily_slate_rule"] = "Fixed for the day; only confirmed injury status is refreshed."
+    result["daily_slate_date"] = _active_nba_slate_date()
+    result["daily_slate_rule"] = "Previous slate remains visible until 7:00 a.m. Eastern; then today’s picks are frozen."
     _BP_BOARD_CACHE[market] = (time.time(), result)
     return JSONResponse(result)
 
@@ -2152,13 +2152,13 @@ def proprietary_market_board(market: str = "rebounds"):
 
 @app.get("/api/cron/freeze-daily")
 def cron_freeze_daily(request: FastRequest):
-    """Capture all five market boards during the midnight Eastern hour."""
+    """Capture all five market boards at 7 a.m. Eastern."""
     secret = os.getenv("CRON_SECRET", "")
     if not secret or not secrets.compare_digest(request.headers.get("authorization", ""), "Bearer " + secret):
         raise HTTPException(status_code=401, detail="Unauthorized")
     now_et = datetime.now(ZoneInfo("America/New_York"))
-    if now_et.hour != 0:
-        return JSONResponse({"status": "outside_freeze_window", "eastern_time": now_et.isoformat()})
+    if now_et.hour != 7:
+        return JSONResponse({"status": "outside_freeze_window", "eastern_time": now_et.isoformat(), "required_window": "07:00-07:59 America/New_York"})
     results = {}
     for market_name in ("points", "rebounds", "assists", "steals", "threes"):
         try:
