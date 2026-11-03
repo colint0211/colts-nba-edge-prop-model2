@@ -139,14 +139,24 @@ def save_predictions(rows, market=None):
             event_id = str(
                 prediction.get("event_id") or prediction.get("game_id") or ""
             )
-            identity_parts = [
-                market_name, player.casefold(),
-                event_id.casefold() or event.casefold(),
-                format(line, ".4f"), side, str(odds),
-                format(probability, ".3f"),
-            ]
-            if prediction.get("daily_top5"):
-                identity_parts.extend(["daily_top5", str(prediction.get("slate_date") or "")])
+            if prediction.get("calibration_sample"):
+                # One immutable, first-seen forecast per player/market/event/line/slate.
+                # Later odds refreshes cannot inflate the training sample.
+                identity_parts = [
+                    market_name, player.casefold(),
+                    event_id.casefold() or event.casefold(),
+                    format(line, ".4f"), "calibration_sample",
+                    str(prediction.get("slate_date") or ""),
+                ]
+            else:
+                identity_parts = [
+                    market_name, player.casefold(),
+                    event_id.casefold() or event.casefold(),
+                    format(line, ".4f"), side, str(odds),
+                    format(probability, ".3f"),
+                ]
+                if prediction.get("daily_top5"):
+                    identity_parts.extend(["daily_top5", str(prediction.get("slate_date") or "")])
             identity = "|".join(identity_parts)
             fingerprint = hashlib.sha256(identity.encode("utf-8")).hexdigest()
             snapshot = json.dumps(
@@ -639,3 +649,60 @@ def list_predictions(status="unsettled", market=None, limit=100):
         }
         for row in rows
     ]
+
+
+def calibration_profile(market=None, min_samples=100, bins=10):
+    """Build a side-normalized reliability map from settled, immutable calibration snapshots."""
+    clauses = ["settled_at IS NOT NULL", "snapshot->>'calibration_sample'='true'"]
+    args = []
+    if market and market != "all":
+        clauses.append("market=%s")
+        args.append(str(market).lower())
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT market, side, model_probability, outcome
+            FROM nba_predictions
+            WHERE """ + " AND ".join(clauses),
+            args,
+        ).fetchall()
+    grouped = {}
+    for market_name, side, probability, outcome in rows:
+        if outcome not in ("WIN", "LOSS") or side not in ("OVER", "UNDER"):
+            continue
+        p = _number(probability)
+        if p is None or not 0 < p < 1:
+            continue
+        p_over = p if side == "OVER" else 1.0 - p
+        actual_over = 1 if (outcome == "WIN" and side == "OVER") or (outcome == "LOSS" and side == "UNDER") else 0
+        grouped.setdefault(market_name, []).append((p_over, actual_over))
+    profiles = {}
+    for market_name, samples in grouped.items():
+        count = len(samples)
+        bucket_rows = []
+        for index in range(bins):
+            lower, upper = index / bins, (index + 1) / bins
+            selected = [(p, y) for p, y in samples if lower <= p < upper or (index == bins - 1 and p == 1)]
+            if not selected:
+                continue
+            predicted = sum(p for p, _ in selected) / len(selected)
+            observed = sum(y for _, y in selected) / len(selected)
+            bucket_rows.append({
+                "lower": round(lower, 4), "upper": round(upper, 4),
+                "count": len(selected), "predicted": round(predicted, 4),
+                "observed": round(observed, 4),
+            })
+        profiles[market_name] = {
+            "sample_size": count,
+            "ready": count >= min_samples and any(b["count"] >= 20 for b in bucket_rows),
+            "bins": bucket_rows,
+            "minimum_sample_size": min_samples,
+            "method": "side-normalized empirical reliability bins; no adjustment until minimum evidence is met",
+        }
+    if market and market != "all":
+        return profiles.get(str(market).lower(), {
+            "sample_size": 0, "ready": False, "bins": [],
+            "minimum_sample_size": min_samples,
+            "method": "side-normalized empirical reliability bins; no adjustment until minimum evidence is met",
+        })
+    return profiles
