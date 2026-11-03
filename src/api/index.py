@@ -1896,7 +1896,16 @@ def _propline_quote(prop):
 def _snapshot_daily_market_top5(market, props):
     """Freeze the first complete market candidate board for the Eastern-time slate date."""
     try:
-        slate_date = datetime.now(ZoneInfo("America/New_York")).date().isoformat()
+        now_et = datetime.now(ZoneInfo("America/New_York"))
+        slate_date = now_et.date().isoformat()
+        prediction_ledger.initialize()
+        existing_slate = prediction_ledger.get_daily_slate(market, slate_date)
+        if existing_slate and existing_slate.get("candidates"):
+            return existing_slate["candidates"]
+        # Do not create a late, partial slate if the midnight capture was missed.
+        # The next valid capture window begins at midnight Eastern.
+        if now_et.hour >= 4:
+            return None
         calibration_rows = []
         for prop in props or []:
             if not isinstance(prop, dict) or prop.get("best_side") not in ("OVER", "UNDER"):
@@ -1911,7 +1920,6 @@ def _snapshot_daily_market_top5(market, props):
             item["calibration_sample"] = True
             item["slate_date"] = slate_date
             calibration_rows.append(item)
-        prediction_ledger.initialize()
         if calibration_rows:
             prediction_ledger.save_predictions(calibration_rows, market)
         ordered = sorted(
@@ -1956,7 +1964,7 @@ def _snapshot_daily_market_top5(market, props):
             prediction_ledger.save_daily_top_five(selected, market, slate_date)
         return candidates
     except Exception:
-        return [dict(p) for p in (props or []) if isinstance(p, dict)]
+        return None
 
 
 @app.get("/api/proprietary-market-board")
@@ -2003,10 +2011,9 @@ def proprietary_market_board(market: str = "rebounds"):
         cached_result["injury_feed"] = injury_feed.get("meta", {})
         cached_result["balldontlie"] = {key: value for key, value in bdl_games.items() if key != "games"}
         frozen_candidates = _snapshot_daily_market_top5(market, cached_result.get("props") or [])
-        cached_result["props"] = frozen_candidates
-        cached_result["line_count"] = len(frozen_candidates)
-        cached_result["projected_count"] = len(frozen_candidates)
-        cached_result["daily_frozen"] = bool(frozen_candidates)
+        if frozen_candidates is not None:
+            cached_result["props"] = frozen_candidates
+        cached_result["daily_frozen"] = frozen_candidates is not None
         cached_result["daily_slate_date"] = datetime.now(ZoneInfo("America/New_York")).date().isoformat()
         cached_result["daily_slate_rule"] = "Fixed for the day; only confirmed injury status is refreshed."
         return JSONResponse(cached_result)
@@ -2131,10 +2138,11 @@ def proprietary_market_board(market: str = "rebounds"):
         "balldontlie": {key: value for key, value in bdl_games.items() if key != "games"},
     }
     frozen_candidates = _snapshot_daily_market_top5(market, output)
-    result["props"] = frozen_candidates
-    result["line_count"] = len(frozen_candidates)
-    result["projected_count"] = len(frozen_candidates)
-    result["daily_frozen"] = bool(frozen_candidates)
+    if frozen_candidates is not None:
+        result["props"] = frozen_candidates
+        result["line_count"] = len(frozen_candidates)
+        result["projected_count"] = len(frozen_candidates)
+    result["daily_frozen"] = frozen_candidates is not None
     result["daily_slate_date"] = datetime.now(ZoneInfo("America/New_York")).date().isoformat()
     result["daily_slate_rule"] = "Fixed for the day; only confirmed injury status is refreshed."
     _BP_BOARD_CACHE[market] = (time.time(), result)
