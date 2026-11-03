@@ -175,7 +175,7 @@ async function load(refresh=false){
       best_probability:p.best_probability,market:'points',
       simulations:p.simulations
     })).filter(p=>p.player&&p.line!=null);
-    await loadCustomLines();data=await applySavedOverrides(data,'points');
+    await loadCustomLines();data=board.daily_frozen?data:await applySavedOverrides(data,'points');
     await recordDailyTopFive('points',rankEV(data).slice(0,5));
     ['rebounds','assists','steals','threes'].forEach(loadBP);
     el('ng').textContent=schedule.schedule_game_count??'—';
@@ -352,7 +352,8 @@ async function loadBP(m){
     const r=await fetch('/api/proprietary-market-board?market='+encodeURIComponent(m)+'&ts='+Date.now(),{cache:'no-store'});
     const d=await r.json();
     if(!r.ok)throw Error(d.detail||d.error||'Proprietary model request failed');
-    bpCache[m]=await applySavedOverrides((d.props||[]).map(p=>({...p,overOdds:p.over_odds,underOdds:p.under_odds,ev:p.expected_value_pct==null?null:Number(p.expected_value_pct)/100,expected_profit_per_100:p.expected_value_pct,model_status:'projected',best_side:p.best_side,best_probability:p.best_probability,market:m,simulations:p.simulations})).filter(p=>p.player&&p.line!=null),m);
+    const normalizedRows=(d.props||[]).map(p=>({...p,overOdds:p.over_odds,underOdds:p.under_odds,ev:p.expected_value_pct==null?null:Number(p.expected_value_pct)/100,expected_profit_per_100:p.expected_value_pct,model_status:'projected',best_side:p.best_side,best_probability:p.best_probability,market:m,simulations:p.simulations})).filter(p=>p.player&&p.line!=null);
+    bpCache[m]=d.daily_frozen?normalizedRows:await applySavedOverrides(normalizedRows,m);
     const dailyPicks=rankEV(bpCache[m]).slice(0,5);
     await recordDailyTopFive(m,dailyPicks);
     bpLoading[m]=false;render();renderFull();
