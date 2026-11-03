@@ -342,11 +342,18 @@ function liveTickerHtml(p){
   const score=g.away_score!=null&&g.home_score!=null?g.away+" "+g.away_score+" – "+g.home_score+" "+g.home:(g.away&&g.home?g.away+" @ "+g.home:"Score unavailable");
   const status=g.state==="in"?"LIVE · "+(g.period?"Q"+g.period:"")+(g.clock&&g.clock!=="0:00"?" · "+g.clock+" left":""):g.status||"Waiting for game";
   const liveValue=value==null?"—":num(value,0);
+  const settledGrade=grade(p);
+  const outlookClass=pace?(pace.verdict==="ON PACE TO HIT"?"hit":pace.verdict==="ON PACE TO MISS"?"miss":"push"):"";
+  const resultHtml=settledGrade
+    ?'<div class="mini-label" style="margin-top:6px">Final result: <span class="grade '+(settledGrade==="HIT"?"hit":settledGrade==="MISS"?"miss":"push")+'">'+(settledGrade==="HIT"?"✓ HIT":settledGrade==="MISS"?"✕ MISS":"PUSH")+'</span></div>'
+    :pace
+      ?'<div class="mini-label" style="margin-top:6px">Live outlook: <span class="grade '+outlookClass+'">'+(pace.verdict==="ON PACE TO HIT"?"ON PACE TO HIT":pace.verdict==="ON PACE TO MISS"?"ON PACE TO MISS":"TOO CLOSE")+'</span></div>'
+      :'';
   const paceHtml=pace
-    ?'<div class="mini-value">'+num(pace.projected,1)+' '+label+' projected · '+esc(pace.verdict)+'</div><div class="mini-label">'+num(pace.current,0)+' '+label+' in '+num(pace.minutes,1)+' min · '+num(pace.gameMinutesLeft,1)+' game min left · '+num(pace.remainingPlayerMinutes,1)+' expected player min left</div>'
+    ?'<div class="mini-value">'+num(pace.projected,1)+' '+label+' projected</div><div class="mini-label">'+num(pace.current,0)+' '+label+' in '+num(pace.minutes,1)+' min · '+num(pace.gameMinutesLeft,1)+' game min left · '+num(pace.remainingPlayerMinutes,1)+' expected player min left</div>'
     :'<div class="mini-value">'+(g.state==="in"?"Calculating live pace":"Waiting for live game")+'</div><div class="mini-label">Pace estimate appears when the matching stat, player minutes and game clock are available.</div>';
   return '<div class="scorebox"><div><div class="score-label">Live game score</div><div class="score">'+esc(score)+'</div></div><div class="game-status">'+(g.state==="in"?'<span class="live-dot"></span>':'')+esc(status)+'</div></div>'+
-    '<div class="statline" style="margin-top:10px"><div class="mini"><div class="mini-label">Live '+esc(bpMarketLabel(market))+' / prop line</div><div class="mini-value">'+liveValue+' <span>/ '+(validLine?num(line):"—")+' '+label+'</span></div><div class="progress"><span style="width:'+progress+'%"></span></div></div><div class="mini"><div class="mini-label">Live pace / outlook</div>'+paceHtml+'</div></div>';
+    '<div class="statline" style="margin-top:10px"><div class="mini"><div class="mini-label">Live '+esc(bpMarketLabel(market))+' / prop line</div><div class="mini-value">'+liveValue+' <span>/ '+(validLine?num(line):"—")+' '+label+'</span></div><div class="progress"><span style="width:'+progress+'%"></span></div>'+resultHtml+'</div><div class="mini"><div class="mini-label">Live pace / outlook</div>'+paceHtml+'</div></div>';
 }
 function dvpSummary(p){
   const d=p.defense_vs_position;
