@@ -41,15 +41,61 @@ const norm=s=>String(s||'').toLowerCase().replace(/[^a-z0-9]/g,'');
 const bpMarkets=['points','rebounds','assists','steals','threes'];
 function bpMarketLabel(m){return ({points:'Points',rebounds:'Rebounds',assists:'Assists',steals:'Steals',threes:'3-Pointers Made'})[m]||m}
 function normalizeLiveTeam(value){
-  const raw=String(value||'').trim().toUpperCase();
-  const aliases={GS:'GSW',NY:'NYK',NO:'NOP',SA:'SAS',UTAH:'UTA',WSH:'WAS'};
+  const raw=String(value||'').trim().toUpperCase().replace(/\\./g,'');
+  const aliases={
+    GS:'GSW',NY:'NYK',NO:'NOP',SA:'SAS',UTAH:'UTA',WSH:'WAS',
+    'GOLDEN STATE WARRIORS':'GSW',
+    'NEW YORK KNICKS':'NYK',
+    'NEW YORK NETS':'BKN',
+    'BROOKLYN NETS':'BKN',
+    'NEW ORLEANS PELICANS':'NOP',
+    'SAN ANTONIO SPURS':'SAS',
+    'UTAH JAZZ':'UTA',
+    'WASHINGTON WIZARDS':'WAS',
+    'ATLANTA HAWKS':'ATL',
+    'BOSTON CELTICS':'BOS',
+    'CHARLOTTE HORNETS':'CHA',
+    'CHICAGO BULLS':'CHI',
+    'CLEVELAND CAVALIERS':'CLE',
+    'DALLAS MAVERICKS':'DAL',
+    'DENVER NUGGETS':'DEN',
+    'DETROIT PISTONS':'DET',
+    'HOUSTON ROCKETS':'HOU',
+    'INDIANA PACERS':'IND',
+    'LOS ANGELES CLIPPERS':'LAC',
+    'LA CLIPPERS':'LAC',
+    'LOS ANGELES LAKERS':'LAL',
+    'LA LAKERS':'LAL',
+    'MEMPHIS GRIZZLIES':'MEM',
+    'MIAMI HEAT':'MIA',
+    'MILWAUKEE BUCKS':'MIL',
+    'MINNESOTA TIMBERWOLVES':'MIN',
+    'OKLAHOMA CITY THUNDER':'OKC',
+    'ORLANDO MAGIC':'ORL',
+    'PHILADELPHIA 76ERS':'PHI',
+    'PHOENIX SUNS':'PHX',
+    'PORTLAND TRAIL BLAZERS':'POR',
+    'SACRAMENTO KINGS':'SAC',
+    'TORONTO RAPTORS':'TOR'
+  };
   return aliases[raw]||raw;
 }
 function gameFor(p){
-  const parts=String(p.game||'').toUpperCase().split('@').map(normalizeLiveTeam);
+  const games=liveData.games||[];
+  // ESPN's box score already links each live player to the exact event.
+  const st=playerLive(p)||{};
+  const gameId=String(st.game_id||p.game_id||p.event_id||'');
+  if(gameId){
+    const byId=games.find(g=>String(g.id||g.event_id||'')===gameId);
+    if(byId)return byId;
+  }
+  // PropLine/model matchups commonly use full team names, while ESPN's
+  // scoreboard uses abbreviations. Normalize both to the same NBA codes.
+  const raw=String(p.game||'').trim();
+  const parts=raw.split(/\\s+(?:@|VS?\\.?|AT)\\s+/i).map(normalizeLiveTeam);
   if(parts.length!==2||!parts[0]||!parts[1])return null;
   const wanted=parts.slice().sort().join('|');
-  return (liveData.games||[]).find(g=>{
+  return games.find(g=>{
     const teams=(g.teams||[g.away,g.home]).map(normalizeLiveTeam).sort().join('|');
     return teams===wanted;
   })||null;
