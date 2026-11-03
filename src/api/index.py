@@ -1664,7 +1664,8 @@ def _score_blended_market(model, market_quote):
         "market_books": market_quote["books_used"],
         "best_over_book": market_quote["over_book"],
         "best_under_book": market_quote["under_book"],
-        "calibration_status": "uncalibrated",
+        "calibration_status": model.get("calibration_status", "collecting data"),
+        "calibration_applied": bool(model.get("calibration_applied", False)),
     })
     return model
 
