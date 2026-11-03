@@ -50,6 +50,13 @@ def initialize():
             CREATE INDEX IF NOT EXISTS nba_predictions_custom_lines
               ON nba_predictions(created_at DESC)
               WHERE snapshot->>'custom_line' = 'true';
+            CREATE TABLE IF NOT EXISTS nba_daily_slates (
+              market TEXT NOT NULL,
+              slate_date TEXT NOT NULL,
+              candidates JSONB NOT NULL DEFAULT '[]'::jsonb,
+              created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+              PRIMARY KEY (market, slate_date)
+            );
             """
         )
 
@@ -714,3 +721,58 @@ def calibration_profile(market=None, min_samples=100, bins=10):
             "method": "side-normalized empirical reliability bins; no adjustment until minimum evidence is met",
         })
     return profiles
+
+
+def freeze_daily_slate(market, slate_date, candidates):
+    """Atomically preserve the first complete candidate board for a market/day."""
+    market = str(market or "").strip().lower()
+    slate_date = str(slate_date or "").strip()
+    if market not in ("points", "rebounds", "assists", "steals", "threes"):
+        raise ValueError("Unsupported market")
+    import re
+    if not re.fullmatch(r"\\d{4}-\\d{2}-\\d{2}", slate_date):
+        raise ValueError("Invalid slate date")
+    safe_candidates = [row for row in (candidates or []) if isinstance(row, dict)]
+    payload = json.dumps(safe_candidates, default=str, separators=(",", ":"), allow_nan=False)
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO nba_daily_slates (market, slate_date, candidates)
+            VALUES (%s, %s, %s::jsonb)
+            ON CONFLICT (market, slate_date) DO NOTHING
+            """,
+            (market, slate_date, payload),
+        )
+        row = conn.execute(
+            "SELECT candidates, created_at FROM nba_daily_slates WHERE market=%s AND slate_date=%s",
+            (market, slate_date),
+        ).fetchone()
+    stored = row[0] if row else []
+    if isinstance(stored, str):
+        stored = json.loads(stored)
+    return {
+        "market": market, "slate_date": slate_date,
+        "candidates": stored if isinstance(stored, list) else [],
+        "created_at": row[1].isoformat() if row and row[1] else None,
+        "created_now": bool(row and row[1]),
+    }
+
+
+def get_daily_slate(market, slate_date):
+    market = str(market or "").strip().lower()
+    slate_date = str(slate_date or "").strip()
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT candidates, created_at FROM nba_daily_slates WHERE market=%s AND slate_date=%s",
+            (market, slate_date),
+        ).fetchone()
+    if not row:
+        return None
+    candidates = row[0]
+    if isinstance(candidates, str):
+        candidates = json.loads(candidates)
+    return {
+        "market": market, "slate_date": slate_date,
+        "candidates": candidates if isinstance(candidates, list) else [],
+        "created_at": row[1].isoformat() if row[1] else None,
+    }
