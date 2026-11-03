@@ -1927,13 +1927,17 @@ def _snapshot_daily_market_top5(market, props):
         for prop in candidates:
             if not isinstance(prop, dict) or prop.get("injury_blocked") or prop.get("injury_flag"):
                 continue
+            if prop.get("recommendation") not in ("VALUE CANDIDATE", "LEAN / VERIFY"):
+                continue
+            if prop.get("sample_label") and "fallback" in str(prop.get("sample_label")).lower():
+                continue
             try:
                 ev = float(prop.get("expected_value_pct"))
                 sample = int(prop.get("sample_size") or prop.get("games_used") or 0)
                 minutes = float(prop.get("projected_minutes"))
             except (TypeError, ValueError, OverflowError):
                 continue
-            if not math.isfinite(ev) or sample < 8 or minutes < 15:
+            if not math.isfinite(ev) or ev <= 0 or sample < 8 or minutes < 15:
                 continue
             if prop.get("best_side") not in ("OVER", "UNDER") or prop.get("best_odds") is None:
                 continue
