@@ -1893,18 +1893,24 @@ def _propline_quote(prop):
     }
 
 
+def _active_nba_slate_date(now_et=None):
+    """Keep the prior night's slate active until 7:00 a.m. Eastern."""
+    now_et = now_et or datetime.now(ZoneInfo("America/New_York"))
+    active_date = now_et.date() - timedelta(days=1) if now_et.hour < 7 else now_et.date()
+    return active_date.isoformat()
+
+
 def _snapshot_daily_market_top5(market, props):
-    """Freeze the first complete market candidate board for the Eastern-time slate date."""
+    """Freeze the first complete market candidate board after 7 a.m. Eastern."""
     try:
         now_et = datetime.now(ZoneInfo("America/New_York"))
-        slate_date = now_et.date().isoformat()
+        slate_date = _active_nba_slate_date(now_et)
         prediction_ledger.initialize()
         existing_slate = prediction_ledger.get_daily_slate(market, slate_date)
         if existing_slate and existing_slate.get("candidates"):
             return existing_slate["candidates"]
-        # Do not create a late, partial slate if the midnight capture was missed.
-        # The next valid capture window begins at midnight Eastern.
-        if now_et.hour >= 4:
+        # Before 7 a.m. the previous slate remains active; never freeze today's board early.
+        if now_et.hour < 7:
             return None
         calibration_rows = []
         for prop in props or []:
