@@ -2278,6 +2278,98 @@ def _fetch_live_summary(event_id):
     return summary
 
 
+_LOCAL_LIVE_SCOREBOARD_CACHE = {"at": 0.0, "payload": None}
+_LOCAL_LIVE_SCOREBOARD_TTL = 8
+
+
+@app.get("/api/live-stats")
+def live_stats():
+    """Serve live NBA scores locally from ESPN, then enrich every active game with its box score.
+
+    This deliberately avoids the retired/stale LIVE_UPSTREAM deployment. The browser
+    receives the same stable shape it already consumes: games, players_by_id,
+    players_by_name and updated_at.
+    """
+    now = time.time()
+    cached = _LOCAL_LIVE_SCOREBOARD_CACHE.get("payload")
+    if cached is None or now - _LOCAL_LIVE_SCOREBOARD_CACHE.get("at", 0.0) >= _LOCAL_LIVE_SCOREBOARD_TTL:
+        et_now = datetime.now(ZoneInfo("America/New_York"))
+        dates = [et_now.date().isoformat(), (et_now.date() - timedelta(days=1)).isoformat()]
+        games = []
+        errors = []
+        seen_events = set()
+        for day in dates:
+            try:
+                scoreboard = _get_json(
+                    "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?"
+                    + urlencode({"dates": day.replace("-", "")}),
+                    timeout=10,
+                )
+            except Exception as exc:
+                errors.append(day + ": " + type(exc).__name__)
+                continue
+            for event in scoreboard.get("events") or []:
+                if not isinstance(event, dict):
+                    continue
+                event_id = str(event.get("id") or "").strip()
+                if not event_id or event_id in seen_events:
+                    continue
+                seen_events.add(event_id)
+                competitions = event.get("competitions") or []
+                competition = competitions[0] if competitions and isinstance(competitions[0], dict) else {}
+                competitors = competition.get("competitors") or []
+                away = next((x for x in competitors if x.get("homeAway") == "away"), None)
+                home = next((x for x in competitors if x.get("homeAway") == "home"), None)
+                if not away or not home:
+                    continue
+                away_team = away.get("team") or {}
+                home_team = home.get("team") or {}
+                away_code = str(away_team.get("abbreviation") or "").upper()
+                home_code = str(home_team.get("abbreviation") or "").upper()
+                if not away_code or not home_code:
+                    continue
+                status = competition.get("status") or event.get("status") or {}
+                status_type = status.get("type") or {}
+                state = str(status_type.get("state") or "pre").lower()
+                games.append({
+                    "id": event_id,
+                    "event_id": event_id,
+                    "game": away_code + "@" + home_code,
+                    "away": away_code,
+                    "home": home_code,
+                    "teams": [away_code, home_code],
+                    "away_score": int(float(away.get("score") or 0)),
+                    "home_score": int(float(home.get("score") or 0)),
+                    "state": state,
+                    "period": int(status.get("period") or 0),
+                    "clock": str(status.get("displayClock") or ""),
+                    "status": str(status_type.get("detail") or status_type.get("description") or "Scheduled"),
+                    "date": event.get("date") or competition.get("date"),
+                })
+        cached = {
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "games": games,
+            "players_by_id": {},
+            "players_by_name": {},
+            "source": "ESPN scoreboard + ESPN game summaries",
+            "scoreboard_errors": errors[:3],
+        }
+        _LOCAL_LIVE_SCOREBOARD_CACHE.update({"at": now, "payload": cached})
+
+    # Work on a fresh copy because enrichment mutates the player maps.
+    payload = json.loads(json.dumps(cached))
+    payload = _enrich_live_boxscores(payload)
+    payload = _enrich_live_quarters(payload)
+    payload["live_feed_status"] = {
+        "source": payload.get("source"),
+        "games": len(payload.get("games") or []),
+        "players": len(payload.get("players_by_id") or {}),
+        "boxscore_enrichment": payload.get("live_enrichment"),
+        "scoreboard_errors": payload.get("scoreboard_errors") or [],
+    }
+    return JSONResponse(payload)
+
+
 @app.get("/api/live-stats-diagnostic")
 def live_stats_diagnostic():
     """Inspect ESPN summary availability and schema without returning player data."""
