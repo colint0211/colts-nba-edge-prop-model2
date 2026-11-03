@@ -1603,6 +1603,8 @@ def _apply_historical_calibration(model, market):
     calibrated_over = max(0.01, min(0.99, calibrated_over))
     model["raw_over_probability"] = model.get("over_probability")
     model["raw_under_probability"] = model.get("under_probability")
+    model["raw_model_over_probability"] = model.get("over_probability")
+    model["raw_model_under_probability"] = model.get("under_probability")
     model["over_probability"] = round(calibrated_over * mass * 100, 2)
     model["under_probability"] = round((1.0 - calibrated_over) * mass * 100, 2)
     model["calibration_status"] = "historically calibrated"
