@@ -6,11 +6,11 @@
     },
     {
       "path": "/api/cron/freeze-daily",
-      "schedule": "0 4 * * *"
+      "schedule": "0 11 * * *"
     },
     {
       "path": "/api/cron/freeze-daily",
-      "schedule": "0 5 * * *"
+      "schedule": "0 12 * * *"
     }
   ],
   "git": {
