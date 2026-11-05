@@ -118,8 +118,17 @@ function liveStatValue(p){
 }
 function grade(p){
   const g=gameFor(p),value=liveStatValue(p);
-  if(!g||g.state!=='post'||value==null||p.line==null||!p.best_side)return null;
+  if(!g||value==null||p.line==null||!p.best_side)return null;
   const side=String(p.best_side).toUpperCase(),line=Number(p.line);
+  if(!Number.isFinite(line))return null;
+
+  // An OVER is mathematically secured as soon as the live stat exceeds
+  // the line. Show HIT immediately; do not wait for the final buzzer.
+  // (A later official stat correction could still change the box score.)
+  if(side==='OVER'&&g.state==='in'&&value>line)return 'HIT';
+
+  // Unders and unresolved overs remain pending until the game is final.
+  if(g.state!=='post')return null;
   if(value===line)return 'PUSH';
   return (side==='OVER'?value>line:value<line)?'HIT':'MISS';
 }
