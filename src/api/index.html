@@ -491,12 +491,17 @@ function bpLineCard(p,i){
     '<div class="card-bottom"><span>Calibration: '+esc(p.calibration_status||'collecting data')+'</span><span>Settled samples: '+esc(p.calibration_sample_size??0)+'</span></div>'+injurySummary(p)+balldontlieSummary(p)+dvpSummary(p)+lineEditor(p)+'</article>';
 }
 function allModelEV(){
-  const all=rankEV(data).map(p=>({...p,market:'points'}));
-  for(const m of ['rebounds','assists','steals','threes']){
-    const rows=bpCache[m];
-    if(Array.isArray(rows))all.push(...rankEV(rows).map(p=>({...p,market:m})));
+  const pools=[['points',data],...['rebounds','assists','steals','threes'].map(m=>[m,bpCache[m]])];
+  const all=[];
+  for(const [m,rows] of pools){
+    if(!Array.isArray(rows))continue;
+    const marketRows=rows.map(p=>({...p,market:m}));
+    const reviewed=marketRows.filter(p=>p.post_selection_reviewed===true&&(!p.negative_review||p.negative_review.status==='passed'));
+    all.push(...rankEV(reviewed.length?reviewed:marketRows).slice(0,5));
   }
-  return sortByEV(all);
+  const unique=new Map();
+  for(const p of sortByEV(all)){const k=norm(p.player)+'|'+String(p.game||'').toLowerCase();if(!unique.has(k))unique.set(k,p);}
+  return sortByEV([...unique.values()]);
 }
 function bpCard(p,i){
   const hasProjection=p.projection!=null&&Number.isFinite(Number(p.projection));
