@@ -134,7 +134,8 @@ function grade(p){
 }
 function isFallback(p){
   const label=String(p.sample_label||p.reason||'').toLowerCase();
-  return label.includes('previous-season')||label.includes('previous season')||label.includes('fallback');
+  const reviewedUnder=p.workload_adjusted===true && p.negative_review && p.negative_review.status==='under_value';
+  return !reviewedUnder && (label.includes('previous-season')||label.includes('previous season')||label.includes('fallback'));
 }
 function customLineKey(p,m){
   return [m||p.market||"points",String(p.player||"").trim().toLowerCase(),String(p.game||"").trim().toLowerCase()].join("|");
@@ -183,7 +184,8 @@ async function applySavedOverrides(rows,m){
 function isEligibleEV(p){
   const sample=Number(p.sample_size??p.games_used??0);
   const approved=p.recommendation==='VALUE CANDIDATE'||p.recommendation==='LEAN / VERIFY';
-  return p.model_status==='projected'&&approved&&!isFallback(p)&&sample>=8
+  const reviewPassed=p.post_selection_reviewed===true&&p.negative_review&&['clear','under_value'].includes(p.negative_review.status);
+  return p.model_status==='projected'&&approved&&reviewPassed&&!isFallback(p)&&sample>=8
     &&!p.injury_blocked&&!p.injury_flag
     &&p.expected_profit_per_100!=null&&Number(p.expected_profit_per_100)>0&&!!p.best_side;
 }
