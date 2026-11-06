@@ -1933,7 +1933,7 @@ def _post_selection_negative_review(prop, market, injury_feed):
     athlete_id = str(prop.get("athlete_id") or "").strip()
     if not athlete_id:
         prop["negative_review"] = {"status": "inconclusive", "reason": "No verified athlete ID"}
-        return True, "No verified athlete ID; retained without adjustment"
+        return False, prop["negative_review"]["reason"]
 
     field, label = STAT_FIELDS[market]
     current_stats = _gamelog_records(athlete_id, field, label, 2027)
@@ -1951,6 +1951,8 @@ def _post_selection_negative_review(prop, market, injury_feed):
                 continue
         return values
 
+    current_minutes_records = sorted(current_minutes_records or [], key=lambda row: str(row.get("date") or ""))
+    prior_minutes_records = sorted(prior_minutes_records or [], key=lambda row: str(row.get("date") or ""))
     current_minutes = clean_minutes(current_minutes_records)
     prior_minutes = clean_minutes(prior_minutes_records)
     recent_minutes = current_minutes[-3:]
@@ -2180,8 +2182,7 @@ def _revalidate_frozen_market_candidates(market, candidates, injury_feed):
     for p in ordered:
         if p.get("recommendation") not in ("VALUE CANDIDATE", "LEAN / VERIFY"):
             continue
-        if p.get("sample_label") and "fallback" in str(p.get("sample_label")).lower():
-            continue
+        # Mixed current/prior-season samples must undergo the workload review.
         try:
             ev=float(p.get("expected_value_pct"))
             sample=int(p.get("sample_size") or p.get("games_used") or 0)
