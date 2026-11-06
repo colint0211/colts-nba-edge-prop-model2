@@ -1975,6 +1975,7 @@ def _post_selection_negative_review(prop, market, injury_feed):
     # probability calculation. The sportsbook price is never used to form the mean.
     if recent_return or role_drop or reported_injury:
         factor = max(0.40, min(1.0, workload_ratio if role_drop else 0.85))
+        prop["negative_review"] = {"status": "reviewing", "reason": "Recent workload or injury signal detected"}
         values, sample_label, _ = _player_history(athlete_id, field, label)
         adjusted_values = [max(0.0, float(value) * factor) for value in values]
         over_odds = prop.get("over_odds")
