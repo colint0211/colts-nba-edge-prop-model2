@@ -2207,7 +2207,6 @@ def proprietary_market_board(market: str = "rebounds"):
     if cached_board and now - cached_board[0] < _BP_BOARD_TTL_SECONDS:
         cached_result = _json_safe(cached_board[1])
         for cached_prop in cached_result.get("props") or []:
-            _apply_official_injury(cached_prop, injury_feed)
             _apply_balldontlie_game(cached_prop, bdl_games)
         cached_result["injury_feed"] = injury_feed.get("meta", {})
         cached_result["balldontlie"] = {key: value for key, value in bdl_games.items() if key != "games"}
@@ -2310,7 +2309,8 @@ def proprietary_market_board(market: str = "rebounds"):
                 "defense_vs_position": matchup_adjustment,
                 **model,
             }
-            _apply_official_injury(market_prop, injury_feed, name, market_prop.get("team"))
+            # Injury and return-to-play review is deliberately deferred until
+            # after this market's provisional Top 5 has been ranked.
             _apply_balldontlie_game(market_prop, bdl_games)
             output.append(market_prop)
         except Exception as exc:
