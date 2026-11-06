@@ -2301,7 +2301,7 @@ def live_stats():
     cached = _LOCAL_LIVE_SCOREBOARD_CACHE.get("payload")
     if cached is None or now - _LOCAL_LIVE_SCOREBOARD_CACHE.get("at", 0.0) >= _LOCAL_LIVE_SCOREBOARD_TTL:
         et_now = datetime.now(ZoneInfo("America/New_York"))
-        dates = [et_now.date().isoformat(), (et_now.date() - timedelta(days=1)).isoformat()]
+        dates = [et_now.date().isoformat()]  # Keep the live board scoped to today's ET slate; yesterday's players can collide by athlete ID.
         games = []
         errors = []
         seen_events = set()
