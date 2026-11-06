@@ -1973,6 +1973,13 @@ def _post_selection_negative_review(prop, market, injury_feed):
     recent_return = return_window and role_drop
     reported_injury = bool(injury_context and injury_reason and official_status)
 
+    if current_games == 0:
+        prop["negative_review"] = {
+            "status": "inconclusive",
+            "reason": "No current-season game log is available to verify present workload",
+        }
+        return False, prop["negative_review"]["reason"]
+
     # A recent return or material minutes drop triggers a second, workload-adjusted
     # probability calculation. The sportsbook price is never used to form the mean.
     if recent_return or role_drop or reported_injury:
