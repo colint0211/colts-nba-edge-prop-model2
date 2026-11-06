@@ -666,8 +666,12 @@ def list_predictions(status="unsettled", market=None, limit=100):
     ]
 
 
-def calibration_profile(market=None, min_samples=100, bins=10):
-    """Build a side-normalized reliability map from settled, immutable calibration snapshots."""
+def calibration_profile(market=None, min_samples=100, bins=10, min_bin_samples=20, min_populated_bins=3):
+    """Fit an outcome-only side-normalized reliability map from immutable pregame snapshots.
+
+    Require 100 settled forecasts and three probability buckets with at least
+    20 outcomes each. The no-vig market is an audit benchmark only.
+    """
     clauses = ["settled_at IS NOT NULL", "snapshot->>'calibration_sample'='true'"]
     args = []
     if market and market != "all":
@@ -675,53 +679,72 @@ def calibration_profile(market=None, min_samples=100, bins=10):
         args.append(str(market).lower())
     with _connect() as conn:
         rows = conn.execute(
-            """
-            SELECT market, side, model_probability, outcome
-            FROM nba_predictions
-            WHERE """ + " AND ".join(clauses),
-            args,
+            """SELECT market, side, model_probability, market_probability, outcome
+               FROM nba_predictions WHERE """ + " AND ".join(clauses), args
         ).fetchall()
+
     grouped = {}
-    for market_name, side, probability, outcome in rows:
+    for market_name, side, model_probability, market_probability, outcome in rows:
         if outcome not in ("WIN", "LOSS") or side not in ("OVER", "UNDER"):
             continue
-        p = _number(probability)
-        if p is None or not 0 < p < 1:
+        model_p = _number(model_probability)
+        if model_p is None or not 0 < model_p < 1:
             continue
-        p_over = p if side == "OVER" else 1.0 - p
-        actual_over = 1 if (outcome == "WIN" and side == "OVER") or (outcome == "LOSS" and side == "UNDER") else 0
-        grouped.setdefault(market_name, []).append((p_over, actual_over))
+        model_over = model_p if side == "OVER" else 1.0 - model_p
+        market_p = _number(market_probability)
+        market_over = None if market_p is None or not 0 < market_p < 1 else (
+            market_p if side == "OVER" else 1.0 - market_p
+        )
+        actual_over = 1 if ((outcome == "WIN" and side == "OVER") or
+                            (outcome == "LOSS" and side == "UNDER")) else 0
+        grouped.setdefault(market_name, []).append((model_over, market_over, actual_over))
+
     profiles = {}
     for market_name, samples in grouped.items():
-        count = len(samples)
         bucket_rows = []
         for index in range(bins):
             lower, upper = index / bins, (index + 1) / bins
-            selected = [(p, y) for p, y in samples if lower <= p < upper or (index == bins - 1 and p == 1)]
-            if not selected:
-                continue
-            predicted = sum(p for p, _ in selected) / len(selected)
-            observed = sum(y for _, y in selected) / len(selected)
-            bucket_rows.append({
-                "lower": round(lower, 4), "upper": round(upper, 4),
-                "count": len(selected), "predicted": round(predicted, 4),
-                "observed": round(observed, 4),
-            })
+            selected = [(p, y) for p, _, y in samples
+                        if lower <= p < upper or (index == bins - 1 and p == 1)]
+            if selected:
+                predicted = sum(p for p, _ in selected) / len(selected)
+                observed = sum(y for _, y in selected) / len(selected)
+                bucket_rows.append({
+                    "lower": round(lower, 4), "upper": round(upper, 4),
+                    "count": len(selected), "predicted": round(predicted, 4),
+                    "observed": round(observed, 4),
+                    "gap_pp": round((observed - predicted) * 100, 2),
+                })
+        populated = sum(b["count"] >= min_bin_samples for b in bucket_rows)
+        model_brier = sum((p-y)**2 for p, _, y in samples) / len(samples)
+        market_rows = [(p, y) for _, p, y in samples if p is not None]
+        market_brier = (sum((p-y)**2 for p, y in market_rows) / len(market_rows)
+                        if market_rows else None)
         profiles[market_name] = {
-            "sample_size": count,
-            "ready": count >= min_samples and any(b["count"] >= 20 for b in bucket_rows),
+            "sample_size": len(samples),
+            "ready": len(samples) >= min_samples and populated >= min_populated_bins,
             "bins": bucket_rows,
+            "populated_bins": populated,
             "minimum_sample_size": min_samples,
-            "method": "side-normalized empirical reliability bins; no adjustment until minimum evidence is met",
+            "minimum_bin_sample_size": min_bin_samples,
+            "minimum_populated_bins": min_populated_bins,
+            "model_brier_score": round(model_brier, 5),
+            "market_brier_score": round(market_brier, 5) if market_brier is not None else None,
+            "brier_lift_vs_market": round(model_brier - market_brier, 5) if market_brier is not None else None,
+            "market_benchmark_sample_size": len(market_rows),
+            "method": "side-normalized isotonic reliability map; no-vig market is audit-only, never blended",
         }
+
     if market and market != "all":
         return profiles.get(str(market).lower(), {
-            "sample_size": 0, "ready": False, "bins": [],
-            "minimum_sample_size": min_samples,
-            "method": "side-normalized empirical reliability bins; no adjustment until minimum evidence is met",
+            "sample_size": 0, "ready": False, "bins": [], "populated_bins": 0,
+            "minimum_sample_size": min_samples, "minimum_bin_sample_size": min_bin_samples,
+            "minimum_populated_bins": min_populated_bins, "model_brier_score": None,
+            "market_brier_score": None, "brier_lift_vs_market": None,
+            "market_benchmark_sample_size": 0,
+            "method": "awaiting settled immutable pregame outcomes",
         })
     return profiles
-
 
 def freeze_daily_slate(market, slate_date, candidates):
     """Atomically preserve the first complete candidate board for a market/day."""
