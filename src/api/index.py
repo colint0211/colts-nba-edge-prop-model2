@@ -2169,6 +2169,55 @@ def _snapshot_daily_market_top5(market, props):
     except Exception:
         return None
 
+def _revalidate_frozen_market_candidates(market, candidates, injury_feed):
+    """Re-run the post-selection risk gate against today's immutable source snapshot."""
+    ordered = sorted(
+        [dict(p) for p in candidates if isinstance(p, dict)],
+        key=lambda p: float(p.get("expected_value_pct") if p.get("expected_value_pct") is not None else -1e9),
+        reverse=True,
+    )
+    eligible = []
+    for p in ordered:
+        if p.get("recommendation") not in ("VALUE CANDIDATE", "LEAN / VERIFY"):
+            continue
+        if p.get("sample_label") and "fallback" in str(p.get("sample_label")).lower():
+            continue
+        try:
+            ev=float(p.get("expected_value_pct"))
+            sample=int(p.get("sample_size") or p.get("games_used") or 0)
+            minutes=float(p.get("projected_minutes"))
+        except (TypeError,ValueError,OverflowError):
+            continue
+        if not math.isfinite(ev) or ev <= 0 or sample < 12 or minutes < 15:
+            continue
+        if p.get("best_side") not in ("OVER","UNDER") or p.get("best_odds") is None:
+            continue
+        eligible.append(p)
+    selected=[]; seen=set()
+    for p in eligible:
+        key=(_norm_player_name(p.get("player")),str(p.get("game") or "").casefold())
+        if key in seen: continue
+        seen.add(key)
+        try:
+            passed, reason=_post_selection_negative_review(p,market,injury_feed)
+        except Exception as exc:
+            passed=False; reason="Negative review failed safely: "+type(exc).__name__
+            p["negative_review"]={"status":"review_failed","reason":reason}
+        p["post_selection_reviewed"]=True
+        if passed and p.get("best_side") in ("OVER","UNDER") and float(p.get("expected_value_pct") or 0)>0:
+            selected.append(p)
+            if len(selected)==5: break
+    selected_keys={(_norm_player_name(p.get("player")),str(p.get("game") or "").casefold()) for p in selected}
+    for p in ordered:
+        key=(_norm_player_name(p.get("player")),str(p.get("game") or "").casefold())
+        if key not in selected_keys and p.get("negative_review") is None:
+            p["negative_review"]={"status":"not_reviewed","reason":"Not selected for targeted post-selection review"}
+    for rank,p in enumerate(selected,1): p["selection_rank"]=rank
+    if selected:
+        prediction_ledger.save_daily_top_five(selected,market,_active_nba_slate_date())
+    ordered.sort(key=lambda p: (0 if (_norm_player_name(p.get("player")),str(p.get("game") or "").casefold()) in selected_keys else 1,-float(p.get("expected_value_pct") or -1e9)))
+    return ordered
+
 @app.get("/api/proprietary-market-board")
 def proprietary_market_board(market: str = "rebounds"):
     market = market.lower().strip()
@@ -2186,6 +2235,10 @@ def proprietary_market_board(market: str = "rebounds"):
         frozen_slate = None
     if frozen_slate and frozen_slate.get("candidates"):
         frozen_props = [dict(p) for p in (frozen_slate.get("candidates") or []) if isinstance(p, dict)]
+        # Re-run today's targeted injury/workload gate even for an already-frozen
+        # snapshot. The original source lines remain intact; unsafe picks are
+        # removed from the actionable Top 5 and replaced from the same snapshot.
+        frozen_props = _revalidate_frozen_market_candidates(market, frozen_props, injury_feed)
         for prop in frozen_props:
             _apply_official_injury(prop, injury_feed)
             _apply_balldontlie_game(prop, bdl_games)
