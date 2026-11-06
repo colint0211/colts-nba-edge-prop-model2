@@ -1204,7 +1204,7 @@ def _projected_minutes(valid_minutes):
     return 0.55 * recent5 + 0.30 * recent10 + 0.15 * established
 
 def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, market="", matchup_adjustment=None):
-    """Recency-weighted empirical projection with minutes adjustment and discrete outcomes."""
+    """Project count stats with an overdispersed count model; never truncate the upper tail at the observed maximum."""
     clean = [float(v) for v in values if v is not None and math.isfinite(float(v)) and float(v) >= 0]
     if len(clean) < 4:
         return None
@@ -1215,23 +1215,21 @@ def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, ma
     recent10_mean = sum(recent10) / len(recent10)
     weights = [math.exp(-0.075 * (len(clean)-1-i)) for i in range(len(clean))]
     weighted_mean = sum(v*w for v,w in zip(clean,weights)) / sum(weights)
-    # Recent form is a capped signal, not a replacement for the season baseline.
     form_weight = min(0.30, len(recent10)/(len(recent10)+20.0))
     target_mean = (1.0-form_weight)*long_mean + form_weight*weighted_mean
 
     valid_minutes = []
     for item in (minutes or []):
         try:
-            value=float(item)
-            if math.isfinite(value) and value>0: valid_minutes.append(value)
-        except (TypeError,ValueError):
+            value = float(item)
+            if math.isfinite(value) and value > 0:
+                valid_minutes.append(value)
+        except (TypeError, ValueError):
             continue
     projected_min = _projected_minutes(valid_minutes)
     baseline_min = _median(valid_minutes[-20:]) if valid_minutes else None
     minute_factor = 1.0
     if projected_min is not None and baseline_min and baseline_min > 0 and len(valid_minutes) >= 8:
-        # Minutes are a projection adjustment, not a second full projection.
-        # Tight bounds reduce false swings caused by short-term rotations/noise.
         minute_factor = max(0.85, min(1.15, projected_min / baseline_min))
         target_mean *= minute_factor
 
@@ -1245,56 +1243,80 @@ def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, ma
         except (TypeError, ValueError):
             matchup_factor = 1.0
 
-    distribution=[max(0.0,v*(target_mean/long_mean)) if long_mean>0 else v for v in clean]
-    ordered=sorted(distribution)
-    median=ordered[len(ordered)//2]
-    deviations=sorted(abs(x-median) for x in ordered)
-    mad=deviations[len(deviations)//2] if deviations else 0.0
-    variance=sum((x-target_mean)**2 for x in distribution)/max(1,len(distribution)-1)
-    std_dev=max(math.sqrt(max(0.0,variance)),1.4826*mad,0.25)
-    # A pure empirical bootstrap assigns zero probability to outcomes beyond
-    # the observed sample. Blend it with a wider parametric component so small
-    # samples do not create false near-certainty (for example, 99.9% unders).
-    parametric_weight=0.25 if market in ("steals","threes") else 0.35
-    uncertainty_factor=min(1.25,1.0+0.50/math.sqrt(n))
-    rng=random.Random(str(seed)+"|"+str(line)+"|"+str(market))
-    sims=60000
-    over=under=push=0
+    target_mean = max(0.05, target_mean)
+    distribution = [max(0.0, v * (target_mean / long_mean)) if long_mean > 0 else v for v in clean]
+    empirical_variance = sum((v - sum(distribution)/len(distribution))**2 for v in distribution) / max(1, n-1)
+
+    # NBA box-score stats are counts. An eight-game sample can have a tiny
+    # observed variance and no outcomes above the historical maximum. That is
+    # not evidence that the true upper tail is nearly impossible. Use a
+    # Gamma-Poisson (negative-binomial) distribution with at least Poisson
+    # variance, and shrink noisy dispersion estimates toward a conservative
+    # prior until a larger sample is available.
+    excess_variance = max(0.0, empirical_variance - target_mean)
+    raw_dispersion = min(30.0, max(4.0, target_mean**2 / excess_variance)) if excess_variance > 1e-9 else 30.0
+    prior_dispersion = 15.0
+    dispersion_k = max(4.0, min(30.0, (n/(n+12.0))*raw_dispersion + (12.0/(n+12.0))*prior_dispersion))
+    model_variance = target_mean + (target_mean**2 / dispersion_k)
+    std_dev = math.sqrt(model_variance)
+
+    rng = random.Random(str(seed) + "|" + str(line) + "|" + str(market))
+    sims = 60000
+    over = under = push = 0
+    empirical_weight = 0.20
+
+    def poisson_draw(lam):
+        # Knuth sampler; NBA player-stat rates are comfortably below 30.
+        threshold = math.exp(-lam)
+        product = 1.0
+        count = 0
+        while product > threshold:
+            count += 1
+            product *= rng.random()
+        return count - 1
+
     for _ in range(sims):
-        if rng.random()<parametric_weight:
-            sample=max(0.0,rng.gauss(target_mean,std_dev*uncertainty_factor))
+        if rng.random() < empirical_weight:
+            sample = distribution[rng.randrange(len(distribution))]
         else:
-            sample=distribution[rng.randrange(len(distribution))]
-        if abs(sample-line)<1e-9: push+=1
-        elif sample>line: over+=1
-        else: under+=1
-    over_p,under_p,push_p=over/sims,under/sims,push/sims
-    over_ev=_odds_profit(over_p,under_p,over_odds)
-    under_ev=_odds_profit(under_p,over_p,under_odds)
-    best=max([(v,side,prob,price) for v,side,prob,price in [
-        (over_ev,"OVER",over_p,over_odds),(under_ev,"UNDER",under_p,under_odds)
-    ] if v is not None],key=lambda x:x[0],default=None)
+            latent_rate = rng.gammavariate(dispersion_k, target_mean / dispersion_k)
+            sample = poisson_draw(latent_rate)
+        if abs(sample - line) < 1e-9:
+            push += 1
+        elif sample > line:
+            over += 1
+        else:
+            under += 1
+
+    over_p, under_p, push_p = over/sims, under/sims, push/sims
+    over_ev = _odds_profit(over_p, under_p, over_odds)
+    under_ev = _odds_profit(under_p, over_p, under_odds)
+    best = max([(v, side, prob, price) for v, side, prob, price in [
+        (over_ev, "OVER", over_p, over_odds), (under_ev, "UNDER", under_p, under_odds)
+    ] if v is not None], key=lambda x: x[0], default=None)
     return {
-        "projection":round(target_mean,2),
-        "projected_minutes":round(projected_min,1) if projected_min is not None else None,
-        "over_probability":round(over_p*100,2),"under_probability":round(under_p*100,2),
-        "push_probability":round(push_p*100,2),"simulations":sims,
-        "best_side":best[1] if best else None,
-        "best_probability":round(best[2]*100,2) if best else None,
-        "best_odds":best[3] if best else None,
-        "expected_value_pct":round(best[0]*100,2) if best else None,
-        "edge_pp":None,
-        "recommendation":"VALUE CANDIDATE" if best and best[0]>0.05 else ("LEAN / VERIFY" if best and best[0]>0 else "PASS"),
-        "model_components":["exponentially weighted history","10-game form signal","minutes adjustment" if valid_minutes else "minutes unavailable; no adjustment","defense-vs-position matchup adjustment" if isinstance(matchup_adjustment, dict) and matchup_adjustment.get("available", True) else "defense-vs-position unavailable; no adjustment","empirical/parametric mixture distribution","Monte Carlo probability estimation"],
-        "model_method":"recency-weighted empirical/parametric mixture with minutes adjustment; provisional pending out-of-sample calibration",
-        "sample_size":n,"long_run_mean":round(long_mean,2),"recent5_mean":round(recent5_mean,2),        "recent10_mean":round(recent10_mean,2),"weighted_mean":round(weighted_mean,2),
-        "distribution_std_dev":round(std_dev,2),"minute_adjustment_factor":round(minute_factor,3),
-        "minutes_sample_size":len(valid_minutes),
-        "matchup_adjustment_pct":round((matchup_factor - 1.0) * 100, 2),
-        "defense_vs_position":matchup_adjustment,
-        "baseline_minutes":round(baseline_min,1) if baseline_min is not None else None,
-        "minutes_method":"55% recent-5 median / 30% recent-10 median / 15% recent-20 median; adjustment capped at +/-15%",
-        "calibration_status":"uncalibrated"
+        "projection": round(target_mean, 2),
+        "projected_minutes": round(projected_min, 1) if projected_min is not None else None,
+        "over_probability": round(over_p*100, 2), "under_probability": round(under_p*100, 2),
+        "push_probability": round(push_p*100, 2), "simulations": sims,
+        "best_side": best[1] if best else None,
+        "best_probability": round(best[2]*100, 2) if best else None,
+        "best_odds": best[3] if best else None,
+        "expected_value_pct": round(best[0]*100, 2) if best else None,
+        "edge_pp": None,
+        "recommendation": "VALUE CANDIDATE" if best and best[0] > 0.05 else ("LEAN / VERIFY" if best and best[0] > 0 else "PASS"),
+        "model_components": ["recency-weighted history", "10-game form signal", "minutes adjustment" if valid_minutes else "minutes unavailable; no adjustment", "defense-vs-position matchup adjustment" if isinstance(matchup_adjustment, dict) and matchup_adjustment.get("available", True) else "defense-vs-position unavailable; no adjustment", "20% empirical history + 80% negative-binomial count distribution"],
+        "model_method": "recency-weighted count-rate projection with Gamma-Poisson overdispersion; provisional pending out-of-sample calibration",
+        "sample_size": n, "long_run_mean": round(long_mean, 2), "recent5_mean": round(recent5_mean, 2),
+        "recent10_mean": round(recent10_mean, 2), "weighted_mean": round(weighted_mean, 2),
+        "distribution_std_dev": round(std_dev, 2), "minute_adjustment_factor": round(minute_factor, 3),
+        "minutes_sample_size": len(valid_minutes),
+        "matchup_adjustment_pct": round((matchup_factor - 1.0) * 100, 2),
+        "defense_vs_position": matchup_adjustment,
+        "baseline_minutes": round(baseline_min, 1) if baseline_min is not None else None,
+        "minutes_method": "55% recent-5 median / 30% recent-10 median / 15% recent-20 median; adjustment capped at +/-15%",
+        "count_dispersion_k": round(dispersion_k, 2),
+        "calibration_status": "uncalibrated"
     }
 
 _BP_OFFERS_CACHE = {}
@@ -1631,41 +1653,37 @@ def _apply_historical_calibration(model, market):
     return model
 
 def _score_blended_market(model, market_quote):
-    """
-    Logarithmic opinion pool on the conditional Over/Under probabilities.
-    Push probability remains a separate model outcome, avoiding the previous
-    distortion from independently pooling two non-complementary probabilities.
-    """
-    model_over = model["over_probability"] / 100.0
-    model_under = model["under_probability"] / 100.0
+    """Keep the proprietary probability independent; use the book only to price and measure edge."""
+    model_over = max(0.0, min(1.0, model["over_probability"] / 100.0))
+    model_under = max(0.0, min(1.0, model["under_probability"] / 100.0))
     model_push = max(0.0, min(0.25, model.get("push_probability", 0.0) / 100.0))
-    model_decision_mass = max(1e-9, model_over + model_under)
-    model_over_cond = model_over / model_decision_mass
+    model_mass = max(1e-9, model_over + model_under)
+    model_over_cond = model_over / model_mass
+    model_under_cond = model_under / model_mass
     market_over = market_quote["over_probability"]
     market_under = market_quote["under_probability"]
     market_mass = max(1e-9, market_over + market_under)
     market_over_cond = market_over / market_mass
-    # Fixed 50% market weight is a transparent starting point, not a learned
-    # optimum. The response exposes this so calibration can replace it later.
-    market_weight = 0.50
-    blended_over_cond = _log_pool(model_over_cond, market_over_cond, market_weight)
-    blended_under_cond = 1.0 - blended_over_cond
-    over = (1.0 - model_push) * blended_over_cond
-    under = (1.0 - model_push) * blended_under_cond
+    market_under_cond = market_under / market_mass
+
+    # No fixed 50/50 opinion pool: the proprietary model must stand on its own.
+    # Sportsbook prices are used only for expected value and market-relative edge.
+    over = model_over
+    under = model_under
     choices = []
-    for side, prob, loss, odds in (
-        ("OVER", over, under, market_quote["over_odds"]),
-        ("UNDER", under, over, market_quote["under_odds"]),
+    for side, prob, conditional_prob, market_prob, loss, odds in (
+        ("OVER", over, model_over_cond, market_over_cond, under, market_quote["over_odds"]),
+        ("UNDER", under, model_under_cond, market_under_cond, over, market_quote["under_odds"]),
     ):
         ev = _odds_profit(prob, loss, odds)
         if ev is not None:
-            choices.append((ev, side, prob, odds, loss))
+            choices.append((ev, side, prob, odds, loss, conditional_prob, market_prob))
     best = max(choices, key=lambda x: x[0], default=None)
     model.update({
         "model_over_probability": round(model_over * 100, 2),
         "model_under_probability": round(model_under * 100, 2),
-        "market_over_probability": round(market_over * 100, 2),
-        "market_under_probability": round(market_under * 100, 2),
+        "market_over_probability": round(market_over_cond * 100, 2),
+        "market_under_probability": round(market_under_cond * 100, 2),
         "over_probability": round(over * 100, 2),
         "under_probability": round(under * 100, 2),
         "push_probability": round(model_push * 100, 2),
@@ -1673,12 +1691,12 @@ def _score_blended_market(model, market_quote):
         "best_probability": round(best[2] * 100, 2) if best else None,
         "best_odds": best[3] if best else None,
         "expected_value_pct": round(best[0] * 100, 2) if best else None,
-        "edge_pp": round((best[2] - _american_probability(best[3])) * 100, 2) if best else None,
+        "edge_pp": round((best[5] - best[6]) * 100, 2) if best else None,
         "recommendation": "VALUE CANDIDATE" if best and best[0] > 0.05 else ("LEAN / VERIFY" if best and best[0] > 0 else "PASS"),
         "kelly_fraction_pct": round(max(0.0, (best[2] * _american_payout(best[3]) - best[4]) /
             max(1e-9, _american_payout(best[3]) * (best[2] + best[4]))) * 100, 2) if best else None,
-        "blend_method": "50/50 conditional logarithmic pool; market weight awaits out-of-sample optimization",
-        "market_weight": market_weight,
+        "blend_method": "No probability blend; independent proprietary probability priced against DraftKings/FanDuel odds",
+        "market_weight": 0.0,
         "market_books": market_quote["books_used"],
         "best_over_book": market_quote["over_book"],
         "best_under_book": market_quote["under_book"],
@@ -1951,7 +1969,7 @@ def _snapshot_daily_market_top5(market, props):
                 minutes = float(prop.get("projected_minutes"))
             except (TypeError, ValueError, OverflowError):
                 continue
-            if not math.isfinite(ev) or ev <= 0 or sample < 8 or minutes < 15:
+            if not math.isfinite(ev) or ev <= 0 or sample < 12 or minutes < 15:
                 continue
             if prop.get("best_side") not in ("OVER", "UNDER") or prop.get("best_odds") is None:
                 continue
@@ -2068,7 +2086,7 @@ def proprietary_market_board(market: str = "rebounds"):
                 model["blend_method"] = "No verified two-sided DraftKings quote; no bet rating"
 
             sample_size = int(model.get("sample_size") or len(values))
-            if sample_size < 8:
+            if sample_size < 12:
                 model["confidence"] = "low"
                 model["recommendation"] = "PASS"
                 model["expected_value_pct"] = None
@@ -2132,7 +2150,7 @@ def proprietary_market_board(market: str = "rebounds"):
     result = {
         "market": market,
         "source": "ESPN game-log distribution + DraftKings/FanDuel odds via PropLine",
-        "blend": "50/50 logarithmic model/best available DraftKings-FanDuel market probability pool (provisional pending calibration)",
+        "blend": "Independent proprietary probability; DraftKings/FanDuel prices used only for EV and market-relative edge",
         "line_count": len(props),
         "projected_count": len(output),
         "props": output,
