@@ -1918,8 +1918,148 @@ def _active_nba_slate_date(now_et=None):
     return active_date.isoformat()
 
 
+def _post_selection_negative_review(prop, market, injury_feed):
+    """Run expensive injury/workload checks only after a prop reaches the provisional Top 5."""
+    if not isinstance(prop, dict):
+        return False, "Invalid candidate"
+    _apply_official_injury(prop, injury_feed, prop.get("player"), prop.get("team"))
+    if prop.get("injury_blocked") or prop.get("injury_flag"):
+        prop["negative_review"] = {
+            "status": "blocked",
+            "reason": "Official injury report status: " + str(prop.get("injury_status") or "unavailable"),
+        }
+        return False, prop["negative_review"]["reason"]
+
+    athlete_id = str(prop.get("athlete_id") or "").strip()
+    if not athlete_id:
+        prop["negative_review"] = {"status": "inconclusive", "reason": "No verified athlete ID"}
+        return True, "No verified athlete ID; retained without adjustment"
+
+    field, label = STAT_FIELDS[market]
+    current_stats = _gamelog_records(athlete_id, field, label, 2027)
+    current_minutes_records = _gamelog_records(athlete_id, "minutes", "MIN", 2027)
+    prior_minutes_records = _gamelog_records(athlete_id, "minutes", "MIN", 2026)
+
+    def clean_minutes(rows):
+        values = []
+        for row in rows or []:
+            try:
+                value = float(row.get("value"))
+                if math.isfinite(value) and 0 < value <= 60:
+                    values.append(value)
+            except (TypeError, ValueError, AttributeError):
+                continue
+        return values
+
+    current_minutes = clean_minutes(current_minutes_records)
+    prior_minutes = clean_minutes(prior_minutes_records)
+    recent_minutes = current_minutes[-3:]
+    recent_median = _median(recent_minutes)
+    prior_baseline = _median(prior_minutes[-10:])
+    current_games = len(current_stats)
+    official_status = str(prop.get("injury_status") or "").strip()
+    injury_reason = str(prop.get("injury_reason") or "").strip()
+    injury_text = (official_status + " " + injury_reason).casefold()
+    injury_context = any(token in injury_text for token in (
+        "calf", "hamstring", "ankle", "knee", "hip", "back", "foot",
+        "groin", "thigh", "quad", "wrist", "shoulder", "illness",
+        "minutes restriction", "management", "injury"
+    ))
+    return_window = current_games <= 4 and prior_baseline is not None and recent_median is not None
+    workload_ratio = (recent_median / prior_baseline) if prior_baseline and recent_median is not None else 1.0
+    role_drop = prior_baseline is not None and recent_median is not None and workload_ratio < 0.78
+    recent_return = return_window and role_drop
+    reported_injury = bool(injury_context and official_status.casefold() not in ("", "available", "active"))
+
+    # A recent return or material minutes drop triggers a second, workload-adjusted
+    # probability calculation. The sportsbook price is never used to form the mean.
+    if recent_return or role_drop or reported_injury:
+        factor = max(0.40, min(1.0, workload_ratio if role_drop else 0.85))
+        values, sample_label, _ = _player_history(athlete_id, field, label)
+        adjusted_values = [max(0.0, float(value) * factor) for value in values]
+        over_odds = prop.get("over_odds")
+        under_odds = prop.get("under_odds")
+        adjusted = _simulate_market(
+            adjusted_values, float(prop.get("line")), over_odds, under_odds,
+            _norm_player_name(prop.get("player")) + market + "negative-review",
+            minutes=[], market=market, matchup_adjustment=None,
+        )
+        if adjusted and over_odds is not None and under_odds is not None:
+            adjusted = _apply_historical_calibration(adjusted, market)
+            over_raw = _american_probability(over_odds)
+            under_raw = _american_probability(under_odds)
+            mass = max(1e-9, over_raw + under_raw)
+            quote = {
+                "over_probability": over_raw / mass,
+                "under_probability": under_raw / mass,
+                "over_odds": over_odds,
+                "under_odds": under_odds,
+                "books_used": prop.get("market_books") or ["DraftKings/FanDuel via PropLine"],
+                "over_book": "PropLine",
+                "under_book": "PropLine",
+            }
+            adjusted = _score_blended_market(adjusted, quote)
+            # Preserve the original line/odds and identity; replace only model output.
+            for key in (
+                "projection", "projected_minutes", "over_probability", "under_probability",
+                "push_probability", "best_side", "best_probability", "best_odds",
+                "expected_value_pct", "edge_pp", "recommendation", "kelly_fraction_pct",
+                "model_over_probability", "model_under_probability", "market_over_probability",
+                "market_under_probability", "calibration_status", "calibration_applied",
+                "calibration_method", "model_components", "model_method",
+                "distribution_std_dev", "count_dispersion_k",
+            ):
+                if key in adjusted:
+                    prop[key] = adjusted[key]
+            prop["negative_review"]["adjusted_projection"] = adjusted.get("projection")
+            prop["negative_review"]["adjusted_side"] = adjusted.get("best_side")
+            prop["negative_review"]["adjusted_ev_pct"] = adjusted.get("expected_value_pct")
+            prop["negative_review"]["workload_factor"] = round(factor, 3)
+            prop["negative_review"]["adjustment_basis"] = (
+                "Current-season return-to-play minutes versus prior-season baseline"
+                if recent_return else "Recent minutes versus prior-season baseline"
+            )
+            prop["sample_label"] = sample_label
+            prop["workload_adjusted"] = True
+            # On a returning/injured player, an OVER is not retained from the
+            # unadjusted model. Only a positive-EV UNDER survives the risk review.
+            if adjusted.get("best_side") != "UNDER" or float(adjusted.get("expected_value_pct") or 0) <= 0:
+                prop["recommendation"] = "PASS"
+                prop["best_side"] = None
+                prop["best_odds"] = None
+                prop["best_probability"] = None
+                prop["expected_value_pct"] = None
+                prop["edge_pp"] = None
+                prop["negative_review"]["status"] = "removed"
+                prop["negative_review"]["reason"] = (
+                    "Workload/injury adjustment did not produce a positive-EV UNDER."
+                )
+                return False, prop["negative_review"]["reason"]
+            prop["negative_review"]["status"] = "under_value"
+            prop["negative_review"]["reason"] = (
+                "Workload/injury risk repriced; retained only because the adjusted UNDER remains positive EV."
+            )
+        else:
+            prop["negative_review"] = {
+                "status": "inconclusive",
+                "reason": "Workload risk found but two-sided odds or adjusted model unavailable",
+                "workload_factor": round(factor, 3),
+            }
+            return False, prop["negative_review"]["reason"]
+    else:
+        prop["negative_review"] = {
+            "status": "clear",
+            "reason": "No material official injury or recent workload reduction detected",
+            "current_season_games": current_games,
+            "recent_minutes_median": round(recent_median, 1) if recent_median is not None else None,
+            "prior_minutes_baseline": round(prior_baseline, 1) if prior_baseline is not None else None,
+        }
+
+    return True, "Passed post-selection negative review"
+
+
 def _snapshot_daily_market_top5(market, props):
-    """Freeze the first complete market candidate board after 7 a.m. Eastern."""
+    """Select initial Top 5, then run targeted negative review and promote replacements."""
     try:
         now_et = datetime.now(ZoneInfo("America/New_York"))
         slate_date = _active_nba_slate_date(now_et)
@@ -1927,7 +2067,6 @@ def _snapshot_daily_market_top5(market, props):
         existing_slate = prediction_ledger.get_daily_slate(market, slate_date)
         if existing_slate and existing_slate.get("candidates"):
             return existing_slate["candidates"]
-        # Before 7 a.m. the previous slate remains active; never freeze today's board early.
         if now_et.hour < 7:
             return None
         calibration_rows = []
@@ -1954,10 +2093,11 @@ def _snapshot_daily_market_top5(market, props):
         if not ordered:
             return []
         frozen = prediction_ledger.freeze_daily_slate(market, slate_date, ordered)
-        candidates = frozen.get("candidates") or []
+        candidates = [dict(p) for p in (frozen.get("candidates") or []) if isinstance(p, dict)]
+        injury_feed = _load_official_injury_feed()
         eligible = []
         for prop in candidates:
-            if not isinstance(prop, dict) or prop.get("injury_blocked") or prop.get("injury_flag"):
+            if prop.get("injury_blocked") or prop.get("injury_flag"):
                 continue
             if prop.get("recommendation") not in ("VALUE CANDIDATE", "LEAN / VERIFY"):
                 continue
@@ -1975,21 +2115,52 @@ def _snapshot_daily_market_top5(market, props):
                 continue
             eligible.append(prop)
         eligible.sort(key=lambda item: float(item.get("expected_value_pct") or 0), reverse=True)
+
+        # The expensive injury/workload lookups happen only for provisional picks
+        # and, if one is removed, the next best candidate needed to fill the slot.
         selected, seen = [], set()
+        reviewed = 0
+        removed = []
         for prop in eligible:
             key = (_norm_player_name(prop.get("player")), str(prop.get("game") or "").casefold())
             if key in seen:
                 continue
             seen.add(key)
-            selected.append(prop)
-            if len(selected) == 5:
-                break
+            reviewed += 1
+            passed, reason = _post_selection_negative_review(prop, market, injury_feed)
+            if passed:
+                selected.append(prop)
+                if len(selected) == 5:
+                    break
+            else:
+                removed.append({
+                    "player": prop.get("player"),
+                    "side": prop.get("best_side"),
+                    "reason": reason,
+                })
+        for prop in candidates:
+            if prop.get("negative_review") is None:
+                prop["negative_review"] = {"status": "not_reviewed", "reason": "Outside provisional Top 5 and not needed as a replacement"}
         if selected:
+            for index, prop in enumerate(selected, 1):
+                prop["selection_rank"] = index
+                prop["post_selection_reviewed"] = True
             prediction_ledger.save_daily_top_five(selected, market, slate_date)
+            # Keep selected picks first in the frozen board; leave the remaining
+            # market candidates available as a replacement audit trail.
+            selected_keys = {
+                (_norm_player_name(p.get("player")), str(p.get("game") or "").casefold())
+                for p in selected
+            }
+            candidates.sort(
+                key=lambda p: (
+                    (_norm_player_name(p.get("player")), str(p.get("game") or "").casefold()) not in selected_keys,
+                    -float(p.get("expected_value_pct") or -1e9),
+                )
+            )
         return candidates
     except Exception:
         return None
-
 
 @app.get("/api/proprietary-market-board")
 def proprietary_market_board(market: str = "rebounds"):
