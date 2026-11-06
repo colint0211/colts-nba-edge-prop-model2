@@ -2002,7 +2002,7 @@ def _post_selection_negative_review(prop, market, injury_feed):
             adjusted = _score_blended_market(adjusted, quote)
             # Preserve the original line/odds and identity; replace only model output.
             for key in (
-                "projection", "projected_minutes", "over_probability", "under_probability",
+                "projection", "over_probability", "under_probability",
                 "push_probability", "best_side", "best_probability", "best_odds",
                 "expected_value_pct", "edge_pp", "recommendation", "kelly_fraction_pct",
                 "model_over_probability", "model_under_probability", "market_over_probability",
@@ -2012,6 +2012,7 @@ def _post_selection_negative_review(prop, market, injury_feed):
             ):
                 if key in adjusted:
                     prop[key] = adjusted[key]
+            prop["projected_minutes"] = round(recent_median, 1) if recent_median is not None else prop.get("projected_minutes")
             prop["negative_review"]["adjusted_projection"] = adjusted.get("projection")
             prop["negative_review"]["adjusted_side"] = adjusted.get("best_side")
             prop["negative_review"]["adjusted_ev_pct"] = adjusted.get("expected_value_pct")
