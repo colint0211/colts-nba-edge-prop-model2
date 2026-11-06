@@ -1969,7 +1969,7 @@ def _post_selection_negative_review(prop, market, injury_feed):
     workload_ratio = (recent_median / prior_baseline) if prior_baseline and recent_median is not None else 1.0
     role_drop = prior_baseline is not None and recent_median is not None and workload_ratio < 0.78
     recent_return = return_window and role_drop
-    reported_injury = bool(injury_context and official_status.casefold() not in ("", "available", "active"))
+    reported_injury = bool(injury_context and injury_reason and official_status)
 
     # A recent return or material minutes drop triggers a second, workload-adjusted
     # probability calculation. The sportsbook price is never used to form the mean.
@@ -2128,7 +2128,12 @@ def _snapshot_daily_market_top5(market, props):
                 continue
             seen.add(key)
             reviewed += 1
-            passed, reason = _post_selection_negative_review(prop, market, injury_feed)
+            try:
+                passed, reason = _post_selection_negative_review(prop, market, injury_feed)
+            except Exception as review_error:
+                passed = False
+                reason = "Negative review failed safely: " + type(review_error).__name__
+                prop["negative_review"] = {"status": "review_failed", "reason": reason}
             if passed:
                 selected.append(prop)
                 if len(selected) == 5:
