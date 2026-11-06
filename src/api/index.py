@@ -3055,20 +3055,27 @@ def tank01_dvp_status():
 
 @app.get("/api/model/calibration")
 def model_calibration(market: str = "all"):
-    """Return actual settled calibration evidence, without inventing estimates."""
+    """Expose per-market calibration readiness and a same-sample no-vig benchmark."""
     selected = market.lower().strip()
     if selected != "all" and selected not in STAT_FIELDS:
         raise HTTPException(status_code=400, detail="Use points, rebounds, assists, steals, threes, or all.")
     try:
         prediction_ledger.initialize()
-        if selected == "all":
-            profiles = prediction_ledger.calibration_profile("all")
-        else:
-            profiles = {selected: prediction_ledger.calibration_profile(selected)}
+        names = list(STAT_FIELDS) if selected == "all" else [selected]
+        profiles = {name: prediction_ledger.calibration_profile(name) for name in names}
+        ready = [name for name, profile in profiles.items() if profile.get("ready")]
+        total = sum(int(profile.get("sample_size") or 0) for profile in profiles.values())
         return JSONResponse({
-            "status": "historical calibration active where sample thresholds are met",
-            "minimum_sample_size": 100,
+            "status": "calibrated" if ready and len(ready) == len(names) else (
+                "collecting settled pregame outcomes" if total == 0 else
+                "insufficient settled sample; raw probabilities remain unadjusted"
+            ),
+            "minimum_sample_size_per_market": 100,
+            "minimum_bin_sample_size": 20,
+            "minimum_populated_bins": 3,
+            "calibrated_markets": ready,
             "markets": profiles,
+            "policy": "Sportsbook probabilities are benchmarked, never blended into the proprietary model. Calibration is applied only when each market independently meets all evidence thresholds.",
         })
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Calibration history unavailable: " + type(exc).__name__)
