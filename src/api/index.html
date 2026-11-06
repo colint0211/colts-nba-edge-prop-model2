@@ -496,8 +496,8 @@ function allModelEV(){
   for(const [m,rows] of pools){
     if(!Array.isArray(rows))continue;
     const marketRows=rows.map(p=>({...p,market:m}));
-    const reviewed=marketRows.filter(p=>p.post_selection_reviewed===true&&(!p.negative_review||p.negative_review.status==='passed'));
-    all.push(...rankEV(reviewed.length?reviewed:marketRows).slice(0,5));
+    const reviewed=marketRows.filter(p=>p.post_selection_reviewed===true&&p.negative_review&&['clear','under_value'].includes(p.negative_review.status)&&p.best_side&&Number(p.expected_value_pct)>0);
+    all.push(...rankEV(reviewed).slice(0,5));
   }
   const unique=new Map();
   for(const p of sortByEV(all)){const k=norm(p.player)+'|'+String(p.game||'').toLowerCase();if(!unique.has(k))unique.set(k,p);}
