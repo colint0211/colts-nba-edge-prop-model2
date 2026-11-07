@@ -185,7 +185,7 @@ function isEligibleEV(p){
   const sample=Number(p.sample_size??p.games_used??0);
   const approved=p.recommendation==='VALUE CANDIDATE'||p.recommendation==='LEAN / VERIFY';
   const reviewPassed=p.post_selection_reviewed===true&&p.negative_review&&['clear','under_value'].includes(p.negative_review.status);
-  return p.model_status==='projected'&&approved&&reviewPassed&&!isFallback(p)&&sample>=8
+  return p.model_status==='projected'&&approved&&reviewPassed&&sample>=8
     &&!p.injury_blocked&&!p.injury_flag
     &&p.expected_profit_per_100!=null&&Number(p.expected_profit_per_100)>0&&!!p.best_side;
 }
