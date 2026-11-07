@@ -241,8 +241,8 @@ async function load(refresh=false){
     data=(board.props||[]).map(p=>({...p,
       overOdds:p.over_odds,underOdds:p.under_odds,
       ev:p.expected_value_pct==null?null:Number(p.expected_value_pct)/100,
-      expected_profit_per_100:p.expected_value_pct,
-      model_status:'projected',best_side:p.best_side,
+      expected_value_pct:p.expected_value_pct??p.expected_profit_per_100??null,expected_profit_per_100:p.expected_profit_per_100??p.expected_value_pct??null,
+      model_status:'projected',best_side:String(p.best_side||'').toUpperCase(),
       best_probability:p.best_probability,market:'points',
       simulations:p.simulations
     })).filter(p=>p.player&&p.line!=null);
@@ -450,7 +450,7 @@ async function loadBP(m){
     const r=await fetch('/api/proprietary-market-board?market='+encodeURIComponent(m)+'&ts='+Date.now(),{cache:'no-store'});
     const d=await r.json();
     if(!r.ok)throw Error(d.detail||d.error||'Proprietary model request failed');
-    const normalizedRows=(d.props||[]).map(p=>({...p,overOdds:p.over_odds,underOdds:p.under_odds,ev:p.expected_value_pct==null?null:Number(p.expected_value_pct)/100,expected_profit_per_100:p.expected_value_pct,model_status:'projected',best_side:p.best_side,best_probability:p.best_probability,market:m,simulations:p.simulations})).filter(p=>p.player&&p.line!=null);
+    const normalizedRows=(d.props||[]).map(p=>({...p,overOdds:p.over_odds,underOdds:p.under_odds,ev:p.expected_value_pct==null?null:Number(p.expected_value_pct)/100,expected_value_pct:p.expected_value_pct??p.expected_profit_per_100??null,expected_profit_per_100:p.expected_profit_per_100??p.expected_value_pct??null,model_status:'projected',best_side:String(p.best_side||'').toUpperCase(),best_probability:p.best_probability,market:m,simulations:p.simulations})).filter(p=>p.player&&p.line!=null);
     bpCache[m]=d.daily_frozen?normalizedRows:await applySavedOverrides(normalizedRows,m);
     const dailyPicks=rankEV(bpCache[m]).slice(0,5);
     if(d.daily_frozen)await recordDailyTopFive(m,dailyPicks);
@@ -502,13 +502,21 @@ function allModelEV(){
   const all=[];
   for(const [m,rows] of pools){
     if(!Array.isArray(rows))continue;
-    const marketRows=rows.map(p=>({...p,market:m}));
-    const reviewed=marketRows.filter(p=>p.post_selection_reviewed===true&&p.negative_review&&['clear','under_value'].includes(p.negative_review.status)&&p.best_side&&Number(p.expected_value_pct)>0);
-    // Preserve the full reviewed pool; rank globally after deduplicating players.
-    all.push(...rankEV(reviewed));
+    // Use exactly the same approval, sample-size, injury and positive-EV
+    // checks as each individual market board. A second hand-written filter
+    // here previously discarded valid reviewed candidates.
+    const marketRows=rows.map(p=>({...p,market:m,
+      best_side:String(p.best_side||'').toUpperCase(),
+      expected_value_pct:p.expected_value_pct??p.expected_profit_per_100??null,
+      expected_profit_per_100:p.expected_profit_per_100??p.expected_value_pct??null
+    }));
+    all.push(...rankEV(marketRows));
   }
   const unique=new Map();
-  for(const p of sortByEV(all)){const k=norm(p.player)+'|'+String(p.game||'').toLowerCase();if(!unique.has(k))unique.set(k,p);}
+  for(const p of sortByEV(all)){
+    const k=norm(p.player)+'|'+String(p.game||'').toLowerCase();
+    if(!unique.has(k))unique.set(k,p);
+  }
   return sortByEV([...unique.values()]);
 }
 function bpCard(p,i){
