@@ -1959,6 +1959,23 @@ def _post_selection_negative_review(prop, market, injury_feed):
     recent_median = _median(recent_minutes)
     prior_baseline = _median(prior_minutes[-10:])
     current_games = len(current_stats)
+    # Detect a return from a meaningful absence even when the official report
+    # has already changed the player to Available. ESPN game logs omit DNP rows,
+    # so the date gap between consecutive appearances is the reliable signal.
+    played_dates = sorted({
+        str(row.get("date") or "")[:10]
+        for row in current_stats
+        if str(row.get("date") or "")[:10]
+    })
+    return_gap_days = 0
+    if len(played_dates) >= 2:
+        try:
+            last_played = datetime.strptime(played_dates[-1], "%Y-%m-%d").date()
+            previous_played = datetime.strptime(played_dates[-2], "%Y-%m-%d").date()
+            return_gap_days = (last_played - previous_played).days
+        except (TypeError, ValueError):
+            return_gap_days = 0
+    return_after_absence = current_games <= 8 and return_gap_days >= 7
     official_status = str(prop.get("injury_status") or "").strip()
     injury_reason = str(prop.get("injury_reason") or "").strip()
     injury_text = (official_status + " " + injury_reason).casefold()
@@ -1967,11 +1984,19 @@ def _post_selection_negative_review(prop, market, injury_feed):
         "groin", "thigh", "quad", "wrist", "shoulder", "illness",
         "minutes restriction", "management", "injury"
     ))
-    return_window = current_games <= 4 and prior_baseline is not None and recent_median is not None
+    return_window = current_games <= 8 and prior_baseline is not None and recent_median is not None
     workload_ratio = (recent_median / prior_baseline) if prior_baseline and recent_median is not None else 1.0
-    role_drop = prior_baseline is not None and recent_median is not None and workload_ratio < 0.78
-    recent_return = return_window and role_drop
+    role_drop = prior_baseline is not None and recent_median is not None and workload_ratio < 0.88
+    recent_return = return_after_absence and return_window
     reported_injury = bool(injury_context and injury_reason and official_status)
+
+    if return_after_absence and (prior_baseline is None or recent_median is None):
+        prop["negative_review"] = {
+            "status": "inconclusive",
+            "reason": "Recent return after a 7+ day gap, but verified current minutes or prior workload baseline is missing; no bet until workload is confirmed",
+            "return_gap_days": return_gap_days,
+        }
+        return False, prop["negative_review"]["reason"]
 
     if current_games == 0:
         prop["negative_review"] = {
@@ -1983,7 +2008,10 @@ def _post_selection_negative_review(prop, market, injury_feed):
     # A recent return or material minutes drop triggers a second, workload-adjusted
     # probability calculation. The sportsbook price is never used to form the mean.
     if recent_return or role_drop or reported_injury:
-        factor = max(0.40, min(1.0, workload_ratio if role_drop else 0.85))
+        # A return after a 7+ day absence is capped at 85% of the
+        # established rate, and reduced further when observed minutes show
+        # the player is still below his normal workload.
+        factor = max(0.40, min(0.85, workload_ratio if (role_drop or recent_return) else 0.85))
         prop["negative_review"] = {"status": "reviewing", "reason": "Recent workload or injury signal detected"}
         values, sample_label, _ = _player_history(athlete_id, field, label)
         adjusted_values = [max(0.0, float(value) * factor) for value in values]
@@ -2026,7 +2054,10 @@ def _post_selection_negative_review(prop, market, injury_feed):
             prop["negative_review"]["adjusted_side"] = adjusted.get("best_side")
             prop["negative_review"]["adjusted_ev_pct"] = adjusted.get("expected_value_pct")
             prop["negative_review"]["workload_factor"] = round(factor, 3)
+            prop["negative_review"]["return_gap_days"] = return_gap_days
             prop["negative_review"]["adjustment_basis"] = (
+                "Return after 7+ day absence; current minutes versus prior-season baseline"
+                if recent_return else
                 "Current-season return-to-play minutes versus prior-season baseline"
                 if recent_return else "Recent minutes versus prior-season baseline"
             )
@@ -2161,6 +2192,13 @@ def _snapshot_daily_market_top5(market, props):
             for index, prop in enumerate(selected, 1):
                 prop["selection_rank"] = index
                 prop["post_selection_reviewed"] = True
+                side = str(prop.get("best_side") or "").upper()
+                line = prop.get("line")
+                prop["play_instruction"] = (
+                    f"PLAY {side} {line} {market.upper()}"
+                    if side in ("OVER", "UNDER") and line is not None
+                    else "NO PLAY"
+                )
             prediction_ledger.save_daily_top_five(selected, market, slate_date)
             # Keep selected picks first in the frozen board; leave the remaining
             # market candidates available as a replacement audit trail.
