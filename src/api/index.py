@@ -2324,7 +2324,7 @@ def proprietary_market_board(market: str = "rebounds"):
                 model["blend_method"] = "No verified two-sided DraftKings quote; no bet rating"
 
             sample_size = int(model.get("sample_size") or len(values))
-            if sample_size < 12:
+            if sample_size < 8:
                 model["confidence"] = "low"
                 model["recommendation"] = "PASS"
                 model["expected_value_pct"] = None
