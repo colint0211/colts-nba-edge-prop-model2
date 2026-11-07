@@ -2112,15 +2112,15 @@ def _snapshot_daily_market_top5(market, props):
                 continue
             if prop.get("recommendation") not in ("VALUE CANDIDATE", "LEAN / VERIFY"):
                 continue
-            if prop.get("sample_label") and "fallback" in str(prop.get("sample_label")).lower():
-                continue
+            # Mixed current/prior-season samples are allowed into the risk review;
+            # the review, not a blanket label filter, decides whether they survive.
             try:
                 ev = float(prop.get("expected_value_pct"))
                 sample = int(prop.get("sample_size") or prop.get("games_used") or 0)
                 minutes = float(prop.get("projected_minutes"))
             except (TypeError, ValueError, OverflowError):
                 continue
-            if not math.isfinite(ev) or ev <= 0 or sample < 12 or minutes < 15:
+            if not math.isfinite(ev) or ev <= 0 or sample < 8 or minutes < 12:
                 continue
             if prop.get("best_side") not in ("OVER", "UNDER") or prop.get("best_odds") is None:
                 continue
@@ -2196,7 +2196,7 @@ def _revalidate_frozen_market_candidates(market, candidates, injury_feed):
             minutes=float(p.get("projected_minutes"))
         except (TypeError,ValueError,OverflowError):
             continue
-        if not math.isfinite(ev) or ev <= 0 or sample < 12 or minutes < 15:
+        if not math.isfinite(ev) or ev <= 0 or sample < 8 or minutes < 12:
             continue
         if p.get("best_side") not in ("OVER","UNDER") or p.get("best_odds") is None:
             continue
