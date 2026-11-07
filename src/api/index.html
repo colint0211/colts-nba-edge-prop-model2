@@ -499,7 +499,8 @@ function allModelEV(){
     if(!Array.isArray(rows))continue;
     const marketRows=rows.map(p=>({...p,market:m}));
     const reviewed=marketRows.filter(p=>p.post_selection_reviewed===true&&p.negative_review&&['clear','under_value'].includes(p.negative_review.status)&&p.best_side&&Number(p.expected_value_pct)>0);
-    all.push(...rankEV(reviewed).slice(0,5));
+    // Preserve the full reviewed pool; rank globally after deduplicating players.
+    all.push(...rankEV(reviewed));
   }
   const unique=new Map();
   for(const p of sortByEV(all)){const k=norm(p.player)+'|'+String(p.game||'').toLowerCase();if(!unique.has(k))unique.set(k,p);}
@@ -521,6 +522,8 @@ function bpCard(p,i){
 function render(){
   const q=el('search').value.toLowerCase();let list=[];
   if(market==='ev'){
+    const pending=['rebounds','assists','steals','threes'].filter(m=>bpLoading[m]||!bpCache[m]);
+    if(pending.length){el('count').textContent='Loading all five markets…';el('cards').innerHTML='<div class="empty">Building the cross-market Top 5 EV board. Checking all five markets before ranking.</div>';return;}
     list=allModelEV();
     if(q)list=list.filter(p=>(p.player+' '+(p.team||p.roster_team||'')+' '+(p.game||'')).toLowerCase().includes(q));
     list=list.slice(0,5);
@@ -554,6 +557,8 @@ function renderFull(){
     return;
   }
   if(market==='ev'){
+    const pending=['rebounds','assists','steals','threes'].filter(m=>bpLoading[m]||!bpCache[m]);
+    if(pending.length){el('countFull').textContent='Loading all five markets…';el('fullCards').innerHTML='<div class="empty">Waiting for all five market boards before listing cross-market candidates.</div>';return;}
     const rows=sortByEV(allModelEV().filter(p=>(p.player+' '+(p.team||'')+' '+(p.game||'')).toLowerCase().includes(q)));
     el('countFull').textContent=rows.length+' cross-market EV candidates';
     el('fullCards').innerHTML=rows.map((p,i)=>p.market==='points'?card(p,i):bpLineCard(p,i)).join('')||'<div class="empty">No positive-EV plays available.</div>';
