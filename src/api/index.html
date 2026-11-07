@@ -182,15 +182,20 @@ async function applySavedOverrides(rows,m){
   return output;
 }
 function isEligibleEV(p){
+  // A passed post-selection review is the authoritative EV-board approval.
+  // Do not re-gate these picks on display-only fields (model_status or
+  // recommendation labels), which are not consistently present in frozen
+  // cross-market snapshots and were hiding valid reviewed plays.
   const sample=Number(p.sample_size??p.games_used??0);
-  const approved=p.recommendation==='VALUE CANDIDATE'||p.recommendation==='LEAN / VERIFY';
-  const reviewPassed=p.post_selection_reviewed===true&&p.negative_review&&['clear','under_value'].includes(p.negative_review.status);
-  return p.model_status==='projected'&&approved&&reviewPassed&&sample>=8
+  const reviewPassed=p.post_selection_reviewed===true&&p.negative_review
+    &&['clear','under_value'].includes(p.negative_review.status);
+  const ev=Number(p.expected_value_pct??p.expected_profit_per_100);
+  return reviewPassed&&sample>=8&&Number.isFinite(ev)&&ev>0
     &&!p.injury_blocked&&!p.injury_flag
-    &&p.expected_profit_per_100!=null&&Number(p.expected_profit_per_100)>0&&!!p.best_side;
+    &&(p.best_side==='OVER'||p.best_side==='UNDER');
 }
 function evRankValue(p){
-  const raw=p.expected_profit_per_100??p.expected_value_pct;
+  const raw=p.expected_value_pct??p.expected_profit_per_100;
   const n=Number(raw);
   return Number.isFinite(n)?n:null;
 }
