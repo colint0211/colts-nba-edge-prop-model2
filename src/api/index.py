@@ -3210,7 +3210,14 @@ def _run_pending_settlements():
             market = str(candidate.get("market") or "").lower()
             mapping = market_fields.get(market)
             game = str(snap.get("game") or "")
-            created_date = str(candidate.get("created_date") or "")
+            # DB timestamps are stored in UTC. A pick saved during the evening
+            # in North American time can therefore have a UTC creation date one day
+            # after its local slate/game date. Prefer the immutable saved slate date.
+            created_date = str(
+                snap.get("slate_date")
+                or candidate.get("created_date")
+                or ""
+            )
             # Some board feeds omit the matchup string. In that case, a verified
             # player ID plus the saved team and an ESPN event containing that team
             # is sufficient; never settle by player name alone.
@@ -3252,8 +3259,11 @@ def _run_pending_settlements():
                         game_date = datetime.fromisoformat(row_date).date()
                     except ValueError:
                         continue
-                    # Picks may be entered up to two days before tipoff.
-                    if not (created <= game_date <= created + timedelta(days=2)):
+                    # ESPN dates can be UTC while slate dates are local.
+                    # Permit the adjacent prior calendar date for late-evening
+                    # Eastern picks, while still requiring the exact verified
+                    # player ID and matchup below.
+                    if not (created - timedelta(days=1) <= game_date <= created + timedelta(days=2)):
                         continue
                     event_teams = matchup_for_event(event_id)
                     if not event_teams:
@@ -3262,11 +3272,13 @@ def _run_pending_settlements():
                     # matchup. If it only included the player's team, require
                     # that team to be one of the two verified event participants.
                     if (
-                        not expected_teams
-                        or event_teams == expected_teams
-                        or (
-                            len(expected_teams) == 1
-                            and expected_teams.issubset(event_teams)
+                        expected_teams
+                        and (
+                            event_teams == expected_teams
+                            or (
+                                len(expected_teams) == 1
+                                and expected_teams.issubset(event_teams)
+                            )
                         )
                     ):
                         possible.append(row)
