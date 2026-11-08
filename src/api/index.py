@@ -3174,7 +3174,10 @@ def _run_pending_settlements():
     }
     team_aliases = {"NY": "NYK", "GS": "GSW", "WSH": "WAS"}
     event_team_cache = {}
-    result = {"checked": 0, "settled": 0, "skipped": 0, "errors": 0, "settlements": []}
+    result = {"checked": 0, "settled": 0, "skipped": 0, "errors": 0,
+              "skip_reasons": {"missing_identity": 0, "no_matching_completed_game": 0,
+                               "ambiguous_game": 0, "settlement_conflict": 0},
+              "settlements": []}
 
     def matchup_for_event(event_id):
         if not event_id:
@@ -3186,12 +3189,26 @@ def _run_pending_settlements():
                     "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/summary?"
                     + urlencode({"event": key}), timeout=8
                 )
-                competitions = (payload.get("header") or {}).get("competitions") or []
-                competitors = competitions[0].get("competitors") if competitions else []
+                # ESPN summary responses vary: some expose competitors under
+                # header.competitions, others expose the two teams under boxscore.
+                header = payload.get("header") or {}
+                competitions = header.get("competitions") or []
+                competitors = []
+                if isinstance(competitions, list) and competitions:
+                    competitors = competitions[0].get("competitors") or []
+                if not competitors:
+                    boxscore = payload.get("boxscore") or {}
+                    team_rows = boxscore.get("teams") or []
+                    competitors = [
+                        row.get("team") if isinstance(row, dict) and isinstance(row.get("team"), dict) else row
+                        for row in team_rows
+                    ]
                 teams = set()
                 for competitor in competitors or []:
-                    team = competitor.get("team") or {}
-                    code = str(team.get("abbreviation") or "").upper()
+                    if not isinstance(competitor, dict):
+                        continue
+                    team = competitor.get("team") if isinstance(competitor.get("team"), dict) else competitor
+                    code = _canonical_team_code(team.get("abbreviation") or team.get("shortDisplayName"))
                     if code:
                         teams.add(team_aliases.get(code, code))
                 event_team_cache[key] = teams if len(teams) == 2 else None
@@ -3241,6 +3258,7 @@ def _run_pending_settlements():
                 or not created_date
             ):
                 result["skipped"] += 1
+                result["skip_reasons"]["missing_identity"] += 1
                 continue
             field, label = mapping
             try:
@@ -3285,6 +3303,9 @@ def _run_pending_settlements():
                 # More than one possible event is ambiguous; do not settle it.
                 if len(possible) != 1:
                     result["skipped"] += 1
+                    result["skip_reasons"][
+                        "ambiguous_game" if len(possible) > 1 else "no_matching_completed_game"
+                    ] += 1
                     continue
                 actual = float(possible[0]["value"])
                 settled = prediction_ledger.settle_prediction(candidate["id"], actual)
@@ -3295,8 +3316,13 @@ def _run_pending_settlements():
                 })
             except ValueError:
                 result["skipped"] += 1
-            except Exception:
+                result["skip_reasons"]["settlement_conflict"] += 1
+            except Exception as exc:
                 result["errors"] += 1
+                # Keep the response actionable without leaking URLs, tokens, or credentials.
+                result.setdefault("error_types", {})
+                error_name = type(exc).__name__
+                result["error_types"][error_name] = result["error_types"].get(error_name, 0) + 1
         return JSONResponse(result)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail="Prediction database unavailable.") from exc
