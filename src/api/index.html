@@ -525,7 +525,9 @@ function allModelEV(){
   }
   const unique=new Map();
   for(const p of sortByEV(all)){
-    const k=norm(p.player)+'|'+String(p.game||'').toLowerCase();
+    // A player can legitimately qualify in more than one distinct market.
+    // Deduplicate only repeated rows for the same player, game, AND market.
+    const k=String(p.market||'').toLowerCase()+'|'+norm(p.player)+'|'+String(p.game||'').toLowerCase();
     if(!unique.has(k))unique.set(k,p);
   }
   return sortByEV([...unique.values()]);
