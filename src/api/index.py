@@ -1679,7 +1679,19 @@ def _score_blended_market(model, market_quote):
         if ev is not None:
             choices.append((ev, side, prob, odds, loss, conditional_prob, market_prob))
     best = max(choices, key=lambda x: x[0], default=None)
+    over_ev = next((item[0] for item in choices if item[1] == "OVER"), None)
+    under_ev = next((item[0] for item in choices if item[1] == "UNDER"), None)
+    over_edge = (model_over_cond - market_over_cond) * 100
+    under_edge = (model_under_cond - market_under_cond) * 100
     model.update({
+        "over_ev_pct": round(over_ev * 100, 2) if over_ev is not None else None,
+        "under_ev_pct": round(under_ev * 100, 2) if under_ev is not None else None,
+        "over_edge_pp": round(over_edge, 2),
+        "under_edge_pp": round(under_edge, 2),
+        "selection_reason": (
+            "Selected " + best[1] + " because it has the higher expected value at the listed odds; "
+            "the projection is an average, not the selected betting side."
+        ) if best else "No side has a calculable expected value at the listed odds.",
         "model_over_probability": round(model_over * 100, 2),
         "model_under_probability": round(model_under * 100, 2),
         "market_over_probability": round(market_over_cond * 100, 2),
@@ -2043,7 +2055,8 @@ def _post_selection_negative_review(prop, market, injury_feed):
                 "push_probability", "best_side", "best_probability", "best_odds",
                 "expected_value_pct", "edge_pp", "recommendation", "kelly_fraction_pct",
                 "model_over_probability", "model_under_probability", "market_over_probability",
-                "market_under_probability", "calibration_status", "calibration_applied",
+                "market_under_probability", "over_ev_pct", "under_ev_pct", "over_edge_pp",
+                "under_edge_pp", "selection_reason", "calibration_status", "calibration_applied",
                 "calibration_method", "model_components", "model_method",
                 "distribution_std_dev", "count_dispersion_k",
             ):
