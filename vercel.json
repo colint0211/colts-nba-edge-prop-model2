@@ -2,7 +2,7 @@
   "crons": [
     {
       "path": "/api/cron/settle-pending",
-      "schedule": "0 12 * * *"
+      "schedule": "0 * * * *"
     },
     {
       "path": "/api/cron/freeze-daily",
