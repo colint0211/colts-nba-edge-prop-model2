@@ -121,7 +121,7 @@ def make_candidates(game,model):
             p=1-logistic_cdf(0,cover_mean,scale); push=0.0
         ev=ev_at_minus_110(p,push)
         edge=(p-market_p)*100
-        if edge>=2.5 and ev*100>=1.5 and p>=.50:
+        if edge>=2.5 and ev*100>=1.5 and p>=.50 and edge<=12.0 and ev*100<=20.0:
             candidates.append({"market":"sides","selection":team,"line":line,"prob":p,
               "market_prob":market_p,"edge_pp":edge,"ev_pct":ev*100,"odds":-110,
               "date":game["date"],"matchup":game["away"]+" @ "+game["home"],
