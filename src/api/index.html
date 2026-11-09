@@ -151,7 +151,7 @@ async function loadAdvancedMetrics(){
   const r=await fetch('/api/advanced-metrics/status?t='+Date.now(),{cache:'no-store'});
   const d=await r.json();if(!r.ok)throw Error(d.detail||'Status unavailable');
   const datasets=d.datasets||[], runs=d.recent_runs||[];
-  const rows=datasets.map(x=>'<div>• <b>'+esc(x.metric)+'</b>: '+esc(x.rows)+' rows · latest '+esc(x.latest_snapshot)+'</div>').join('');
+  const rows=datasets.map(x=>'<div>• <b>'+esc(x.metric)+'</b>: '+esc(x.rows)+' rows · latest '+esc(x.latest_snapshot)+' · '+esc(x.source||'source not reported')+'</div>').join('');
   const latest=runs.slice(0,4).map(x=>'<div>• '+esc(x.date)+' batch '+esc(x.batch)+' · <b>'+esc(x.status)+'</b> · '+esc(x.summary?.elapsed_seconds??'—')+' sec'+(Object.keys(x.summary?.errors||{}).length?' · '+Object.keys(x.summary.errors).length+' source errors':'')+'</div>').join('');
   el('advancedMetrics').innerHTML='<div><b>Snapshot tables</b></div>'+(rows||'<div>No advanced metric snapshots collected yet.</div>')+'<div style="margin-top:10px"><b>Recent collection runs</b></div>'+(latest||'<div>No collection runs recorded.</div>')+'<div style="margin-top:10px">Rotation: '+esc(d.rotation)+'</div><div>'+esc(d.optional_player_impact)+'</div>';
  }catch(e){el('advancedMetrics').textContent='Advanced metrics status unavailable: '+(e.message||e)}
