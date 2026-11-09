@@ -155,7 +155,7 @@ def collect(batch=None):
     season = _season()
     snapshot_date = datetime.now(timezone.utc).date()
     if batch is None:
-        batch = (datetime.now(timezone.utc).hour // 4) % 6
+        batch = datetime.now(timezone.utc).timetuple().tm_yday % 6
     batch = int(batch)
     if batch < 0 or batch > 5:
         raise ValueError("batch must be between 0 and 5")
@@ -222,6 +222,6 @@ def status():
                         "started_at":r[5].isoformat() if r[5] else None,
                         "finished_at":r[6].isoformat() if r[6] else None,
                         "summary":r[7]} for r in runs],
-        "rotation":"Five teams per batch; six batches rotate every four hours.",
+        "rotation":"Five teams per batch; six batches rotate daily, completing a full team on/off and lineup cycle every six days.",
         "optional_player_impact":"Dunks & Threes Team EPM requires DUNKS_AND_THREES_API_KEY; it is not assumed available.",
     }
