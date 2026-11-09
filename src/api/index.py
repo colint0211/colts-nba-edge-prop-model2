@@ -3359,13 +3359,31 @@ async def save_daily_top5(request: FastRequest):
         raise HTTPException(status_code=503, detail="Could not save daily Top 5 picks.") from exc
 
 
+# A dashboard history refresh also acts as a live settlement heartbeat.
+# The browser polls this endpoint every 60 seconds; throttle per warm serverless
+# instance so multiple open tabs do not repeatedly query ESPN.
+_AUTO_SETTLEMENT_LAST_RUN = 0.0
+_AUTO_SETTLEMENT_MIN_INTERVAL = 45.0
+
+
 @app.get("/api/model/daily-top5")
 def get_daily_top5(slate_date: str, market: str = "all"):
+    global _AUTO_SETTLEMENT_LAST_RUN
     try:
         prediction_ledger.initialize()
+        now = time.time()
+        settlement_status = {"checked": 0, "settled": 0, "skipped": 0, "errors": 0}
+        if now - _AUTO_SETTLEMENT_LAST_RUN >= _AUTO_SETTLEMENT_MIN_INTERVAL:
+            _AUTO_SETTLEMENT_LAST_RUN = now
+            settlement_response = _run_pending_settlements()
+            try:
+                settlement_status = json.loads(settlement_response.body.decode("utf-8"))
+            except Exception:
+                settlement_status = {"status": "unavailable"}
         return JSONResponse({
             "predictions": prediction_ledger.list_daily_top_five(slate_date, market),
             "all_time": prediction_ledger.daily_top_five_metrics(),
+            "settlement": settlement_status,
         })
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Daily Top 5 history is temporarily unavailable.") from exc
