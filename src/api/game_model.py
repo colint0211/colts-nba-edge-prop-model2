@@ -645,6 +645,11 @@ def _candidate(game,market,model):
 
 
 def _qualified(row):
+    # Do not publish actionable bets from a probability model whose calibration
+    # has not passed a genuinely out-of-sample validation. The current matchup
+    # engine is explicitly provisional and failed the latest market benchmark.
+    if row.get("probability_calibration_status") != "validated":
+        return False
     derived=(row.get("data_quality")=="derived_early_season" or row.get("base_data_quality")=="derived_early_season")
     edge_floor=4.0 if derived else 2.5
     ev_floor=2.0 if derived else 1.5
