@@ -3726,6 +3726,14 @@ def game_sides_totals_history(slate_date: str):
         raise HTTPException(status_code=503, detail="Game-model history is temporarily unavailable: " + type(exc).__name__)
 
 
+
+@app.get("/api/game-clv")
+def game_sides_totals_clv():
+    try:
+        return JSONResponse(game_model.clv_report())
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Game-model CLV report is temporarily unavailable: " + type(exc).__name__)
+
 @app.get("/api/game-metrics")
 def game_sides_totals_metrics():
     try:
