@@ -121,7 +121,7 @@ def make_candidates(game,model):
             p=1-logistic_cdf(0,cover_mean,scale); push=0.0
         ev=ev_at_minus_110(p,push)
         edge=(p-market_p)*100
-        if edge>=2.5 and ev*100>=1.5 and p>=.50 and edge<=12.0 and ev*100<=20.0:
+        if edge>=4.0 and ev*100>=2.0 and p>=.50 and edge<=12.0 and ev*100<=20.0:
             candidates.append({"market":"sides","selection":team,"line":line,"prob":p,
               "market_prob":market_p,"edge_pp":edge,"ev_pct":ev*100,"odds":-110,
               "date":game["date"],"matchup":game["away"]+" @ "+game["home"],
@@ -134,7 +134,7 @@ def make_candidates(game,model):
         line=float(game["close_total"])
         p,push=normal_market_probs(tm,total_sd,line,over)
         ev=ev_at_minus_110(p,push); edge=(p-market_p)*100
-        if edge>=2.5 and ev*100>=1.5 and p>=.50 and edge<=12.0 and ev*100<=20.0:
+        if edge>=4.0 and ev*100>=2.0 and p>=.50 and edge<=12.0 and ev*100<=20.0:
             candidates.append({"market":"totals","selection":side,"line":line,"prob":p,
               "market_prob":market_p,"edge_pp":edge,"ev_pct":ev*100,"odds":-110,
               "date":game["date"],"matchup":game["away"]+" @ "+game["home"],
@@ -212,7 +212,7 @@ def run():
       "selection":"Top 5 qualified sides and Top 5 qualified totals per game date; no same-day result leakage",
       "data":"BoxScore Lab team-game results; Hugging Face consensus closing spread/total and no-vig probabilities",
       "pricing_assumption":"Historical consensus file contains no closing American prices; ROI uses flat -110, not historical book price.",
-      "thresholds":{"edge_pp_min":2.5,"ev_pct_min":1.5,"model_probability_min":0.50,"max_picks_per_market_per_day":5},
+      "thresholds":{"edge_pp_min":4.0,"ev_pct_min":2.0,"model_probability_min":0.50,"max_picks_per_market_per_day":5},
       "season_summaries":season_summary,
       "combined":{"sides":summarize([p for p in all_picks if p["market"]=="sides"]),
         "totals":summarize([p for p in all_picks if p["market"]=="totals"]),"all":summarize(all_picks)},
