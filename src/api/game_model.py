@@ -621,3 +621,29 @@ def history(slate_date):
       "model_probability_pct":round(r[6]*100,2),"market_probability_pct":round(r[7]*100,2) if r[7] is not None else None,
       "projected_home":r[8],"projected_away":r[9],"projected_margin":r[10],"projected_total":r[11],
       "actual_value":r[12],"outcome":r[13],"profit_units":r[14],"created_at":r[15].isoformat() if r[15] else None} for r in rows]
+
+
+def data_probe():
+    events,source,quota=_fetch_lines(force=True)
+    samples=[]
+    for event in (events or [])[:5]:
+        if not isinstance(event,dict): continue
+        books=[]
+        for book in event.get("bookmakers") or []:
+            if not isinstance(book,dict): continue
+            markets=[]
+            for market in book.get("markets") or []:
+                if not isinstance(market,dict): continue
+                markets.append({
+                  "key":market.get("key"),"line_type":market.get("line_type"),
+                  "period":market.get("period"),"team":market.get("team"),
+                  "suspended":bool(market.get("suspended_at")),
+                  "outcomes":[{"name":o.get("name"),"point":o.get("point"),"price":o.get("price")}
+                    for o in (market.get("outcomes") or [])[:4] if isinstance(o,dict)]
+                })
+            books.append({"key":book.get("key"),"markets":markets})
+        samples.append({"id":event.get("id"),"home_team":event.get("home_team"),
+          "away_team":event.get("away_team"),"commence_time":event.get("commence_time"),
+          "bookmakers":books})
+    return {"source":source,"event_count":len(events or []),"parsed_game_count":len(_parse_game_lines(events)),
+      "quota":quota,"sample_events":samples}
