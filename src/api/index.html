@@ -81,6 +81,10 @@ table{width:100%;border-collapse:collapse;min-width:800px;font-size:12px}th,td{p
   <tbody id="historyRows"><tr><td colspan="11">Loading…</td></tr></tbody></table>
  </div>
 
+ <div class="section">Advanced metric data collection</div>
+ <div class="hint">Live status of the separate historical metrics store. Snapshots are retained by date; unavailable source feeds are reported as errors, never filled with guessed values.</div>
+ <div id="advancedMetrics" class="panel muted">Checking advanced-metrics database…</div>
+
  <div class="section">Model data and methodology</div>
  <div id="sources" class="panel muted">Checking data sources…</div>
  <div class="source">Team strength uses estimated offensive/defensive efficiency, net rating, pace, effective field-goal percentage and turnover rate. Offensive rebounds are approximated in the possession estimate. Situational features include rest, back-to-backs, travel, time-zone changes and elevation. Official injury reports are checked after initial candidate ranking. Games with questionable/doubtful rotation availability are withheld until that absence can be valued reliably. Optional Dunks & Threes next-game Team EPM can supply lineup-adjusted player impact when DUNKS_AND_THREES_API_KEY is configured; otherwise the model reports that this input is unavailable and uses only its team-efficiency baseline. DraftKings lines are used to calculate market-relative edge and expected value; they are not used to create the model's projected score or probability. Historical player-prop results remain archived and are never blended into this record.</div>
@@ -141,6 +145,16 @@ function renderSources(s){
  'Saved model picks: '+(s.saved_sides??'—')+' sides · '+(s.saved_totals??'—')+' totals'
  ];
  el('sources').innerHTML=lines.map(x=>'<div>• '+esc(x)+'</div>').join('');
+}
+async function loadAdvancedMetrics(){
+ try{
+  const r=await fetch('/api/advanced-metrics/status?t='+Date.now(),{cache:'no-store'});
+  const d=await r.json();if(!r.ok)throw Error(d.detail||'Status unavailable');
+  const datasets=d.datasets||[], runs=d.recent_runs||[];
+  const rows=datasets.map(x=>'<div>• <b>'+esc(x.metric)+'</b>: '+esc(x.rows)+' rows · latest '+esc(x.latest_snapshot)+'</div>').join('');
+  const latest=runs.slice(0,4).map(x=>'<div>• '+esc(x.date)+' batch '+esc(x.batch)+' · <b>'+esc(x.status)+'</b> · '+esc(x.summary?.elapsed_seconds??'—')+' sec'+(Object.keys(x.summary?.errors||{}).length?' · '+Object.keys(x.summary.errors).length+' source errors':'')+'</div>').join('');
+  el('advancedMetrics').innerHTML='<div><b>Snapshot tables</b></div>'+(rows||'<div>No advanced metric snapshots collected yet.</div>')+'<div style="margin-top:10px"><b>Recent collection runs</b></div>'+(latest||'<div>No collection runs recorded.</div>')+'<div style="margin-top:10px">Rotation: '+esc(d.rotation)+'</div><div>'+esc(d.optional_player_impact)+'</div>';
+ }catch(e){el('advancedMetrics').textContent='Advanced metrics status unavailable: '+(e.message||e)}
 }
 async function loadBoard(refresh=false){
  el('status').textContent='UPDATING';
