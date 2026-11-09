@@ -135,6 +135,7 @@ function renderSources(s){
  'Season: '+(s.season||'—'),
  'Official injury report: '+(s.injuries||'unavailable'),
  'Player impact: '+(s.player_impact||'EPM/on-off not integrated'),
+ 'Withheld games: '+(s.unavailable_games?.length??0)+' (injury uncertainty or extreme model/market gap)',
  'DraftKings quota remaining: '+(s.prop_line_quota?.daily_remaining??'not supplied'),
  'Saved model picks: '+(s.saved_sides??'—')+' sides · '+(s.saved_totals??'—')+' totals'
  ];
