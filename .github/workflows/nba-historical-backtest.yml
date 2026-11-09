@@ -15,7 +15,7 @@ on:
       - "scripts/nba_game_by_game_forensic_audit.py"
       - "scripts/nba_game_by_game_forensic_audit_v2.py"
       - "scripts/nba_upset_blowout_collapse_factor_study.py"
-      - "scripts/nba_injury_source_smoke_test.py"
+      - "scripts/nba_injury_parquet_source_smoke_test.py"
       - "src/api/nba_historical_backtest.py"
       - "src/api/quant_game_engine.py"
   workflow_dispatch:
@@ -64,7 +64,7 @@ jobs:
         env:
           PYTHONPATH: .
         run: python scripts/nba_market_validation.py
-      - name: Install Parquet reader for reverse-engineering experiment
+      - name: Install Parquet reader for historical data experiments
         run: python -m pip install 'duckdb>=1.2,<2'
       - name: Reverse engineer formula on prior seasons and test on untouched 2026-27
         env:
@@ -94,22 +94,13 @@ jobs:
         env:
           PYTHONPATH: .
         run: python scripts/nba_upset_blowout_collapse_factor_study.py
-      - name: Validate official historical NBA injury report archive
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-      - name: Install historical injury report parser
-        run: python -m pip install nbainjuries
-      - name: Test timestamped official injury report retrieval
+      - name: Validate structured historical NBA injury-report dataset
         env:
           PYTHONPATH: .
-        run: python scripts/nba_injury_source_smoke_test.py
+        run: python scripts/nba_injury_parquet_source_smoke_test.py
       - name: Upload backtest report
         uses: actions/upload-artifact@v4
         with:
           name: nba-historical-matchup-backtest
           path: backtest-output/
           if-no-files-found: error
-
-# run revision 3 - rerun against current branch head
