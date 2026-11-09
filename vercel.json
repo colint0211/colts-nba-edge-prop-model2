@@ -7,6 +7,10 @@
     {
       "path": "/api/advanced-metrics/collect",
       "schedule": "30 12 * * *"
+    },
+    {
+      "path": "/api/odds-snapshots/collect",
+      "schedule": "*/15 * * * *"
     }
   ],
   "git": {
