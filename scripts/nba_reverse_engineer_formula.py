@@ -28,6 +28,31 @@ def season_rows(season):
 
 def make_examples(rows):
     histories = defaultdict(lambda: deque(maxlen=10))
+
+    def team_rates_with_cold_start(history, league_ppp, league_pace):
+        # Keep the established rolling estimate once three prior games exist.
+        # Before then, blend the limited team sample toward the contemporaneous
+        # league prior instead of dropping the matchup from the holdout.
+        games = list(history)[-10:]
+        if len(games) >= 3:
+            return _team_rates(history, league_ppp, league_pace)
+        if not games:
+            return league_ppp, league_ppp, league_pace
+        pf = sum(g["pf"] for g in games)
+        pa = sum(g["pa"] for g in games)
+        own_poss = sum(g["poss"] for g in games)
+        opp_poss = sum(g["opp_poss"] for g in games)
+        if own_poss <= 0 or opp_poss <= 0:
+            return league_ppp, league_ppp, league_pace
+        observed = len(games) / 3.0
+        off = pf / own_poss
+        defense = pa / opp_poss
+        pace = sum(g["pace"] for g in games) / len(games)
+        return (
+            observed * off + (1.0 - observed) * league_ppp,
+            observed * defense + (1.0 - observed) * league_ppp,
+            observed * pace + (1.0 - observed) * league_pace,
+        )
     league_games = []
     by_date = defaultdict(list)
     for row in rows:
@@ -49,12 +74,11 @@ def make_examples(rows):
 
         day_games = by_date[day]
         for gid, home, away, hs, vs, hp, ap in day_games:
-            h = _team_rates(histories[home], lppp, lpace)
-            a = _team_rates(histories[away], lppp, lpace)
-            if h is None or a is None:
-                continue
-            hr = _rest_days(histories[home], day)
-            ar = _rest_days(histories[away], day)
+            h = team_rates_with_cold_start(histories[home], lppp, lpace)
+            a = team_rates_with_cold_start(histories[away], lppp, lpace)
+            # Neutral rest prior for teams with no prior game in the season.
+            hr = _rest_days(histories[home], day) if histories[home] else 2.0
+            ar = _rest_days(histories[away], day) if histories[away] else 2.0
             x = _xfeatures(h, a, lppp, lpace, hr, ar)
             hoff, hdef, hpace = h
             aoff, adef, apace = a
