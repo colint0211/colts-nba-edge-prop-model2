@@ -7,6 +7,7 @@ spread magnitude and closing total. Results are associations, not causal claims.
 """
 from __future__ import annotations
 import csv, json, math
+from datetime import date
 from pathlib import Path
 
 ROOT = Path("backtest-output/game_by_game_forensic_audit_v2")
@@ -24,7 +25,10 @@ NUMERIC = [
 ]
 def f(row, key):
     try:
-        x = float(row.get(key, ""))
+        raw = row.get(key, "")
+        if raw in ("", None) and key in ("home_rest_days", "away_rest_days"):
+            raw = row.get("_calc_" + key, "")
+        x = float(raw)
         return x if math.isfinite(x) else None
     except (TypeError, ValueError):
         return None
@@ -47,6 +51,7 @@ def score_parts(r):
 def labels(r):
     margin, total = f(r, "actual_home_margin"), f(r, "actual_total")
     spread = f(r, "home_spread")
+    closing_total = f(r, "closing_total")
     home_score, away_score = score_parts(r)
     if None in (margin,total,spread,home_score,away_score): return {}
     # Negative home spread means home favourite in the source convention.
@@ -57,7 +62,7 @@ def labels(r):
       "favorite_20pt_blowout": fav_margin >= 20,
       "underdog_20pt_blowout": fav_margin <= -20,
       "road_underdog_upset": home_fav and margin < 0,
-      "high_total_bilateral_under100": total >= 225 and home_score < 100 and away_score < 100,
+      "high_total_bilateral_under100": closing_total is not None and closing_total >= 225 and home_score < 100 and away_score < 100,
     }
 
 def match_distance(a,b):
@@ -71,6 +76,25 @@ def main():
         raise FileNotFoundError(f"Required audit not found: {SOURCE}")
     with SOURCE.open(newline="") as fp:
         rows = list(csv.DictReader(fp))
+    # Reconstruct rest days from each team's schedule in this audit file.
+    # Upstream rest fields were null, so calculate rather than report no data.
+    last_game = {}
+    for r in sorted(rows, key=lambda x: (x.get("season", ""), x.get("date", ""))):
+        season = r.get("season", "")
+        try:
+            game_day = date.fromisoformat(str(r.get("date", ""))[:10])
+        except ValueError:
+            r["_calc_home_rest_days"] = ""
+            r["_calc_away_rest_days"] = ""
+            continue
+        for side in ("home", "away"):
+            team = r.get(side, "")
+            previous = last_game.get((season, team))
+            r["_calc_" + side + "_rest_days"] = max(0, (game_day - previous).days - 1) if previous else ""
+        for side in ("home", "away"):
+            team = r.get(side, "")
+            if team:
+                last_game[(season, team)] = game_day
     for r in rows:
         r["_labels"] = labels(r)
         r["_season"] = r.get("season","")
