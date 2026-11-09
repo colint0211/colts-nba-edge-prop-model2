@@ -62,7 +62,7 @@ def main():
         spread=float(q["close_spread_home"])
         pred=sum(a*b for a,b in zip(r["features"],beta))
         edge=pred+spread
-        outcome=margin+spread
+        outcome=float(r["actual_margin"])+spread
         pick="home" if edge>=EDGE_THRESHOLD else ("away" if edge<=-EDGE_THRESHOLD else "pass")
         result="push" if abs(outcome)<1e-9 else ("win" if (pick=="home" and outcome>0) or (pick=="away" and outcome<0) else "loss") if pick!="pass" else "pass"
         matched.append({"date":date,"home":q["home_team"],"away":q["away_team"],
