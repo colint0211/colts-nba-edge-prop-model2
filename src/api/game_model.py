@@ -739,3 +739,20 @@ def history(slate_date):
       "model_probability_pct":round(r[6]*100,2),"market_probability_pct":round(r[7]*100,2) if r[7] is not None else None,
       "projected_home":r[8],"projected_away":r[9],"projected_margin":r[10],"projected_total":r[11],
       "actual_value":r[12],"outcome":r[13],"profit_units":r[14],"created_at":r[15].isoformat() if r[15] else None} for r in rows]
+
+
+def _normalise_team_name(value):
+    return "".join(ch.lower() for ch in str(value or "") if ch.isalnum())
+
+
+def api_sports_team_probe(team_name="Phoenix Suns"):
+    key=os.getenv("API_SPORTS_KEY","").strip()
+    if not key: raise RuntimeError("API_SPORTS_KEY missing")
+    headers={"x-apisports-key":key,"Accept":"application/json"}
+    teams,_=_json("https://v1.basketball.api-sports.io/teams?"+urlencode({"league":"12","season":"2026-2027"}),headers,5)
+    rows=teams.get("response") or []
+    target=_normalise_team_name(team_name)
+    team=next((x for x in rows if _normalise_team_name(x.get("name"))==target),None)
+    if not team: return {"team_count":len(rows),"sample":rows[:3],"found":False}
+    stats,_=_json("https://v1.basketball.api-sports.io/statistics?"+urlencode({"league":"12","season":"2026-2027","team":team.get("id")}),headers,5)
+    return {"team":team,"results":stats.get("results"),"response":stats.get("response")}
