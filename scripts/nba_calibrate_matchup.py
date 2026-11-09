@@ -1,4 +1,4 @@
-"""Train a market-anchored calibration on 2024-25, evaluate untouched 2025-26."""
+"""Train on 2024-25 and evaluate 2025-26; close-snapshot picks are diagnostic only, not executable bets."""
 from __future__ import annotations
 import json, math, sys
 from collections import defaultdict
@@ -131,11 +131,11 @@ def main():
                    "total":{"raw_model":rmse(test,lambda r:r["raw_total"],"actual_total"),
                             "closing_market":rmse(test,lambda r:r["close_total"],"actual_total"),
                             "calibrated":rmse(cal,lambda r:r["cal_total"],"actual_total")}},
-      "test_record":{"sides":summarize([p for p in picks if p["market"]=="sides"]),
+      "hypothetical_close_snapshot_selection_diagnostic_not_bettable":{"sides":summarize([p for p in picks if p["market"]=="sides"]),
                      "totals":summarize([p for p in picks if p["market"]=="totals"]),
                      "combined":summarize(picks)},
       "test_games":len(test),"test_picks":len(picks),
-      "interpretation":"Only 2024-25 fits coefficients. 2025-26 is untouched out-of-sample. This tests calibration, not a guarantee of profitable seasons."
+      "interpretation":"Only 2024-25 fits coefficients; 2025-26 is untouched out-of-sample. The displayed selection record uses closing lines and assumed -110 prices, so it is NOT an executable betting backtest, does NOT measure CLV, and must not be presented as realized or achievable ROI. See market_validation_report.json for market-only versus market-plus-fundamental Brier/log-loss comparison."
     }
     OUT.mkdir(exist_ok=True)
     (OUT/"calibration_report.json").write_text(json.dumps(report,indent=2))
