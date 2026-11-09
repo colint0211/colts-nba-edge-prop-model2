@@ -4,8 +4,17 @@ from src.api.clv import signed_line_clv, summarize_clv
 
 
 class ClosingLineValueTests(unittest.TestCase):
-    def test_spread_line_move_toward_bet_is_positive(self):
+    def test_favorite_spread_move_toward_bettor_is_positive(self):
         self.assertEqual(signed_line_clv("sides", "BOS", -3.5, -2.5), 1.0)
+
+    def test_favorite_spread_move_away_from_bettor_is_negative(self):
+        self.assertEqual(signed_line_clv("sides", "BOS", -3.5, -4.5), -1.0)
+
+    def test_underdog_spread_move_toward_bettor_is_positive(self):
+        self.assertEqual(signed_line_clv("sides", "CHI", 3.5, 4.5), 1.0)
+
+    def test_underdog_spread_move_away_from_bettor_is_negative(self):
+        self.assertEqual(signed_line_clv("sides", "CHI", 3.5, 2.5), -1.0)
 
     def test_over_benefits_from_higher_total(self):
         self.assertEqual(signed_line_clv("totals", "OVER", 220.5, 222.0), 1.5)
