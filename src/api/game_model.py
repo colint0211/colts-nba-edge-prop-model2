@@ -560,6 +560,15 @@ def _score_game(game,ratings,schedule,injuries,season):
         model["projected_away"]=round(model["projected_away"]-margin_delta/2.0,2)
         model["projected_margin"]=round(model["projected_home"]-model["projected_away"],2)
         model["projected_total"]=round(model["projected_home"]+model["projected_away"],2)
+        dist=model["score_distribution"]
+        z80=1.281551565545
+        score_sd=float(dist["home_score_sd"])
+        margin_sd=float(dist["margin_sd"])
+        total_sd=float(dist["total_sd"])
+        dist["home_score_80"]=[round(model["projected_home"]-z80*score_sd,1),round(model["projected_home"]+z80*score_sd,1)]
+        dist["away_score_80"]=[round(model["projected_away"]-z80*score_sd,1),round(model["projected_away"]+z80*score_sd,1)]
+        dist["margin_80"]=[round(model["projected_margin"]-z80*margin_sd,1),round(model["projected_margin"]+z80*margin_sd,1)]
+        dist["total_80"]=[round(model["projected_total"]-z80*total_sd,1),round(model["projected_total"]+z80*total_sd,1)]
         model["epm_margin"]=round(epm_margin,2)
     model["epm_used"]=epm_used
     model["injury_uncertainty"]=bool(home_adj.get("unpriced_injury") or away_adj.get("unpriced_injury"))
