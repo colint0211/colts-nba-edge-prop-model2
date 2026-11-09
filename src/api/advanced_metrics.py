@@ -136,7 +136,7 @@ def _tank01_team_rows():
 
 def _bdl_team_season_advanced(season):
     payload, headers = _bdl_get("/nba/v1/team_season_averages/general", [
-        ("season",season),("season_type","regular"),("type","advanced")
+        ("season",season),("season_type","regular"),("type","advanced"),("per_page",100)
     ])
     rows = payload.get("data")
     if not isinstance(rows,list) or not rows:
@@ -153,13 +153,24 @@ def _bdl_player_season_advanced(season):
     return [("player_season_advanced",row) for row in rows]
 
 def _bdl_daily_advanced(snapshot_date):
-    payload, headers = _bdl_get("/nba/v2/stats/advanced", [
-        ("dates[]",snapshot_date.isoformat()),("period",0),("per_page",100)
-    ])
-    rows = payload.get("data")
-    if not isinstance(rows,list):
-        raise RuntimeError("BALLDONTLIE daily advanced stats response was invalid.")
-    return [("game_advanced",row) for row in rows]
+    day = snapshot_date.isoformat()
+    rows = []
+    cursor = None
+    # Three 100-row pages cover most slates while respecting trial rate limits.
+    for page in range(3):
+        params = [("dates[]",day),("period",0),("per_page",100)]
+        if cursor is not None:
+            params.append(("cursor",str(cursor)))
+        payload, headers = _bdl_get("/nba/v2/stats/advanced", params)
+        page_rows = payload.get("data")
+        if not isinstance(page_rows,list):
+            raise RuntimeError("BALLDONTLIE daily advanced stats response was invalid.")
+        rows.extend(("game_advanced",row) for row in page_rows)
+        cursor = (payload.get("meta") or {}).get("next_cursor")
+        if not cursor or len(page_rows) < 100:
+            break
+    return rows
+
 
 def _bdl_projected_lineups(snapshot_date):
     payload, headers = _bdl_get("/nba/v1/projected_lineups", [
@@ -201,7 +212,7 @@ def _entity(metric, row, team_code=None):
         game = row.get("game") or {}
         player = row.get("player") or {}
         return str(game.get("id","")) + ":" + str(player.get("id","")) + ":" + str(row.get("period",0))
-    if metric == "projected_lineup":
+    if metric == "projected_lineups":
         return str(row.get("game_id","")) + ":" + str(row.get("team_id",""))
     if metric == "injury_status":
         return ":".join(str(x) for x in (row.get("player"),row.get("team"),row.get("game_date")) if x)
@@ -284,7 +295,6 @@ def collect(batch=None):
         ("schedule_context", schedule_rows, None, "App schedule"),
         ("injury_status", injury_rows, None, "Official NBA injury report"),
         ("team_season_advanced", lambda: _bdl_team_season_advanced(season.split("-")[0]), None, "BALLDONTLIE GOAT"),
-        ("player_season_advanced", lambda: _bdl_player_season_advanced(season.split("-")[0]), None, "BALLDONTLIE GOAT"),
         ("game_advanced", lambda: _bdl_daily_advanced(snapshot_date), None, "BALLDONTLIE GOAT"),
         ("projected_lineups", lambda: _bdl_projected_lineups(snapshot_date), None, "BALLDONTLIE GOAT"),
     ]
