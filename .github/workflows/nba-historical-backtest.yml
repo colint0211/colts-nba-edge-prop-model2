@@ -1,0 +1,39 @@
+name: NBA historical matchup backtest
+on:
+  push:
+    branches:
+      - sides-totals-rebuild
+    paths:
+      - ".github/workflows/nba-historical-backtest.yml"
+      - "scripts/nba_historical_matchup_backtest.py"
+  workflow_dispatch:
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Download public historical datasets and inspect schemas
+        run: |
+          python - <<'PY'
+          import csv, io, urllib.request
+          urls = {
+            "team_2023_24": "https://boxscorelab.com/downloads/2023-24-team-game-results.csv",
+            "team_2024_25": "https://boxscorelab.com/downloads/2024-25-team-game-results.csv",
+            "team_2025_26": "https://boxscorelab.com/downloads/2025-26-team-game-results.csv",
+            "lines_2024_25": "https://huggingface.co/datasets/minmaxxxer/nba-closing-lines-ats-2024-25/resolve/main/nba_2024_25_closing_lines_ats.csv",
+            "lines_2025_26": "https://huggingface.co/datasets/minmaxxxer/nba-closing-lines-ats-2025-26/resolve/main/nba_2025_26_closing_lines_ats.csv",
+          }
+          for name, url in urls.items():
+              req=urllib.request.Request(url, headers={"User-Agent":"ColtsNBAHistoricalResearch/1.0"})
+              with urllib.request.urlopen(req, timeout=60) as r:
+                  data=r.read().decode("utf-8-sig")
+              rows=csv.DictReader(io.StringIO(data))
+              sample=next(rows, None)
+              print("\nDATASET", name, "URL", url)
+              print("COLUMNS", list(rows.fieldnames or []))
+              print("SAMPLE", sample)
+          PY
