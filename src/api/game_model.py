@@ -601,11 +601,12 @@ def _candidate(game,market,model):
             team_mean=margin_mean if team==game["home"] else -margin_mean
             # Cover event is team margin + quoted handicap > 0.
             cover_mean=team_mean+float(line)
-            win=1.0-_logistic_cdf(0.0,cover_mean,logistic_scale)
             push=0.0
             if abs(float(line)-round(float(line)))<1e-9:
+                win=1.0-_logistic_cdf(0.5,cover_mean,logistic_scale)
                 push=_logistic_cdf(0.5,cover_mean,logistic_scale)-_logistic_cdf(-0.5,cover_mean,logistic_scale)
-                win=max(0.0,win-push/2.0)
+            else:
+                win=1.0-_logistic_cdf(0.0,cover_mean,logistic_scale)
             market_raw=[_american_probability(game["spreads"][t]["odds"]) for t in (game["home"],game["away"])]
             selected_raw=_american_probability(odds)
             no_vig=selected_raw/sum(market_raw) if selected_raw and sum(market_raw)>0 else None
