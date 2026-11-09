@@ -557,9 +557,12 @@ def _score_game(game,ratings,schedule,injuries,season):
     # Walk-forward residual SD: margin 14.81, total 19.06 across 2,455 games.
     # Logistic margin scale is chosen to match the empirical margin variance.
     margin_sd=14.81
-    total_sd=19.07
+    total_sd=19.06
     logistic_scale=margin_sd*math.sqrt(3.0)/math.pi
-    score_sd=math.sqrt((margin_sd**2+total_sd**2)/4.0)
+    score_variance=(margin_sd**2+total_sd**2)/4.0
+    score_sd=math.sqrt(score_variance)
+    score_covariance=(total_sd**2-margin_sd**2)/4.0
+    score_correlation=score_covariance/score_variance if score_variance>0 else 0.0
     z80=1.281551565545
     margin=home_points-away_points
     total=home_points+away_points
@@ -573,6 +576,7 @@ def _score_game(game,ratings,schedule,injuries,season):
       "score_distribution":{
         "family":"joint normal score approximation; moneyline/spread margin probability uses equivalent logistic link",
         "home_score_sd":round(score_sd,2),"away_score_sd":round(score_sd,2),
+        "home_away_score_covariance":round(score_covariance,3),"home_away_score_correlation":round(score_correlation,4),
         "margin_sd":margin_sd,"total_sd":total_sd,"moneyline_logistic_scale":round(logistic_scale,3),
         "home_score_80":[round(home_points-z80*score_sd,1),round(home_points+z80*score_sd,1)],
         "away_score_80":[round(away_points-z80*score_sd,1),round(away_points+z80*score_sd,1)],
@@ -921,6 +925,13 @@ def build_forecasts(forecast_date=None,force=False):
         raise ValueError("forecast_date must be YYYY-MM-DD")
     ratings=_team_ratings(force,target_date)
     schedule=_schedule(force)
+    try:
+        from . import index as app_index
+        injury_feed=app_index._load_official_injury_feed()
+        injury_meta=injury_feed.get("meta") or {}
+        injuries=(injury_feed.get("records") or []) if injury_meta.get("status")=="fresh" else []
+    except Exception:
+        injuries=[]; injury_meta={"status":"unavailable"}
     forecasts=[]
     for item in schedule:
         if item.get("completed") or not item.get("home") or not item.get("away"):
@@ -936,11 +947,11 @@ def build_forecasts(forecast_date=None,force=False):
               "commence_time":item.get("date"),
               "home":item["home"],"away":item["away"],
               "matchup":_TEAM_NAMES.get(item["away"],item["away"])+" @ "+_TEAM_NAMES.get(item["home"],item["home"])}
-        model=_score_game(game,ratings,schedule,[],ratings.get("season"))
+        model=_score_game(game,ratings,schedule,injuries,ratings.get("season"))
         if not model:
             continue
         dist=model.get("score_distribution") or {}
-        scale=float(dist.get("moneyline_logistic_scale") or 8.07)
+        scale=float(dist.get("moneyline_logistic_scale") or 8.17)
         home_probability=1.0/(1.0+math.exp(-max(-35.0,min(35.0,float(model["projected_margin"])/scale))))
         forecasts.append({
           "event_id":game["event_id"],"commence_time":game["commence_time"],"matchup":game["matchup"],
@@ -951,13 +962,14 @@ def build_forecasts(forecast_date=None,force=False):
           "score_distribution":dist,"home_adjustments":model.get("home_adjustments"),
           "away_adjustments":model.get("away_adjustments"),
           "rating_source":model.get("rating_source"),"data_quality":model.get("data_quality"),
-          "injury_status":"not_applied_in_independent_baseline_forecast"
+          "injury_status":"fresh_official_report_applied" if injury_meta.get("status")=="fresh" else "not_applied_report_"+str(injury_meta.get("status","unavailable")),
+          "injury_report_snapshot":injury_meta.get("snapshot_date")
         })
     forecasts.sort(key=lambda x:x.get("commence_time") or "")
     return {"forecast_date":target_date,"game_count":len(forecasts),"forecasts":forecasts,
       "source_status":{"team_ratings":ratings.get("source"),"data_quality":ratings.get("data_quality"),
         "schedule":"ESPN scoreboard","sportsbook_odds_used":False,
-        "injury_adjustments":"not applied; this endpoint is the independent baseline forecast"},
+        "injury_adjustments":"fresh official report applied" if injury_meta.get("status")=="fresh" else "not applied; report "+str(injury_meta.get("status","unavailable"))},
       "model_policy":"Independent linear team-efficiency and situational score mapping with logistic-link moneyline probabilities and provisional score uncertainty. Sportsbook lines are not inputs."}
 
 
