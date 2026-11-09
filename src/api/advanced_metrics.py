@@ -353,5 +353,5 @@ def status():
                         "finished_at":r[6].isoformat() if r[6] else None,
                         "summary":r[7]} for r in runs],
         "rotation":"Daily team ratings, schedule and injury snapshots; game-level player advanced stats are paginated, and projected lineups are stored when the API tier permits.",
-        "optional_player_impact":"BALLDONTLIE season/game advanced stats and projected lineups require GOAT tier; Dunks & Threes EPM requires DUNKS_AND_THREES_API_KEY.",
+        "optional_player_impact":"BALLDONTLIE season/game advanced stats and projected lineups require GOAT tier. True on/off is not available from the verified feeds; Dunks & Threes EPM must not be used in a betting model without written provider authorization.",
     }
