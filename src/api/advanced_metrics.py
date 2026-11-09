@@ -153,7 +153,7 @@ def collect(batch=None):
     """Collect league-wide advanced tables and one rotating five-team detail batch."""
     initialize()
     season = _season()
-    snapshot_date = datetime.now(_ET).date()
+    snapshot_date = datetime.now(timezone.utc).date()
     if batch is None:
         batch = (datetime.now(timezone.utc).hour // 4) % 6
     batch = int(batch)
