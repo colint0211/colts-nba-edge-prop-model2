@@ -680,3 +680,19 @@ def team_stats_probe():
     return {"source":ratings.get("source"),"season":ratings.get("season"),
       "prior_season":ratings.get("prior_season"),"team_count":len(ratings.get("teams") or {}),
       "sample":{k:ratings["teams"].get(k) for k in ("BOS","DEN","LAL","NYK")}}
+
+
+def tank01_team_probe():
+    from . import index as app_index
+    payload,headers=app_index._tank01_request("/getNBATeams",{"teamStats":"true"},timeout=18)
+    body=payload.get("body")
+    teams=body if isinstance(body,list) else ([v for v in body.values() if isinstance(v,dict)] if isinstance(body,dict) else [])
+    sample=next((t for t in teams if isinstance(t,dict) and t.get("offensiveStats")),None)
+    if not sample: raise RuntimeError("Tank01 team response did not include offensiveStats.")
+    return {"team_count":len(teams),"team":sample.get("teamAbv"),
+      "team_keys":list(sample.keys()),
+      "offensive_stats_keys":list((sample.get("offensiveStats") or {}).keys()),
+      "offensive_stats_sample":sample.get("offensiveStats"),
+      "defensive_stats_keys":list((sample.get("defensiveStats") or {}).keys()),
+      "defensive_stats_sample":sample.get("defensiveStats"),
+      "rate_limit_remaining":headers.get("x-ratelimit-requests-remaining")}
