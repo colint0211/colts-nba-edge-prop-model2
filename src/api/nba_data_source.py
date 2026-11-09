@@ -256,7 +256,7 @@ def _calculate_impacts(connection, parquet_path):
         })
 
     with _db() as conn:
-        conn.executemany("""
+        conn.cursor().executemany("""
           INSERT INTO nba_player_lineup_impacts
           (snapshot_date,season_end_year,team,player_id,player_name,on_net_rating,off_net_rating,
            raw_on_off,shrunk_on_off,on_possessions,off_possessions,games,reliability,eligible_for_model,source)
