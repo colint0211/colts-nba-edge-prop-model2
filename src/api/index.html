@@ -38,6 +38,13 @@ details{margin-top:10px;color:var(--muted);font-size:12px}summary{cursor:pointer
 table{width:100%;border-collapse:collapse;min-width:800px;font-size:12px}th,td{padding:10px;text-align:left;border-bottom:1px solid #243850;white-space:nowrap}th{color:var(--muted);background:#0b1727}tr:last-child td{border-bottom:0}
 .win{color:var(--green);font-weight:900}.loss{color:var(--red);font-weight:900}.push{color:var(--gold);font-weight:900}
 .source{font-size:11px;color:var(--muted);margin-top:20px;line-height:1.6}
+.forecast-card{border:1px solid #2a405b;background:linear-gradient(145deg,#152941,#0d1b2d);border-radius:14px;padding:14px;min-width:0}
+.forecast-head{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;font-weight:900}
+.forecast-score{font-size:24px;font-weight:950;margin:10px 0}
+.forecast-probs{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.forecast-prob{padding:9px;border:1px solid #2b425e;border-radius:10px;background:#102238}
+.forecast-prob b{display:block;font-size:18px}
+.forecast-ranges{font-size:11px;color:var(--muted);line-height:1.7;margin-top:10px}
 @media(max-width:760px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.cards{grid-template-columns:1fr}.num{font-size:22px}}
 </style>
 </head>
@@ -68,6 +75,10 @@ table{width:100%;border-collapse:collapse;min-width:800px;font-size:12px}th,td{p
   <button id="tab-totals" onclick="setMarket('totals')">Game totals</button>
  </div>
  <div id="board" class="cards"><div class="empty">Loading team ratings and DraftKings lines…</div></div>
+
+ <div class="section">Matchup score distributions</div>
+ <div class="hint">Every scheduled matchup, independent of sportsbook lines. Win probabilities and 80% score ranges come from team ratings and situational inputs; injury adjustments are clearly flagged when not applied.</div>
+ <div id="forecasts" class="cards"><div class="empty">Loading independent matchup forecasts…</div></div>
 
  <div class="section">Daily model results</div>
  <div class="hint">The model record below belongs only to this sides-and-totals model. Units are hypothetical at 1u per pick. The former player-prop ledger is preserved separately and is not included.</div>
@@ -131,6 +142,31 @@ function renderBoard(){
  const list=market==='sides'?(boardData.sides||[]):(boardData.totals||[]);
  el('board').innerHTML=list.length?list.map(card).join(''):'<div class="empty">No '+(market==='sides'?'spread':'total')+' bets currently clear the model’s value requirements. No bet is better than forcing a pick.</div>';
 }
+function renderForecasts(data){
+ const list=data?.forecasts||[];
+ if(!list.length){el('forecasts').innerHTML='<div class="empty">No verified schedule forecasts are available for this slate date.</div>';return}
+ el('forecasts').innerHTML=list.map(g=>{
+  const d=g.score_distribution||{},hr=d.home_score_80||[],ar=d.away_score_80||[],tr=d.total_80||[],mr=d.margin_80||[];
+  const homeName=g.home_team||'Home',awayName=g.away_team||'Away';
+  const ranges='80% ranges · '+esc(awayName)+' '+fmt(ar[0],0)+'–'+fmt(ar[1],0)+' · '+esc(homeName)+' '+fmt(hr[0],0)+'–'+fmt(hr[1],0)+'<br>Total '+fmt(tr[0],0)+'–'+fmt(tr[1],0)+' · Home margin '+fmt(mr[0],0)+'–'+fmt(mr[1],0);
+  return '<article class="forecast-card"><div class="forecast-head"><span>'+esc(g.matchup)+'</span><span class="muted">'+esc(g.data_quality||'team model')+'</span></div>'+
+   '<div class="forecast-score">'+fmt(g.projected_away,1)+' – '+fmt(g.projected_home,1)+' <span class="muted" style="font-size:11px">projected score</span></div>'+
+   '<div class="forecast-probs"><div class="forecast-prob"><span class="muted">'+esc(homeName)+' win</span><b class="positive">'+fmt(g.home_win_probability*100,1)+'%</b></div>'+
+   '<div class="forecast-prob"><span class="muted">'+esc(awayName)+' win</span><b>'+fmt(g.away_win_probability*100,1)+'%</b></div></div>'+
+   '<div class="forecast-ranges">'+ranges+'<br>Projected total: '+fmt(g.projected_total,1)+' · Projected margin: '+signed(g.projected_margin)+
+   '<br>Situational factors · home rest '+fmt(g.home_adjustments?.rest_days,0)+'d / travel '+fmt(g.home_adjustments?.travel_miles,0)+'mi · away rest '+fmt(g.away_adjustments?.rest_days,0)+'d / travel '+fmt(g.away_adjustments?.travel_miles,0)+'mi'+
+   '<br>Injuries: '+esc(g.injury_status||'not reviewed')+' · Source: '+esc(g.rating_source||'not reported')+'</div></article>';
+ }).join('');
+}
+async function loadForecasts(day){
+ if(!day)return;
+ el('forecasts').innerHTML='<div class="empty">Calculating independent score distributions…</div>';
+ try{
+  const r=await fetch('/api/game-forecasts?forecast_date='+encodeURIComponent(day)+'&t='+Date.now(),{cache:'no-store'});
+  const d=await r.json();if(!r.ok)throw Error(d.detail||'Forecasts unavailable');
+  renderForecasts(d);
+ }catch(e){el('forecasts').innerHTML='<div class="empty">Independent forecasts unavailable: '+esc(e.message||e)+'</div>'}
+}
 function renderSources(s){
  if(!s){el('sources').textContent='Source diagnostics unavailable.';return}
  const lines=[
@@ -166,6 +202,7 @@ async function loadBoard(refresh=false){
   el('slateDate').textContent='Slate: '+d.slate_date;
   el('historyDate').value=d.slate_date;
   renderMetrics(d.metrics);renderBoard();renderSources(d.source_status);
+  loadForecasts(d.slate_date);
   if(d.settlement?.settled)el('updated').textContent+=' · '+d.settlement.settled+' results settled';
   await loadHistory();
  }catch(e){
