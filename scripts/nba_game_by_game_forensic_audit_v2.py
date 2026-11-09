@@ -43,17 +43,18 @@ def factor_breakdown(h,a,ratings,model):
  home_eff=model["home_expected_offensive_rating"]
  away_eff=model["away_expected_offensive_rating"]
  return {
-  "home_offense_points_margin":round(.60*(h["ortg"]-league_ortg)*pace/100,3),
-  "away_defense_points_margin":round(.40*(a["drtg"]-league_drtg)*pace/100,3),
-  "away_offense_points_margin":round(-.60*(a["ortg"]-league_ortg)*pace/100,3),
-  "home_defense_points_margin":round(-.40*(h["drtg"]-league_drtg)*pace/100,3),
+  "home_offense_points_margin":round(.60*(h["ortg"]-league_ortg)*league_pace/100,3),
+  "away_defense_points_margin":round(.40*(a["drtg"]-league_drtg)*league_pace/100,3),
+  "away_offense_points_margin":round(-.60*(a["ortg"]-league_ortg)*league_pace/100,3),
+  "home_defense_points_margin":round(-.40*(h["drtg"]-league_drtg)*league_pace/100,3),
   "home_court_points_margin":2.0,
   "pace_points_margin":round((pace-league_pace)*(home_eff-away_eff)/100,3),
-  "home_offense_points_total":round(.60*(h["ortg"]-league_ortg)*pace/100,3),
-  "away_defense_points_total":round(.40*(a["drtg"]-league_drtg)*pace/100,3),
-  "away_offense_points_total":round(.60*(a["ortg"]-league_ortg)*pace/100,3),
-  "home_defense_points_total":round(.40*(h["drtg"]-league_drtg)*pace/100,3),
+  "home_offense_points_total":round(.60*(h["ortg"]-league_ortg)*league_pace/100,3),
+  "away_defense_points_total":round(.40*(a["drtg"]-league_drtg)*league_pace/100,3),
+  "away_offense_points_total":round(.60*(a["ortg"]-league_ortg)*league_pace/100,3),
+  "home_defense_points_total":round(.40*(h["drtg"]-league_drtg)*league_pace/100,3),
   "home_court_points_total":2.0,
+  "league_baseline_points_total":round(2*league_ortg*league_pace/100,3),
   "pace_points_total":round((pace-league_pace)*(home_eff+away_eff)/100,3),
   "league_off_rating":round(league_ortg,3),"league_def_rating":round(league_drtg,3),
   "league_pace":round(league_pace,3),"projected_pace":pace
@@ -157,18 +158,16 @@ def main():
     ranked=sorted([c for s in slate for c in json.loads(s["candidate_details_json"]) if c["market"]==market and c["qualifies"]],
       key=lambda x:(x["ev_assumed_minus110_pct"],x["edge_pp"]),reverse=True)
     for rank,c in enumerate(ranked[:5],1):
-     c["daily_top5_rank"]=rank;c["result"]=c["actual_result"];all_selected.append(c)
+     c["daily_top5_rank"]=rank;c["result"]=c["actual_result"];c["season"]=season;all_selected.append(c)
      if market=="SIDE": pass
    all_rows.extend(slate)
    # Add same-day results from source after forecasts.
    for tgames in box.get(day,[]):history[tgames["team"]].append(tgames)
   # all qualified vs actual top5
-  season_top_sides=[x for x in all_selected if x["date"] in bydate and x.get("market")=="SIDE" and x["date"][:4]==season[:4]]
-  season_top_totals=[x for x in all_selected if x["date"] in bydate and x.get("market")=="TOTAL" and x["date"][:4]==season[:4]]
   season_reports.append({"season":season,"source_team_game_rows":nbox,"matched_games_scored":scored,"skipped_games_no_prior_ratings":skipped,
    "qualified_all_games_sides":summarize(side_picks),"qualified_all_games_totals":summarize(total_picks),
-   "top5_daily_sides":summarize([x for x in all_selected if x["market"]=="SIDE" and x["date"][:4]==season[:4]]),
-   "top5_daily_totals":summarize([x for x in all_selected if x["market"]=="TOTAL" and x["date"][:4]==season[:4]])})
+   "top5_daily_sides":summarize([x for x in all_selected if x["market"]=="SIDE" and x.get("season")==season]),
+   "top5_daily_totals":summarize([x for x in all_selected if x["market"]=="TOTAL" and x.get("season")==season])})
  fields=list(all_rows[0])
  with (OUT/"every_game.csv").open("w",newline="") as f:
   w=csv.DictWriter(f,fieldnames=fields);w.writeheader();w.writerows(all_rows)
