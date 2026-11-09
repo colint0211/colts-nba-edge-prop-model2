@@ -1,15 +1,7 @@
 {
   "crons": [
     {
-      "path": "/api/cron/settle-pending",
-      "schedule": "0 14 * * *"
-    },
-    {
-      "path": "/api/cron/freeze-daily",
-      "schedule": "0 11 * * *"
-    },
-    {
-      "path": "/api/cron/freeze-daily",
+      "path": "/api/game-board",
       "schedule": "0 12 * * *"
     }
   ],
