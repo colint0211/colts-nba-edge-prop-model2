@@ -135,7 +135,7 @@ def main():
      c["actual_home_margin"]=g["home_score"]-g["away_score"];c["actual_total"]=g["home_score"]+g["away_score"]
      c["close_spread_home"]=g["close_spread_home"];c["close_total"]=g["close_total"]
      c["factors"]=factors
-    slate.append({"date":day,"matchup":g["away"]+" @ "+g["home"],"home":g["home"],"away":g["away"],
+    slate.append({"season":season,"date":day,"matchup":g["away"]+" @ "+g["home"],"home":g["home"],"away":g["away"],
      "projected_home":model["projected_home"],"projected_away":model["projected_away"],
      "projected_margin":model["projected_margin"],"projected_total":model["projected_total"],
      "actual_home_margin":g["home_score"]-g["away_score"],"actual_total":g["home_score"]+g["away_score"],
