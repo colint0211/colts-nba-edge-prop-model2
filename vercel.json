@@ -13,5 +13,10 @@
     "deploymentEnabled": {
       "injury-feed": false
     }
+  },
+  "functions": {
+    "src/api/index.py": {
+      "maxDuration": 60
+    }
   }
 }
