@@ -535,7 +535,9 @@ def _score_game(game,ratings,schedule,injuries,season):
     if epm_used:
         epm_margin=(h["team_epm"]-a["team_epm"])*pace/100.0+2.0
         baseline_margin=home_points-away_points
-        blended_margin=0.55*baseline_margin+0.45*epm_margin
+        # Use next-game lineup-adjusted EPM as the spread-strength anchor.
+        # Do not invent a blend weight before a walk-forward fit exists.
+        blended_margin=epm_margin
         margin_delta=blended_margin-baseline_margin
         home_points+=margin_delta/2.0
         away_points-=margin_delta/2.0
@@ -588,12 +590,12 @@ def _candidate(game,market,model):
           "projected_margin":model["projected_margin"],"projected_total":model["projected_total"],
           "projected_pace":model["projected_pace"],"home_adjustments":model["home_adjustments"],
           "away_adjustments":model["away_adjustments"],"rating_source":model.get("rating_source","NBA Stats"),
-          "data_quality":model.get("data_quality","advanced"),"epm_used":model.get("epm_used",False),
+          "data_quality":model.get("data_quality","advanced"),"base_data_quality":model.get("base_data_quality",model.get("data_quality","advanced")),"epm_used":model.get("epm_used",False),
           "model_version":"sides-totals-hybrid-v2","sportsbook":"DraftKings"})
     return candidates
 
 def _qualified(row):
-    derived=row.get("data_quality")=="derived_early_season"
+    derived=(row.get("data_quality")=="derived_early_season" or row.get("base_data_quality")=="derived_early_season")
     edge_floor=4.0 if derived else 2.5
     ev_floor=2.0 if derived else 1.5
     # Prevent uncalibrated early-season ratings from treating extreme
