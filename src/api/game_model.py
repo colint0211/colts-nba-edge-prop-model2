@@ -625,7 +625,7 @@ def build_board(force=False,preview_date=None):
               "model_policy":"No upcoming games remain on the requested preview date. No picks were forced."}
         side_picks,side_saved=_save_slate([],"sides",slate_date)
         total_picks,total_saved=_save_slate([],"totals",slate_date)
-        return {"slate_date":slate_date,"frozen":True,"sides":side_picks,"totals":side_picks,
+        return {"slate_date":slate_date,"frozen":True,"sides":side_picks,"totals":total_picks,
           "metrics":_metrics(),"settlement":settlement,"game_count":0,
           "source_status":{"odds":"PropLine DraftKings ("+odds_source+")","team_ratings":"not needed; no remaining games on this slate date",
             "injuries":"not needed","prop_line_quota":quota,"saved_sides":side_saved,"saved_totals":total_saved},
