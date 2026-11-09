@@ -202,10 +202,12 @@ def collect(batch=None):
         feed = app_index._load_official_injury_feed()
         records = feed.get("records") or []
         meta = feed.get("meta") or {}
+        if meta.get("status") != "fresh":
+            raise RuntimeError("Official injury report is not fresh; refusing to snapshot stale or unavailable statuses.")
         if not records:
-            return [("feed_status", {"source_status":meta.get("status","unavailable"),
+            return [("feed_status", {"source_status":"fresh_no_listed_injuries",
                                      "source":meta.get("source","official injury report"),
-                                     "record_count":0,"error":meta.get("error")})]
+                                     "record_count":0})]
         return [("injury", row) for row in records]
 
     tasks = [
