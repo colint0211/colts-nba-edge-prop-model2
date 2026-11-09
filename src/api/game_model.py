@@ -609,8 +609,11 @@ def build_board(force=False):
     for game in games:
         try:
             if game.get("commence_time"):
+                from zoneinfo import ZoneInfo
                 start=datetime.fromisoformat(game["commence_time"].replace("Z","+00:00"))
-                if start<=now: continue
+                if start<=now or start.astimezone(ZoneInfo(_ET)).date().isoformat()!=slate_date: continue
+            else:
+                continue
             model=_score_game(game,ratings,schedule,injuries,ratings["season"])
             if not model: continue
             for candidate in _candidate(game,"sides",model):
