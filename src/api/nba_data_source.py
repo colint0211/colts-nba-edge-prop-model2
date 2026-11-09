@@ -116,6 +116,7 @@ def inspect_current_season():
                     dict(zip([item[0] for item in cursor.description], row))
                     for row in cursor.fetchall()
                 ]
+                sample = json.loads(json.dumps(sample, default=str))
                 details["tables"][table] = {
                     "file": filename,
                     "download_bytes": size,
