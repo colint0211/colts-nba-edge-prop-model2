@@ -233,7 +233,7 @@ def _team_request(metric, endpoint, team_id, season):
     return _fetch(endpoint, params)
 
 def collect(batch=None):
-    """Collect league-wide advanced tables and one rotating five-team detail batch."""
+    """Collect reliable team, schedule and injury data plus licensed advanced feeds."""
     initialize()
     season = _season()
     snapshot_date = datetime.now(timezone.utc).date()
@@ -354,10 +354,12 @@ def latest_team_ratings(max_age_days=2):
     if len(teams) < 28:
         return None
     min_games = min(row["games"] for row in teams.values())
-    quality = "advanced" if min_games >= 10 else "derived_early_season"
+    # Tank01 possessions are estimated from box-score totals and use a league-mean shrinkage prior.
+    # Never label this feed as official advanced stats.
+    quality = "derived_early_season"
     return {
         "teams":teams, "season":_season(), "prior_season":None,
-        "source":"NBA Stats LeagueDashTeamStats advanced; persisted daily snapshot",
+        "source":"Tank01 current-season box-score averages; estimated possessions, league-mean shrinkage, persisted daily snapshot",
         "data_quality":quality, "fetched_at":datetime.now(timezone.utc).isoformat(),
         "player_impact_source":"Team/player on-off and five-man lineup snapshots are being collected separately; EPM is optional.",
         "epm_available":False,
