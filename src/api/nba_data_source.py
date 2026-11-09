@@ -271,7 +271,7 @@ def _calculate_impacts(connection, parquet_path):
            reliability=EXCLUDED.reliability,eligible_for_model=EXCLUDED.eligible_for_model,
            source=EXCLUDED.source,captured_at=NOW()
         """, player_rows)
-        conn.executemany("""
+        conn.cursor().executemany("""
           INSERT INTO nba_lineup_ratings
           (snapshot_date,season_end_year,team,lineup_key,lineup_players,net_rating,possessions,
            seconds_played,games,eligible_for_model,source)
