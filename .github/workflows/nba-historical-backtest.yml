@@ -17,6 +17,30 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Probe public 2023-24 closing-line archive
+        continue-on-error: true
+        run: |
+          python - <<'PY'
+          import urllib.request, zipfile, io
+          url = "https://www.kaggle.com/api/v1/datasets/download/cviaxmiwnptr/nba-betting-data-october-2007-to-june-2024"
+          try:
+              req = urllib.request.Request(url, headers={"User-Agent":"Mozilla/5.0"})
+              with urllib.request.urlopen(req, timeout=45) as r:
+                  data = r.read()
+                  print("HTTP", r.status, "CONTENT_TYPE", r.headers.get("Content-Type"), "BYTES", len(data))
+              if data[:2] == b"PK":
+                  z = zipfile.ZipFile(io.BytesIO(data))
+                  print("ZIP_FILES", z.namelist()[:30])
+                  for name in z.namelist():
+                      if name.lower().endswith(".csv"):
+                          with z.open(name) as f:
+                              print("CSV", name, "HEADER", f.readline().decode("utf-8-sig","replace").strip())
+                          break
+              else:
+                  print("BODY", data[:500])
+          except Exception as e:
+              print("ARCHIVE_UNAVAILABLE", type(e).__name__, str(e)[:500])
+          PY
       - name: Run leakage-safe walk-forward backtest
         env:
           PYTHONPATH: .
