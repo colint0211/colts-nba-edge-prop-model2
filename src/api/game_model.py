@@ -387,14 +387,14 @@ def _situational(team,game_date,schedule,opponent,current_venue):
     from zoneinfo import ZoneInfo
     try:
         target_dt=datetime.fromisoformat(str(game_date).replace("Z","+00:00"))
-        target=target_dt.date()
+        target=target_dt.astimezone(ZoneInfo(_ET)).date()
     except Exception:
         target_dt=datetime.now(timezone.utc); target=target_dt.date()
     current=_VENUES.get(current_venue)
     prior=[]
     for g in schedule:
         if not g.get("completed") or team not in (g.get("home"),g.get("away")): continue
-        try: d=datetime.fromisoformat(g["date"].replace("Z","+00:00")).date()
+        try: d=datetime.fromisoformat(g["date"].replace("Z","+00:00")).astimezone(ZoneInfo(_ET)).date()
         except Exception: continue
         if d<target: prior.append((d,g))
     prior.sort(key=lambda x:x[0],reverse=True)
