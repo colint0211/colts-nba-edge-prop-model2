@@ -3660,6 +3660,15 @@ def game_player_impact_probe(player: str = "Nikola Jokic"):
         return JSONResponse({"status":"unavailable","error":type(exc).__name__,"detail":str(exc)[:250]},status_code=503)
 
 
+
+@app.get("/api/game-api-sports-player-probe")
+def game_api_sports_player_probe(player: str = "Nikola Jokic"):
+    try:
+        return JSONResponse(game_model.api_sports_player_probe(player))
+    except Exception as exc:
+        return JSONResponse({"status":"unavailable","error":type(exc).__name__,"detail":str(exc)[:250]},status_code=503)
+
+
 @app.api_route("/api/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
 async def api_proxy(path: str, request: FastRequest):
     base = LIVE_UPSTREAM if path == "live-stats" else UPSTREAM
