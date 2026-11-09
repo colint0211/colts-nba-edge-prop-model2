@@ -328,48 +328,82 @@ def latest_team_ratings(max_age_days=2):
     initialize()
     with _db() as conn:
         rows = conn.execute("""
-          SELECT payload FROM nba_metric_snapshots
-          WHERE metric_key='team_advanced'
+          SELECT metric_key,payload FROM nba_metric_snapshots
+          WHERE metric_key IN ('team_advanced','team_season_advanced')
             AND snapshot_date >= (CURRENT_DATE - (%s * INTERVAL '1 day'))::date
-          ORDER BY snapshot_date DESC
+          ORDER BY CASE WHEN metric_key='team_season_advanced' THEN 0 ELSE 1 END,
+                   snapshot_date DESC
         """, (int(max_age_days),)).fetchall()
-    teams = {}
+
     def number(row, key, default=0.0):
         try:
             value = row.get(key)
             return float(value) if value is not None else default
         except (TypeError, ValueError):
             return default
-    for (payload,) in rows:
-        code = str(payload.get("TEAM_ABBREVIATION") or "").upper()
-        if len(code) != 3 or code in teams:
+
+    bdl_teams = {}
+    tank_teams = {}
+    for metric, payload in rows:
+        if metric == "team_season_advanced":
+            team = payload.get("team") or {}
+            stats = payload.get("stats") or {}
+            code = str(team.get("abbreviation") or "").upper()
+            games = int(number(stats,"gp",0))
+            ortg = number(stats,"offensive_rating",number(stats,"off_rating",0))
+            drtg = number(stats,"defensive_rating",number(stats,"def_rating",0))
+            if len(code) == 3 and games > 0 and ortg > 0 and drtg > 0 and code not in bdl_teams:
+                bdl_teams[code] = {
+                    "team":code,"games":games,"ortg":ortg,"drtg":drtg,
+                    "net":number(stats,"net_rating",ortg-drtg),
+                    "pace":number(stats,"pace"),
+                    "efg":number(stats,"effective_field_goal_percentage",number(stats,"efg_pct",0)),
+                    "tov":number(stats,"turnover_ratio",number(stats,"turnover_percentage",0)),
+                    "oreb":number(stats,"offensive_rebound_percentage",0),
+                    "dreb":number(stats,"defensive_rebound_percentage",0),
+                    "ts":number(stats,"true_shooting_percentage",0),
+                    "source":"BALLDONTLIE team season advanced snapshot",
+                    "recent_sample":games,
+                }
             continue
-        games = int(number(payload, "GP", payload.get("games",0)))
-        ortg = number(payload, "OFF_RATING", payload.get("ortg",0))
-        drtg = number(payload, "DEF_RATING", payload.get("drtg",0))
+
+        code = str(payload.get("TEAM_ABBREVIATION") or "").upper()
+        if len(code) != 3 or code in tank_teams:
+            continue
+        games = int(number(payload,"GP",payload.get("games",0)))
+        ortg = number(payload,"OFF_RATING",payload.get("ortg",0))
+        drtg = number(payload,"DEF_RATING",payload.get("drtg",0))
         if games < 1 or ortg <= 0 or drtg <= 0:
             continue
-        teams[code] = {
-            "team":code, "games":games, "ortg":ortg, "drtg":drtg,
-            "net":number(payload, "NET_RATING", payload.get("net",ortg-drtg)),
-            "pace":number(payload, "PACE", payload.get("pace",0)),
-            "efg":number(payload, "EFG_PCT", payload.get("efg",0)),
-            "tov":number(payload, "TM_TOV_PCT", payload.get("tov",0)),
-            "oreb":number(payload, "OREB_PCT", payload.get("oreb",0)),
-            "dreb":number(payload, "DREB_PCT", payload.get("dreb",0)),
-            "ts":number(payload, "TS_PCT", payload.get("ts",0)),
+        tank_teams[code] = {
+            "team":code,"games":games,"ortg":ortg,"drtg":drtg,
+            "net":number(payload,"NET_RATING",payload.get("net",ortg-drtg)),
+            "pace":number(payload,"PACE",payload.get("pace",0)),
+            "efg":number(payload,"EFG_PCT",payload.get("efg",0)),
+            "tov":number(payload,"TM_TOV_PCT",payload.get("tov",0)),
+            "oreb":number(payload,"OREB_PCT",payload.get("oreb",0)),
+            "dreb":number(payload,"DREB_PCT",payload.get("dreb",0)),
+            "ts":number(payload,"TS_PCT",payload.get("ts",0)),
             "source":"Tank01 persisted team efficiency snapshot",
             "recent_sample":0,
         }
+
+    if len(bdl_teams) >= 28:
+        teams = bdl_teams
+        quality = "advanced"
+        source = "BALLDONTLIE team season advanced; persisted daily snapshot"
+    elif len(tank_teams) >= 28:
+        teams = tank_teams
+        quality = "derived_early_season"
+        source = "Tank01 current-season box-score averages; estimated possessions, league-mean shrinkage, persisted daily snapshot"
+    else:
+        return None
     if len(teams) < 28:
         return None
     min_games = min(row["games"] for row in teams.values())
-    # Tank01 possessions are estimated from box-score totals and use a league-mean shrinkage prior.
-    # Never label this feed as official advanced stats.
-    quality = "derived_early_season"
     return {
         "teams":teams, "season":_season(), "prior_season":None,
-        "source":"Tank01 current-season box-score averages; estimated possessions, league-mean shrinkage, persisted daily snapshot",
+        "source":source,
         "data_quality":quality, "fetched_at":datetime.now(timezone.utc).isoformat(),
         "player_impact_source":"Team/player on-off and five-man lineup snapshots are being collected separately; EPM is optional.",
         "epm_available":False,
