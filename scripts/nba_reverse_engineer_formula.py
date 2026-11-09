@@ -63,7 +63,7 @@ def make_examples(rows):
             heuristic_margin = ((hoff + adef) / 2.0) * pace + 1.0 - (((aoff + hdef) / 2.0) * pace - 1.0)
             heuristic_total = ((hoff + adef) / 2.0) * pace + 1.0 + (((aoff + hdef) / 2.0) * pace - 1.0)
             examples.append({
-                "date": day, "features": x,
+                "date": day, "home_team": home, "away_team": away, "features": x,
                 "actual_margin": hs - vs, "actual_total": hs + vs,
                 "heuristic_margin": heuristic_margin,
                 "heuristic_total": heuristic_total,
