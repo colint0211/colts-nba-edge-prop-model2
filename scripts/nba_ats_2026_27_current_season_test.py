@@ -115,6 +115,19 @@ def main():
         {"result": x["favorite_result"]} for x in favorites
         if x["favorite_result"] in ("WIN","LOSS","PUSH")
     ]
+    # Diagnostic only: show how sensitive the frozen formula is to the
+    # pre-declared edge cut. The primary result remains EDGE=2.5; do not
+    # select a winning threshold from this in-progress holdout.
+    threshold_sensitivity = {}
+    for threshold in (1.5, 2.5, 3.5, 4.5):
+        selected = []
+        for game in matched:
+            if game["model_home_edge_points"] >= threshold:
+                selected.append({"result": game["model_result"]})
+            elif game["model_home_edge_points"] <= -threshold:
+                selected.append({"result": "WIN" if game["model_result"] == "LOSS" else "LOSS" if game["model_result"] == "WIN" else game["model_result"]})
+        threshold_sensitivity[str(threshold)] = summarize(selected)
+
     report = {
         "experiment":"frozen_2026_27_current_season_ats_holdout",
         "training_seasons":["2024-25","2025-26"],
@@ -125,6 +138,7 @@ def main():
         "matched_games":len(matched),"unmatched_odds_rows":len(unmatched),
         "fixed_rule":f"Home if projected home-margin edge vs closing spread >= +{EDGE}; away if <= -{EDGE}; otherwise pass.",
         "model_ats":summarize(bets),
+        "threshold_sensitivity_diagnostic_not_for_selection":threshold_sensitivity,
         "closing_favorite_baseline":summarize(favorite_bets),
         "all_games_home_cover_rate_pct":round(100*sum(x["actual_home_ats_margin"]>0 for x in matched)/len(matched),2) if matched else None,
         "coefficients_frozen_from_prior_seasons":True,
