@@ -541,7 +541,8 @@ def _score_game(game,ratings,schedule,injuries,season):
         away_points-=margin_delta/2.0
     return {"projected_home":round(home_points,2),"projected_away":round(away_points,2),
       "projected_margin":round(home_points-away_points,2),"projected_total":round(home_points+away_points,2),
-      "projected_pace":round(pace,2),"home_adjustments":home_adj,"away_adjustments":away_adj,\n      "epm_used":epm_used,"epm_margin":round(epm_margin,2) if epm_used else None,
+      "projected_pace":round(pace,2),"home_adjustments":home_adj,"away_adjustments":away_adj,
+      "epm_used":epm_used,"epm_margin":round(epm_margin,2) if epm_used else None,
       "injury_uncertainty":bool(home_adj.get("unpriced_injury") or away_adj.get("unpriced_injury")),
       "rating_source":ratings.get("source"),"data_quality":ratings.get("data_quality","advanced"),
       "ratings":{"home":h,"away":a}}
