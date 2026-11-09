@@ -682,9 +682,11 @@ def team_stats_probe():
       "sample":{k:ratings["teams"].get(k) for k in ("BOS","DEN","LAL","NYK")}}
 
 
-def tank01_team_probe():
+def tank01_team_probe(season=None):
     from . import index as app_index
-    payload,headers=app_index._tank01_request("/getNBATeams",{"teamStats":"true"},timeout=18)
+    params={"teamStats":"true"}
+    if season: params["season"]=str(season)
+    payload,headers=app_index._tank01_request("/getNBATeams",params,timeout=18)
     body=payload.get("body")
     teams=body if isinstance(body,list) else ([v for v in body.values() if isinstance(v,dict)] if isinstance(body,dict) else [])
     sample=next((t for t in teams if isinstance(t,dict) and t.get("offensiveStats")),None)
