@@ -5,7 +5,8 @@ requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115.0",
     "numpy>=2.0,<3",
-    "psycopg[binary]>=3.2,<4"
+    "psycopg[binary]>=3.2,<4",
+    "duckdb>=1.2,<2"
 ]
 
 [tool.vercel]
