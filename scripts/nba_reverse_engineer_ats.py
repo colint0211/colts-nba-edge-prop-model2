@@ -51,27 +51,14 @@ def main():
     beta=fit(train,"actual_margin")
     odds=download_odds()
     # Only regular-season games; key by date and team identity.
-    lookup={}
-    for r in test:
-        # Source game rows use the NBA team abbreviations as team keys.
-        lookup[(str(r["date"])[:10],team_key(r.get("home_team","")),team_key(r.get("away_team","")))]=r
-    # Rebuild keyed score examples directly from feature rows. make_examples stores
-    # only features/date, so join against the source odds via score+date+teams below.
-    # Reconstruct features from the season examples by matching score and date/team
-    # using a deterministic second pass over the original season dataset.
-    # Use a source-agnostic key from game results to avoid game-id differences.
-    score_index={}
-    for r in test:
-        score_index.setdefault((str(r["date"])[:10],round(r["actual_margin"],1),round(r["actual_total"],1)),[]).append(r)
+    lookup={(str(r["date"])[:10],team_key(r["home_team"]),team_key(r["away_team"])):r for r in test}
     matched=[]
     for q in odds:
         if q.get("season_type")!="regular": continue
         date=q["date_et"][:10]
-        margin=float(q["home_score"])-float(q["away_score"])
-        total=float(q["home_score"])+float(q["away_score"])
-        candidates=score_index.get((date,round(margin,1),round(total,1)),[])
-        if not candidates: continue
-        r=candidates.pop(0)
+        key=(date,team_key(q["home_team"]),team_key(q["away_team"]))
+        r=lookup.get(key)
+        if r is None: continue
         spread=float(q["close_spread_home"])
         pred=sum(a*b for a,b in zip(r["features"],beta))
         edge=pred+spread
