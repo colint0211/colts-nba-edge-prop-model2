@@ -9,7 +9,6 @@ import os
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone, timedelta
-from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 def _season():
@@ -53,22 +52,6 @@ def initialize():
         CREATE INDEX IF NOT EXISTS nba_metric_runs_date
           ON nba_metric_collection_runs(snapshot_date DESC, started_at DESC);
         """)
-
-def _bdl_get(path, params=None, timeout=12):
-    api_key = os.getenv("BALLDONTLIE_API_KEY", "").strip()
-    if not api_key:
-        raise RuntimeError("BALLDONTLIE_API_KEY is not configured.")
-    query = urlencode(params or [])
-    url = "https://api.balldontlie.io" + path + (("?" + query) if query else "")
-    req = Request(url, headers={"Authorization":api_key,"Accept":"application/json","User-Agent":"ColtsNBAEdge/2.0"})
-    try:
-        with urlopen(req, timeout=timeout) as response:
-            return json.loads(response.read().decode("utf-8","replace")), dict(response.headers.items())
-    except Exception as exc:
-        from urllib.error import HTTPError
-        if isinstance(exc, HTTPError):
-            raise RuntimeError("BALLDONTLIE " + path + " returned HTTP " + str(exc.code) + "; endpoint may require GOAT tier.") from exc
-        raise
 
 def _tank01_team_rows():
     from . import game_model
@@ -154,44 +137,6 @@ def _tank01_player_rows():
     if not rows:
         raise RuntimeError("Tank01 roster endpoint returned no player season-average rows.")
     return rows
-
-def _bdl_team_season_advanced(season):
-    payload, headers = _bdl_get("/nba/v1/team_season_averages/general", [
-        ("season",season),("season_type","regular"),("type","advanced"),("per_page",100)
-    ])
-    rows = payload.get("data")
-    if not isinstance(rows,list) or not rows:
-        raise RuntimeError("BALLDONTLIE team season advanced returned no data.")
-    return [("team_season_advanced",row) for row in rows]
-
-def _bdl_daily_advanced(snapshot_date):
-    day = snapshot_date.isoformat()
-    rows = []
-    cursor = None
-    # Three 100-row pages cover most slates while respecting trial rate limits.
-    for page in range(3):
-        params = [("dates[]",day),("period",0),("per_page",100)]
-        if cursor is not None:
-            params.append(("cursor",str(cursor)))
-        payload, headers = _bdl_get("/nba/v2/stats/advanced", params)
-        page_rows = payload.get("data")
-        if not isinstance(page_rows,list):
-            raise RuntimeError("BALLDONTLIE daily advanced stats response was invalid.")
-        rows.extend(("game_advanced",row) for row in page_rows)
-        cursor = (payload.get("meta") or {}).get("next_cursor")
-        if not cursor or len(page_rows) < 100:
-            break
-    return rows
-
-
-def _bdl_projected_lineups(snapshot_date):
-    payload, headers = _bdl_get("/nba/v1/projected_lineups", [
-        ("dates[]",snapshot_date.isoformat()),("per_page",100)
-    ])
-    rows = payload.get("data")
-    if not isinstance(rows,list):
-        raise RuntimeError("BALLDONTLIE projected lineups response was invalid.")
-    return [("projected_lineup",row) for row in rows]
 
 def _entity(metric, row, team_code=None):
     if metric in ("team_advanced","team_season_advanced"):
@@ -283,9 +228,6 @@ def collect(batch=None):
         ("player_boxscore_season", _tank01_player_rows, None, "Tank01"),
         ("schedule_context", schedule_rows, None, "App schedule"),
         ("injury_status", injury_rows, None, "Official NBA injury report"),
-        ("team_season_advanced", lambda: _bdl_team_season_advanced(season.split("-")[0]), None, "BALLDONTLIE GOAT"),
-        ("game_advanced", lambda: _bdl_daily_advanced(snapshot_date-timedelta(days=1)), None, "BALLDONTLIE GOAT"),
-        ("projected_lineups", lambda: _bdl_projected_lineups(snapshot_date), None, "BALLDONTLIE GOAT"),
     ]
     with ThreadPoolExecutor(max_workers=4) as pool:
         futures = {pool.submit(fn):(key,team,source) for key,fn,team,source in tasks}
@@ -306,7 +248,6 @@ def collect(batch=None):
     status = ("complete" if required_ok and not summary["errors"]
               else "core_complete" if required_ok
               else "partial" if successful else "failed")
-    summary["optional_tier_note"] = "BALLDONTLIE season advanced, game advanced and projected-lineup feeds require GOAT tier."
     with _db() as conn:
         conn.execute("""
           UPDATE nba_metric_collection_runs
@@ -315,15 +256,14 @@ def collect(batch=None):
     return {"success":successful > 0,"status":status,"run_id":run_id,**summary}
 
 def latest_team_ratings(max_age_days=2):
-    """Return complete persisted team advanced ratings, preferring BALLDONTLIE GOAT."""
+    """Return complete persisted Tank01-derived team ratings; no paid GOAT feed is used."""
     initialize()
     with _db() as conn:
         rows = conn.execute("""
           SELECT metric_key,payload FROM nba_metric_snapshots
-          WHERE metric_key IN ('team_advanced','team_season_advanced')
+          WHERE metric_key = 'team_advanced'
             AND snapshot_date >= (CURRENT_DATE - (%s * INTERVAL '1 day'))::date
-          ORDER BY CASE WHEN metric_key='team_season_advanced' THEN 0 ELSE 1 END,
-                   snapshot_date DESC
+          ORDER BY snapshot_date DESC
         """, (int(max_age_days),)).fetchall()
 
     def number(row, key, default=0.0):
@@ -333,31 +273,8 @@ def latest_team_ratings(max_age_days=2):
         except (TypeError, ValueError):
             return default
 
-    bdl_teams = {}
     tank_teams = {}
     for metric, payload in rows:
-        if metric == "team_season_advanced":
-            team = payload.get("team") or {}
-            stats = payload.get("stats") or {}
-            code = str(team.get("abbreviation") or "").upper()
-            games = int(number(stats,"gp",0))
-            ortg = number(stats,"offensive_rating",number(stats,"off_rating",0))
-            drtg = number(stats,"defensive_rating",number(stats,"def_rating",0))
-            if len(code) == 3 and games > 0 and ortg > 0 and drtg > 0 and code not in bdl_teams:
-                bdl_teams[code] = {
-                    "team":code,"games":games,"ortg":ortg,"drtg":drtg,
-                    "net":number(stats,"net_rating",ortg-drtg),
-                    "pace":number(stats,"pace"),
-                    "efg":number(stats,"effective_field_goal_percentage",number(stats,"efg_pct",0)),
-                    "tov":number(stats,"turnover_ratio",number(stats,"turnover_percentage",0)),
-                    "oreb":number(stats,"offensive_rebound_percentage",0),
-                    "dreb":number(stats,"defensive_rebound_percentage",0),
-                    "ts":number(stats,"true_shooting_percentage",0),
-                    "source":"BALLDONTLIE team season advanced snapshot",
-                    "recent_sample":games,
-                }
-            continue
-
         code = str(payload.get("TEAM_ABBREVIATION") or "").upper()
         if len(code) != 3 or code in tank_teams:
             continue
@@ -379,16 +296,12 @@ def latest_team_ratings(max_age_days=2):
             "recent_sample":0,
         }
 
-    if len(bdl_teams) >= 28:
-        teams = bdl_teams
-        quality = "advanced"
-        source = "BALLDONTLIE team season advanced; persisted daily snapshot"
-    elif len(tank_teams) >= 28:
-        teams = tank_teams
-        quality = "derived_early_season"
-        source = "Tank01 current-season box-score averages; estimated possessions, league-mean shrinkage, persisted daily snapshot"
-    else:
+    if len(tank_teams) < 28:
         return None
+    teams = tank_teams
+    quality = "derived_early_season"
+    source = "Tank01 current-season box-score averages; estimated possessions, league-mean shrinkage, persisted daily snapshot"
+    min_games = min(row["games"] for row in teams.values())
     if len(teams) < 28:
         return None
     min_games = min(row["games"] for row in teams.values())
@@ -396,7 +309,7 @@ def latest_team_ratings(max_age_days=2):
         "teams":teams, "season":_season(), "prior_season":None,
         "source":source,
         "data_quality":quality, "fetched_at":datetime.now(timezone.utc).isoformat(),
-        "player_impact_source":"Tank01 player averages provide box-score-derived eFG, TS, turnover and assist/turnover rates. BALLDONTLIE GOAT adds on-court advanced ratings; true player on/off splits are not inferred.",
+        "player_impact_source":"Tank01 box-score-derived player rates only. NBA Data Parquet (2026-27) is being schema-validated; no player-impact adjustment is applied until its fields and calculations pass validation.",
         "epm_available":False,
     }
 
@@ -421,6 +334,6 @@ def status():
                         "started_at":r[5].isoformat() if r[5] else None,
                         "finished_at":r[6].isoformat() if r[6] else None,
                         "summary":r[7]} for r in runs],
-        "rotation":"Daily team ratings, schedule and injury snapshots; game-level player advanced stats are paginated, and projected lineups are stored when the API tier permits.",
-        "optional_player_impact":"Tank01 supplies player season box-score averages and derived eFG/TS/turnover rates. BALLDONTLIE game advanced stats and projected lineups require GOAT tier. True player on/off is not available from verified feeds; Dunks & Threes EPM requires written authorization for betting-model use.",
+        "rotation":"Daily Tank01 team/player box-score snapshots plus schedule and fresh official injury snapshots. NBA Data Parquet is being validated for possession and lineup impact; it is not yet allowed to change projections.",
+        "optional_player_impact":"No paid BALLDONTLIE GOAT calls. Current player-impact source is box-score-derived only. NBA Data provides current-season play-by-play, possessions and lineup stints; impact metrics remain disabled until schema and calculations are verified. Dunks & Threes EPM remains disabled without written betting-use authorization.",
     }
