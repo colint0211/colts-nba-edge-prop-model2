@@ -6,10 +6,11 @@ closing prices are not supplied in the free consensus file, so ROI is reported
 at a flat -110 assumption; selection edge uses the source's no-vig close probs.
 """
 from __future__ import annotations
-import csv, json, math, os, re, urllib.request
+import csv, json, math, os, re, sys, urllib.request
 from collections import defaultdict
 from datetime import date, datetime
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from src.api.quant_game_engine import project_matchup
 
 SEASONS = ("2024-25", "2025-26")
