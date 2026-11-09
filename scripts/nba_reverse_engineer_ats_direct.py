@@ -76,13 +76,22 @@ def main():
  train=build(examples[2025],2025)
  test=build(examples[2026],2026)
  if len(train)<500 or len(test)<500:raise RuntimeError(f"Insufficient ATS rows: train={len(train)} test={len(test)}")
- beta=fit_rows(train)
+ train=sorted(train,key=lambda r:r["date"])
+ split=int(len(train)*0.8)
+ fit_part,valid_part=train[:split],train[split:]
+ penalty_scores=[]
+ for penalty in (0.0,0.01,0.1,1.0,2.0,5.0,10.0,25.0,50.0,100.0):
+  b=fit_rows(fit_part,penalty)
+  mae=sum(abs(sum(a*v for a,v in zip(r["x"],b))-r["y"]) for r in valid_part)/len(valid_part)
+  penalty_scores.append({"penalty":penalty,"validation_ats_margin_mae":round(mae,4)})
+ chosen=min(penalty_scores,key=lambda x:x["validation_ats_margin_mae"])["penalty"]
+ beta=fit_rows(train,chosen)
  res=summarize(train,test,beta)
  result={"experiment":"direct_ats_margin_formula_v1","training_season":"2024-25","untouched_holdout_season":"2025-26",
   "target":"actual home ATS margin against consensus closing spread",
   "inputs":FEATURES+["closing_home_spread","(no_vig_home_cover_probability-0.5)*100"],
   "formula":"ridge regression directly on ATS margin; bet home if predicted ATS margin >= +2.5, away if <= -2.5, otherwise pass",
-  "ridge_penalty":2.0,"fixed_edge_threshold":EDGE,"break_even_at_minus_110_pct":52.38,
+  "ridge_penalty_selected_on_chronological_training_validation":chosen,"validation_penalty_scores":penalty_scores,"fixed_edge_threshold":EDGE,"break_even_at_minus_110_pct":52.38,
   "results":{k:v for k,v in res.items() if k!="game_results"},
   "coefficients":{name:round(value,8) for name,value in zip(FEATURES+["closing_home_spread","cover_probability_signal"],beta)},
   "integrity":{"holdout_used_for_fitting":False,"threshold_fixed_before_holdout":True,"same_day_result_leakage":False,"live_app_modified":False},
