@@ -10,6 +10,7 @@ import json
 import math
 import os
 import time
+from .clv import signed_line_clv, summarize_clv
 from datetime import date, datetime, timedelta, timezone
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -1076,6 +1077,109 @@ def build_forecasts(forecast_date=None,force=False):
         "schedule":"ESPN scoreboard","sportsbook_odds_used":False,
         "injury_adjustments":"fresh official report applied" if injury_meta.get("status")=="fresh" else "not applied; report "+str(injury_meta.get("status","unavailable"))},
       "model_policy":"Quantitative matchup engine v1: opponent-adjusted offensive efficiency, league-relative defensive resistance, blended team/league pace, explicit rest/travel/time-zone/elevation adjustments, and a joint score distribution. Sportsbook lines are not inputs. Probability calibration and player-level availability valuation remain provisional."}
+
+
+
+def clv_report():
+    """Compare locked picks with the latest complete two-sided quote batch before tip.
+
+    This is last-observed pre-tip CLV, not a claim that the feed captured the
+    sportsbook's exact final closing price. Missing quote pairs are excluded.
+    """
+    initialize()
+    with _connect() as conn:
+        conn.execute("""
+          CREATE TABLE IF NOT EXISTS nba_market_snapshots (
+            id BIGSERIAL PRIMARY KEY, batch_id TEXT NOT NULL,
+            captured_at TIMESTAMPTZ NOT NULL, event_id TEXT NOT NULL,
+            commence_time TIMESTAMPTZ, slate_date DATE NOT NULL,
+            matchup TEXT NOT NULL, home_team TEXT NOT NULL, away_team TEXT NOT NULL,
+            market TEXT NOT NULL CHECK (market IN ('spreads','totals')),
+            outcome TEXT NOT NULL, line DOUBLE PRECISION NOT NULL,
+            odds INTEGER NOT NULL, bookmaker TEXT NOT NULL, source TEXT NOT NULL,
+            raw_quote JSONB NOT NULL DEFAULT '{}'::jsonb
+          );
+          CREATE INDEX IF NOT EXISTS nba_market_snapshots_event_time
+            ON nba_market_snapshots(event_id,market,outcome,captured_at DESC);
+        """)
+        picks = conn.execute("""
+          SELECT id,market,event_id,selection,line,odds,market_probability,snapshot,created_at
+          FROM nba_game_predictions ORDER BY created_at
+        """).fetchall()
+
+        matched = []
+        missing = 0
+        for pick in picks:
+            pid, market, event_id, selection, bet_line, bet_odds, open_prob, snapshot, created_at = pick
+            if isinstance(snapshot, str):
+                try: snapshot = json.loads(snapshot)
+                except Exception: snapshot = {}
+            snapshot = snapshot if isinstance(snapshot, dict) else {}
+            commence_raw = snapshot.get("commence_time")
+            try:
+                commence = datetime.fromisoformat(str(commence_raw).replace("Z", "+00:00"))
+                if commence.tzinfo is None:
+                    commence = commence.replace(tzinfo=timezone.utc)
+            except Exception:
+                missing += 1
+                continue
+            if created_at and created_at >= commence:
+                missing += 1
+                continue
+
+            snap_market = "spreads" if market == "sides" else "totals"
+            selected = str(selection).upper() if market == "totals" else str(selection)
+            other = (("UNDER" if selected == "OVER" else "OVER") if market == "totals"
+                     else str(snapshot.get("away_team") if selected == snapshot.get("home_team")
+                              else snapshot.get("home_team")))
+            quotes = conn.execute("""
+              SELECT batch_id,captured_at,outcome,line,odds
+              FROM nba_market_snapshots
+              WHERE event_id=%s AND market=%s AND captured_at < %s
+              ORDER BY captured_at DESC
+            """, (str(event_id), snap_market, commence)).fetchall()
+            batches = {}
+            for batch_id, captured_at, outcome, line, odds in quotes:
+                batch = batches.setdefault(batch_id, {"captured_at": captured_at, "quotes": {}})
+                batch["quotes"][str(outcome).upper()] = {"line": float(line), "odds": int(odds)}
+            closing = next((v for v in batches.values()
+                            if selected.upper() in v["quotes"] and other.upper() in v["quotes"]), None)
+            if not closing:
+                missing += 1
+                continue
+
+            selected_quote = closing["quotes"][selected.upper()]
+            other_quote = closing["quotes"][other.upper()]
+            line_clv = signed_line_clv(market, selection, bet_line, selected_quote["line"])
+            close_raw = _american_probability(selected_quote["odds"])
+            other_raw = _american_probability(other_quote["odds"])
+            close_prob = (close_raw / (close_raw + other_raw)
+                          if close_raw is not None and other_raw is not None and close_raw + other_raw > 0
+                          else None)
+            price_clv = ((close_prob - float(open_prob)) * 100
+                         if close_prob is not None and open_prob is not None else None)
+            captured_at = closing["captured_at"]
+            if captured_at.tzinfo is None:
+                captured_at = captured_at.replace(tzinfo=timezone.utc)
+            gap = (commence - captured_at).total_seconds() / 60
+            matched.append({
+                "prediction_id": pid, "market": market, "matchup": snapshot.get("matchup"),
+                "selection": selection, "bet_line": float(bet_line),
+                "observed_pre_tip_line": selected_quote["line"],
+                "line_clv_points": line_clv, "price_clv_pp": price_clv,
+                "minutes_before_tip": max(0.0, gap), "observed_at": captured_at.isoformat()
+            })
+
+    report = summarize_clv(matched)
+    report.update({
+        "status": "ok", "method": "latest complete DraftKings two-sided snapshot batch before tip",
+        "matched_predictions": len(matched), "unmatched_predictions": missing,
+        "total_predictions": len(picks),
+        "coverage_pct": round(100 * len(matched) / len(picks), 1) if picks else None,
+        "records": matched,
+        "interpretation": "Positive line CLV and positive no-vig price CLV indicate market movement toward the locked selection. This is last-observed pre-tip CLV, not verified exact sportsbook close."
+    })
+    return report
 
 
 def history(slate_date):
