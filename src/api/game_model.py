@@ -904,3 +904,26 @@ def api_sports_player_probe(player_name="Nikola Jokic"):
     rows=stats.get("response") or []
     return {"found":True,"player":player,"results":stats.get("results"),"row_count":len(rows),
       "sample":rows[:3],"sample_keys":list(rows[0].keys()) if rows else []}
+
+
+def api_sports_player_search(player_name="Nikola Jokic"):
+    key=os.getenv("API_SPORTS_KEY","").strip()
+    if not key: raise RuntimeError("API_SPORTS_KEY missing")
+    name=str(player_name)
+    if "," in name:
+        last,first=[x.strip() for x in name.split(",",1)]; name=(first+" "+last).strip()
+    payload,_=_json("https://v1.basketball.api-sports.io/players?"+urlencode({"search":name,"season":"2026-2027"}),
+      {"x-apisports-key":key,"Accept":"application/json"},4)
+    rows=payload.get("response") or []
+    target=_normal_name(name)
+    exact=[x for x in rows if _normal_name(x.get("name"))==target]
+    return {"matches":len(rows),"exact":exact[:3],"chosen":exact[0] if len(exact)==1 else None}
+
+
+def api_sports_player_stats(player_id):
+    key=os.getenv("API_SPORTS_KEY","").strip()
+    if not key: raise RuntimeError("API_SPORTS_KEY missing")
+    payload,_=_json("https://v1.basketball.api-sports.io/games/statistics/players?"+urlencode({"player":str(player_id),"season":"2026-2027"}),
+      {"x-apisports-key":key,"Accept":"application/json"},4)
+    rows=payload.get("response") or []
+    return {"results":payload.get("results"),"row_count":len(rows),"sample":rows[:4],"keys":list(rows[0].keys()) if rows else []}
