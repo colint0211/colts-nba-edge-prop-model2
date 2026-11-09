@@ -252,42 +252,97 @@ def _nba_stats(season,last_n=0):
     if len(out)<28: raise RuntimeError("NBA Stats advanced team table is incomplete ("+str(len(out))+"/30).")
     return out
 
-def _team_ratings(force=False):
+def _tank01_ratings(force=False):
     now=time.time()
     if not force and _TEAM_CACHE["data"] and now-_TEAM_CACHE["at"]<21600:
         return _TEAM_CACHE["data"]
-    current_year=datetime.now(timezone.utc).year
-    # NBA season starts in October; season label is start year.
-    season_start=current_year if datetime.now(timezone.utc).month>=7 else current_year-1
-    current=f"{season_start}-{str(season_start+1)[-2:]}"
-    previous=f"{season_start-1}-{str(season_start)[-2:]}"
-    current_stats=_nba_stats(current,0)
-    prior_stats={}
-    try: prior_stats=_nba_stats(previous,0)
-    except Exception: pass
-    recent={}
-    try: recent=_nba_stats(current,10)
-    except Exception: pass
+    from . import index as app_index
+    payload,headers=app_index._tank01_request("/getNBATeams",{"teamStats":"true"},timeout=18)
+    body=payload.get("body")
+    teams=body if isinstance(body,list) else ([v for v in body.values() if isinstance(v,dict)] if isinstance(body,dict) else [])
+    raw={}
+    def total(stats,key):
+        try: return float((stats.get(key) or {}).get("Total"))
+        except (TypeError,ValueError): return 0.0
+    for team in teams:
+        if not isinstance(team,dict): continue
+        code=_canonical(team.get("teamAbv"))
+        off=team.get("offensiveStats") or {}; deff=team.get("defensiveStats") or {}
+        if not code or not off or not deff: continue
+        try: games=min(int(float(off.get("gamesPlayed"))),int(float(deff.get("gamesPlayed"))))
+        except (TypeError,ValueError): games=0
+        if games<1: continue
+        ofga,ofta,otov,oreb=total(off,"fga"),total(off,"fta"),total(off,"TOV"),total(off,"reb")
+        dfga,dfta,dtov,dreb=total(deff,"fga"),total(deff,"fta"),total(deff,"TOV"),total(deff,"reb")
+        oposs=ofga-0.25*oreb+otov+0.44*ofta
+        dposs=dfga-0.25*dreb+dtov+0.44*dfta
+        points=total(off,"pts") or float(team.get("ppg") or 0)
+        allowed=total(deff,"pts") or float(team.get("oppg") or 0)
+        if oposs<=0 or dposs<=0 or points<=0 or allowed<=0: continue
+        fgm=total(off,"fgm"); tpm=total(off,"tptfgm")
+        raw[code]={"games":games,"ortg":points/oposs*100.0,"drtg":allowed/dposs*100.0,
+          "pace":(oposs+dposs)/2.0,"efg":(fgm+0.5*tpm)/ofga if ofga else 0,
+          "tov":otov/oposs if oposs else 0,"oreb":0.25,
+          "ts":points/(2*(ofga+0.44*ofta)) if ofga+0.44*ofta else 0}
+    if len(raw)<28:
+        raise RuntimeError("Tank01 team efficiency fallback is incomplete ("+str(len(raw))+"/30).")
+    league={key:sum(row[key] for row in raw.values())/len(raw) for key in ("ortg","drtg","pace","efg","tov","oreb","ts")}
     combined={}
-    for team,cur in current_stats.items():
-        prior=prior_stats.get(team)
-        games=cur["games"]
-        prior_weight=max(0.12,min(0.65,8.0/(games+8.0))) if prior else 0.0
-        row={}
-        for key in ("ortg","drtg","pace","efg","tov","oreb","ts"):
-            base=cur[key]*(1-prior_weight)+(prior[key]*prior_weight if prior else 0)
-            recent_row=recent.get(team)
-            # Form is a modest adjustment, not a substitute for the full-season signal.
-            if recent_row and recent_row.get("games",0)>=4:
-                base=base*0.78+recent_row[key]*0.22
-            row[key]=base
-        row.update({"games":games,"net":row["ortg"]-row["drtg"],"prior_weight":prior_weight,
-                    "recent_sample":recent.get(team,{}).get("games",0)})
-        combined[team]=row
-    if len(combined)<28: raise RuntimeError("Insufficient team ratings for the slate.")
-    result={"teams":combined,"season":current,"prior_season":previous,"source":"NBA Stats leaguedashteamstats advanced","fetched_at":datetime.now(timezone.utc).isoformat()}
+    for code,row in raw.items():
+        weight=max(0.18,min(0.60,6.0/(row["games"]+6.0)))
+        combined[code]={key:row[key]*(1-weight)+league[key]*weight for key in league}
+        combined[code].update({"games":row["games"],"net":combined[code]["ortg"]-combined[code]["drtg"],
+          "prior_weight":weight,"recent_sample":row["games"],"source":"Tank01 estimated possessions"})
+    current_year=datetime.now(timezone.utc).year
+    season_start=current_year if datetime.now(timezone.utc).month>=7 else current_year-1
+    season=f"{season_start}-{str(season_start+1)[-2:]}"
+    result={"teams":combined,"season":season,"prior_season":None,
+      "source":"Tank01 current-season box-score averages; ORtg/DRtg/pace derived using estimated possessions (25% OREB proxy), shrunk toward league mean",
+      "data_quality":"derived_early_season","fetched_at":datetime.now(timezone.utc).isoformat(),
+      "rate_limit_remaining":headers.get("x-ratelimit-requests-remaining")}
     _TEAM_CACHE.update({"at":now,"data":result})
     return result
+
+
+def _team_ratings(force=False):
+    # The NBA Stats endpoint has repeatedly timed out from the Vercel runtime.
+    # Use it only when explicitly enabled; Tank01 is the authenticated fallback.
+    if os.getenv("USE_NBA_STATS_TEAM_RATINGS","").strip().lower() in ("1","true","yes"):
+        now=time.time()
+        if not force and _TEAM_CACHE["data"] and now-_TEAM_CACHE["at"]<21600:
+            return _TEAM_CACHE["data"]
+        current_year=datetime.now(timezone.utc).year
+        season_start=current_year if datetime.now(timezone.utc).month>=7 else current_year-1
+        current=f"{season_start}-{str(season_start+1)[-2:]}"
+        previous=f"{season_start-1}-{str(season_start)[-2:]}"
+        current_stats=_nba_stats(current,0)
+        prior_stats={}
+        try: prior_stats=_nba_stats(previous,0)
+        except Exception: pass
+        recent={}
+        try: recent=_nba_stats(current,10)
+        except Exception: pass
+        combined={}
+        for team,cur in current_stats.items():
+            prior=prior_stats.get(team); games=cur["games"]
+            prior_weight=max(0.12,min(0.65,8.0/(games+8.0))) if prior else 0.0
+            row={}
+            for key in ("ortg","drtg","pace","efg","tov","oreb","ts"):
+                base=cur[key]*(1-prior_weight)+(prior[key]*prior_weight if prior else 0)
+                recent_row=recent.get(team)
+                if recent_row and recent_row.get("games",0)>=4:
+                    base=base*0.78+recent_row[key]*0.22
+                row[key]=base
+            row.update({"games":games,"net":row["ortg"]-row["drtg"],"prior_weight":prior_weight,
+                        "recent_sample":recent.get(team,{}).get("games",0),"source":"NBA Stats"})
+            combined[team]=row
+        if len(combined)<28: raise RuntimeError("Insufficient NBA Stats team ratings.")
+        result={"teams":combined,"season":current,"prior_season":previous,
+          "source":"NBA Stats leaguedashteamstats advanced","data_quality":"advanced","fetched_at":datetime.now(timezone.utc).isoformat()}
+        _TEAM_CACHE.update({"at":now,"data":result})
+        return result
+    return _tank01_ratings(force)
+
 
 def _schedule(force=False):
     now=time.time()
