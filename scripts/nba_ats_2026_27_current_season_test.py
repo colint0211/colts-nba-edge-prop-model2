@@ -40,9 +40,9 @@ def fetch_odds():
         return list(csv.DictReader(response.read().decode("utf-8-sig").splitlines()))
 
 def summarize(picks):
-    wins = sum(x["result"] == "WIN" for x in picks)
-    losses = sum(x["result"] == "LOSS" for x in picks)
-    pushes = sum(x["result"] == "PUSH" for x in picks)
+    wins = sum(x.get("result", x.get("model_result")) == "WIN" for x in picks)
+    losses = sum(x.get("result", x.get("model_result")) == "LOSS" for x in picks)
+    pushes = sum(x.get("result", x.get("model_result")) == "PUSH" for x in picks)
     units = wins * WIN - losses
     decisions = wins + losses
     return {
