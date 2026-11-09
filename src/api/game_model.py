@@ -661,7 +661,7 @@ def _candidate(game,market,model):
           "projected_pace":model["projected_pace"],"home_adjustments":model["home_adjustments"],
           "away_adjustments":model["away_adjustments"],"rating_source":model.get("rating_source","NBA Stats"),
           "data_quality":model.get("data_quality","advanced"),
-          "model_version":"sides-totals-regression-v1","sportsbook":"DraftKings"})
+          "model_version":"sides-totals-efficiency-v1","sportsbook":"DraftKings"})
     return candidates
 
 def _qualified(row):
@@ -803,10 +803,10 @@ def build_board(force=False):
       "metrics":_metrics(),"settlement":settlement,"game_count":len(games),
       "source_status":{"odds":"PropLine DraftKings ("+odds_source+")","team_ratings":ratings["source"],
         "season":ratings["season"],"injuries":injury_meta.get("status","unavailable"),
-        "on_off":"NBA Stats on/off attempted for teams with injury flags",
+        "on_off":"True EPM/on-off unavailable; ESPN player game-log box-score proxy used for flagged rotation absences",
         "prop_line_quota":quota,"saved_sides":side_saved,"saved_totals":total_saved,
         "unavailable_games":unavailable[:10]},
-      "model_policy":"Independent team-efficiency regression. Market odds are used only for EV and no-vig comparison, never as the model probability.",
+      "model_policy":"Team-efficiency ratings projection with explicit early-season uncertainty. Not yet a historically fitted regression. Market odds are used only for EV and no-vig comparison, never as the model probability.",
       "thresholds":{"minimum_edge_pp":4.0 if ratings.get("data_quality")=="derived_early_season" else 2.5,
         "minimum_ev_pct":2.0 if ratings.get("data_quality")=="derived_early_season" else 1.5,"minimum_probability":50}}
 
