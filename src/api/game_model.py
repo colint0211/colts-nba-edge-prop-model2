@@ -852,6 +852,11 @@ def build_board(force=False,preview_date=None):
         model["projected_margin"]=round(model["projected_home"]-model["projected_away"],2)
         model["projected_total"]=round(model["projected_home"]+model["projected_away"],2)
         model["home_adjustments"]=home_adjustments; model["away_adjustments"]=away_adjustments
+        model["score_distribution"]["home_score_80"]=[round(model["projected_home"]-1.281551565545*model["score_distribution"]["home_score_sd"],1),round(model["projected_home"]+1.281551565545*model["score_distribution"]["home_score_sd"],1)]
+        model["score_distribution"]["away_score_80"]=[round(model["projected_away"]-1.281551565545*model["score_distribution"]["away_score_sd"],1),round(model["projected_away"]+1.281551565545*model["score_distribution"]["away_score_sd"],1)]
+        model["score_distribution"]["margin_80"]=[round(model["projected_margin"]-1.281551565545*model["score_distribution"]["margin_sd"],1),round(model["projected_margin"]+1.281551565545*model["score_distribution"]["margin_sd"],1)]
+        model["score_distribution"]["total_80"]=[round(model["projected_total"]-1.281551565545*model["score_distribution"]["total_sd"],1),round(model["projected_total"]+1.281551565545*model["score_distribution"]["total_sd"],1)]
+        base_models[event_id]=model
         for candidate in _candidate(game,"sides",model):
             if _qualified(candidate): sides.append(candidate)
         for candidate in _candidate(game,"totals",model):
@@ -873,14 +878,32 @@ def build_board(force=False,preview_date=None):
     else:
         side_picks,side_saved=_save_slate(sides,"sides",slate_date)
         total_picks,total_saved=_save_slate(totals,"totals",slate_date)
+    forecasts=[]
+    for event_id,model in base_models.items():
+        game=game_by_id.get(event_id,{})
+        dist=model.get("score_distribution") or {}
+        scale=float(dist.get("moneyline_logistic_scale") or 8.07)
+        home_probability=1.0/(1.0+math.exp(-max(-35.0,min(35.0,float(model["projected_margin"])/scale))))
+        forecasts.append({
+          "event_id":event_id,"matchup":game.get("matchup"),
+          "home_team":game.get("home"),"away_team":game.get("away"),
+          "projected_home":model.get("projected_home"),"projected_away":model.get("projected_away"),
+          "projected_margin":model.get("projected_margin"),"projected_total":model.get("projected_total"),
+          "home_win_probability":round(home_probability,5),"away_win_probability":round(1.0-home_probability,5),
+          "score_distribution":dist,"home_adjustments":model.get("home_adjustments"),
+          "away_adjustments":model.get("away_adjustments"),
+          "injury_review_status":"reviewed" if event_id in reviewed else "not_reviewed_after_initial_candidate_screen",
+          "rating_source":model.get("rating_source"),"data_quality":model.get("data_quality")
+        })
+    forecasts.sort(key=lambda x:x.get("matchup") or "")
     return {"slate_date":slate_date,"preview":preview,"frozen":not preview,"sides":side_picks,"totals":total_picks,
-      "metrics":_metrics(),"settlement":settlement,"game_count":len(future_games),
+      "forecasts":forecasts,"metrics":_metrics(),"settlement":settlement,"game_count":len(future_games),
       "source_status":{"odds":"PropLine DraftKings ("+odds_source+")","team_ratings":ratings["source"],
         "season":ratings["season"],"injuries":injury_meta.get("status","unavailable"),
         "player_impact":ratings.get("player_impact_source","not integrated"),
         "reviewed_games":len(review_games),"prop_line_quota":quota,"saved_sides":side_saved,"saved_totals":total_saved,
         "unavailable_games":unique_unavailable[:10]},
-      "model_policy":"Hybrid team-efficiency and next-game Team EPM projection when DUNKS_AND_THREES_API_KEY is configured. EPM incorporates expected lineup availability. This is not yet a historically fitted or calibrated proprietary regression. Market odds are used only for EV and no-vig comparison, never as the model probability.",
+      "model_policy":"Linear team-efficiency score mapping (offense vs opponent defense, shared pace and explicit rest/travel/time-zone/elevation adjustments), logistic-link moneyline and spread probabilities, and a joint score uncertainty approximation. Current uncertainty scales are provisional conversions from the first 2,455-game walk-forward MAEs; score residual covariance and fitted regression coefficients remain validation work. DraftKings odds are used only for no-vig comparison and EV, never to set model probabilities.",
       "thresholds":{"minimum_edge_pp":4.0 if ratings.get("data_quality")=="derived_early_season" else 2.5,
         "maximum_edge_pp":12.0 if ratings.get("data_quality")=="derived_early_season" else None,
         "minimum_ev_pct":2.0 if ratings.get("data_quality")=="derived_early_season" else 1.5,
