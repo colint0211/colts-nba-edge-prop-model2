@@ -719,7 +719,7 @@ def build_board(force=False,preview_date=None):
         game=game_by_id[event_id]
         model=dict(base_models[event_id])
         if home_injury.get("unpriced_injury") or away_injury.get("unpriced_injury"):
-            unavailable.append({"event_id":event_id,"reason":"rotation-player injury impact could not be verified; no pick"})
+            unavailable.append({"event_id":event_id,"reason":"questionable/doubtful/day-to-day rotation availability cannot be valued reliably; no pick"})
             continue
         home_adjustments=dict(model["home_adjustments"])
         away_adjustments=dict(model["away_adjustments"])
@@ -739,6 +739,15 @@ def build_board(force=False,preview_date=None):
 
     sides.sort(key=lambda x:(-x["ev_pct"],-x["edge_pp"]))
     totals.sort(key=lambda x:(-x["ev_pct"],-x["edge_pp"]))
+    unique_unavailable=[]; seen_unavailable=set()
+    for item in unavailable:
+        key=(str(item.get("event_id") or ""),str(item.get("reason") or ""))
+        if key in seen_unavailable: continue
+        seen_unavailable.add(key)
+        row=dict(item)
+        game=game_by_id.get(str(item.get("event_id") or ""))
+        if game: row["matchup"]=game["away_team"]+" @ "+game["home_team"]
+        unique_unavailable.append(row)
     if preview:
         side_picks=sides[:5]; total_picks=totals[:5]; side_saved=0; total_saved=0
     else:
@@ -750,7 +759,7 @@ def build_board(force=False,preview_date=None):
         "season":ratings["season"],"injuries":injury_meta.get("status","unavailable"),
         "player_impact":"True EPM/on-off not integrated; uncertain rotation availability blocks the game; known OUT players are disclosed but not individually valued",
         "reviewed_games":len(review_games),"prop_line_quota":quota,"saved_sides":side_saved,"saved_totals":total_saved,
-        "unavailable_games":unavailable[:10]},
+        "unavailable_games":unique_unavailable[:10]},
       "model_policy":"Team-efficiency ratings projection with explicit early-season uncertainty. Not yet a historically fitted regression. Market odds are used only for EV and no-vig comparison, never as the model probability.",
       "thresholds":{"minimum_edge_pp":4.0 if ratings.get("data_quality")=="derived_early_season" else 2.5,
         "maximum_edge_pp":12.0 if ratings.get("data_quality")=="derived_early_season" else None,
