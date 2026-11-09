@@ -887,7 +887,7 @@ def _apply_official_injury(prop, feed, player_name=None, team_value=None):
         )
 
 
-def _espn_player_id(name):
+def _espn_player_id(name, timeout=12):
     """Resolve a player to ESPN's numeric NBA athlete ID.
 
     ESPN global search can return UUID-style content IDs. The common-v3
@@ -899,7 +899,7 @@ def _espn_player_id(name):
         return _ESPN_ID_CACHE[key]
 
     query = urlencode({"query": name, "limit": 20, "sport": "basketball", "league": "nba"})
-    payload = _get_json(ESPN_SEARCH + "?" + query)
+    payload = _get_json(ESPN_SEARCH + "?" + query, timeout=timeout)
     candidates = []
 
     def numeric_id(value):
