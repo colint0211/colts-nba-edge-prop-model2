@@ -746,7 +746,7 @@ def build_board(force=False,preview_date=None):
         seen_unavailable.add(key)
         row=dict(item)
         game=game_by_id.get(str(item.get("event_id") or ""))
-        if game: row["matchup"]=game["away_team"]+" @ "+game["home_team"]
+        if game: row["matchup"]=_TEAM_NAMES.get(game["away"],game["away"])+" @ "+_TEAM_NAMES.get(game["home"],game["home"])
         unique_unavailable.append(row)
     if preview:
         side_picks=sides[:5]; total_picks=totals[:5]; side_saved=0; total_saved=0
