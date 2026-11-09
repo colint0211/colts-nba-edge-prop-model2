@@ -140,7 +140,7 @@ def _players(lineup):
     """Return validated (NBA person ID, display name) pairs from source lineup text."""
     found = []
     for part in str(lineup or "").split(","):
-        match = re.match(r"^\\s*(\\d{5,9})\\s+(.+?)\\s*$", part)
+        match = re.match(r"^\s*(\d{5,9})\s+(.+?)\s*$", part)
         if match:
             found.append((match.group(1), match.group(2)))
     # Reject incomplete or malformed lineup strings rather than guessing.
