@@ -3607,6 +3607,35 @@ def inspect_nba_data(request: FastRequest):
         raise HTTPException(status_code=503, detail="NBA Data inspection failed: " + type(exc).__name__)
 
 
+@app.get("/api/nba-backtest/status")
+def nba_backtest_status():
+    try:
+        from . import nba_historical_backtest
+        return JSONResponse(nba_historical_backtest.status())
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="NBA historical backtest status unavailable: " + type(exc).__name__)
+
+
+@app.api_route("/api/nba-backtest/run", methods=["GET", "POST"])
+def run_nba_backtest(request: FastRequest):
+    """Protected walk-forward historical team score validation; never changes picks."""
+    secret = os.getenv("CRON_SECRET", "").strip()
+    supplied = request.headers.get("authorization", "")
+    cron_authorized = bool(secret) and secrets.compare_digest(supplied, "Bearer " + secret)
+    preview_authorized = (
+        os.getenv("VERCEL_ENV", "") == "preview"
+        and os.getenv("VERCEL_GIT_COMMIT_REF", "") == "sides-totals-rebuild"
+        and os.getenv("METRICS_PREVIEW_RUN", "").strip().lower() == "true"
+    )
+    if not cron_authorized and not preview_authorized:
+        raise HTTPException(status_code=401, detail="Unauthorized NBA historical backtest request.")
+    try:
+        from . import nba_historical_backtest
+        return JSONResponse(nba_historical_backtest.run())
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="NBA historical backtest failed: " + type(exc).__name__)
+
+
 @app.get("/api/advanced-metrics/status")
 def advanced_metrics_status():
     try:
