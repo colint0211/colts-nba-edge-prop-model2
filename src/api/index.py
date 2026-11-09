@@ -3579,10 +3579,10 @@ async def model_recalculate(request: FastRequest):
 
 
 @app.get("/api/game-board")
-def game_sides_totals_board(refresh: bool = False):
+def game_sides_totals_board(refresh: bool = False, preview_date: str = ""):
     """Return the independent point-spread and game-total board."""
     try:
-        return JSONResponse(game_model.build_board(force=refresh))
+        return JSONResponse(game_model.build_board(force=refresh,preview_date=preview_date or None))
     except HTTPException:
         raise
     except Exception as exc:
