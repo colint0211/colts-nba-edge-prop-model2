@@ -9,7 +9,7 @@ on:
       - main
 
 jobs:
-  python-syntax:
+  python-validation:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -20,3 +20,5 @@ jobs:
           python-version: "3.12"
       - name: Compile API modules
         run: python -m compileall -q src/api
+      - name: Run quantitative matchup engine tests
+        run: python -m unittest discover -s tests -v
