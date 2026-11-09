@@ -22,16 +22,6 @@ _RECENT_CACHE = {"at": 0.0, "data": None}
 _SCHEDULE_CACHE = {"at": 0.0, "data": None}
 _ONOFF_CACHE = {}\n_PLAYER_IMPACT_CACHE = {}
 _CACHE_TTL = 900
-_TEAM_IDS = {
-    "ATL":1610612737,"BOS":1610612738,"BKN":1610612751,"CHA":1610612766,
-    "CHI":1610612741,"CLE":1610612739,"DAL":1610612742,"DEN":1610612743,
-    "DET":1610612765,"GSW":1610612744,"HOU":1610612745,"IND":1610612754,
-    "LAC":1610612746,"LAL":1610612747,"MEM":1610612763,"MIA":1610612748,
-    "MIL":1610612749,"MIN":1610612750,"NOP":1610612740,"NYK":1610612752,
-    "OKC":1610612760,"ORL":1610612753,"PHI":1610612755,"PHX":1610612756,
-    "POR":1610612757,"SAC":1610612758,"SAS":1610612759,"TOR":1610612761,
-    "UTA":1610612762,"WAS":1610612764
-}
 _TEAM_NAMES = {
     "ATL":"Atlanta Hawks","BOS":"Boston Celtics","BKN":"Brooklyn Nets","CHA":"Charlotte Hornets",
     "CHI":"Chicago Bulls","CLE":"Cleveland Cavaliers","DAL":"Dallas Mavericks","DEN":"Denver Nuggets",
@@ -130,9 +120,6 @@ def _canonical(value):
     if low.startswith("los angeles clippers"): return "LAC"
     if low.startswith("los angeles lakers"): return "LAL"
     return None
-
-def _normal_name(value):
-    return "".join(c.lower() for c in str(value or "") if c.isalnum())
 
 def _american_probability(odds):
     try: n=float(odds)
@@ -415,129 +402,6 @@ def _situational(team,game_date,schedule,opponent,current_venue):
     home_venue=_VENUES.get(team)
     altitude_change=(current[3]-home_venue[3]) if current and home_venue else 0
     return {"rest_days":rest,"travel_miles":round(travel),"tz_change":round(tz_change,1),"altitude_change":altitude_change}
-
-def _team_onoff(team,season,force=False):
-    now=time.time()
-    cached=_ONOFF_CACHE.get(team)
-    if not force and cached and now-cached["at"]<21600: return cached["data"]
-    team_id=_TEAM_IDS.get(team)
-    if not team_id: return {}
-    params=urlencode({"TeamID":str(team_id),"Season":season,"SeasonType":"Regular Season","MeasureType":"Advanced","PerMode":"PerGame","PlusMinus":"N","PaceAdjust":"N","Rank":"N","LeagueID":"00","LastNGames":"0","Month":"0","OpponentTeamID":"0","Location":"","Outcome":""})
-    url="https://stats.nba.com/stats/teamplayeronoffsummary?"+params
-    headers={"Referer":"https://www.nba.com/","Origin":"https://www.nba.com","x-nba-stats-origin":"stats","x-nba-stats-token":"true"}
-    try:
-        payload,_=_json(url,headers,7)
-        sets=payload.get("resultSets") or payload.get("resultSet") or []
-        if isinstance(sets,dict): sets=[sets]
-        parsed={}
-        for rs in sets:
-            if not isinstance(rs,dict): continue
-            title=str(rs.get("name") or rs.get("resultSetName") or "").lower()
-            heads=rs.get("headers") or []; rows=rs.get("rowSet") or []
-            for row in rows:
-                item=dict(zip(heads,row))
-                name=item.get("PLAYER_NAME") or item.get("PLAYER")
-                if not name: continue
-                try:
-                    net=float(item.get("NET_RATING"))
-                    mins=float(item.get("MIN") or 0)
-                except (TypeError,ValueError): continue
-                key=_normal_name(name)
-                parsed.setdefault(key,{"name":name,"on_net":None,"off_net":None,"minutes":mins})
-                if "off_court" in title or "offcourt" in title:
-                    parsed[key]["off_net"]=net
-                elif "on_court" in title or "oncourt" in title:
-                    parsed[key]["on_net"]=net
-                elif parsed[key]["on_net"] is None:
-                    parsed[key]["on_net"]=net
-        for item in parsed.values():
-            on=item.get("on_net"); off=item.get("off_net")
-            item["net_rating"]=(on-off) if on is not None and off is not None else None
-        _ONOFF_CACHE[team]={"at":now,"data":parsed}
-        return parsed
-    except Exception:
-        return {}
-
-def _season_player_boxscore(athlete_id,season_year,timeout=3):
-    key=(str(athlete_id),int(season_year))
-    cached=_PLAYER_IMPACT_CACHE.get(key)
-    if cached and time.time()-cached["at"]<21600: return cached["data"]
-    from . import index as app_index
-    url=app_index.ESPN_BASE+"/athletes/"+str(athlete_id)+"/gamelog?"+urlencode({"season":int(season_year)})
-    payload=app_index._get_json(url,timeout=timeout)
-    labels=payload.get("labels") or []
-    season_types=payload.get("seasonTypes") or []
-    def is_regular(st):
-        info=st.get("type") if isinstance(st.get("type"),dict) else {}
-        ids={str(st.get("id") or "").lower(),str(info.get("id") or "").lower()}
-        names=[st.get("name"),st.get("displayName"),st.get("abbreviation"),
-          info.get("name"),info.get("displayName"),info.get("abbreviation")]
-        norm={"".join(ch.lower() for ch in str(x or "") if ch.isalnum()) for x in names}
-        return "2" in ids or any("regularseason" in x and "playin" not in x for x in norm) or "reg" in norm
-    records=[]
-    for st in season_types:
-        if not isinstance(st,dict) or not is_regular(st): continue
-        for cat in st.get("categories") or []:
-            if not isinstance(cat,dict): continue
-            cat_labels=cat.get("labels") or labels
-            index={str(label).upper():i for i,label in enumerate(cat_labels)}
-            events=cat.get("events") or []
-            if isinstance(events,dict): events=list(events.values())
-            for event in events if isinstance(events,list) else []:
-                stats=event.get("stats") if isinstance(event,dict) else None
-                if not isinstance(stats,list): continue
-                def value(label):
-                    i=index.get(label)
-                    if i is None or i>=len(stats): return None
-                    raw=str(stats[i]).replace(",","").strip()
-                    try:
-                        if ":" in raw:
-                            mm,ss=raw.split(":",1); return float(mm)+float(ss)/60.0
-                        return float(raw)
-                    except (TypeError,ValueError): return None
-                mins=value("MIN"); pts=value("PTS")
-                if mins is None or pts is None or mins<=0: continue
-                records.append({"minutes":mins,"points":pts,"rebounds":value("REB") or 0,
-                  "assists":value("AST") or 0,"steals":value("STL") or 0,
-                  "blocks":value("BLK") or 0,"turnovers":value("TO") or 0})
-    data=records[-10:]
-    _PLAYER_IMPACT_CACHE[key]={"at":time.time(),"data":data}
-    return data
-
-
-def _player_boxscore_impact(injury,season):
-    from . import index as app_index
-    raw_name=str(injury.get("player") or "").strip()
-    search_name=raw_name
-    if "," in raw_name:
-        last,first=[x.strip() for x in raw_name.split(",",1)]
-        search_name=(first+" "+last).strip()
-    athlete_id=app_index._espn_player_id(search_name,timeout=3)
-    if not athlete_id: return None
-    try: current_year=int(str(season).split("-")[0])+1
-    except Exception: current_year=2027
-    current=_season_player_boxscore(athlete_id,current_year,timeout=3)
-    if len(current)==0:
-        # If the player has not appeared this season, the current-season team
-        # efficiency sample already reflects the roster without that player.
-        return {"minutes":0.0,"impact_points":0.0,"games":0,"box_value":0.0,
-          "source":"no current-season games; absence already reflected in team sample"}
-    sample=current
-    if len(current)<3:
-        prior=_season_player_boxscore(athlete_id,current_year-1,timeout=3)
-        if len(prior)>=3: sample=prior
-    if len(sample)<2: return None
-    averages={key:sum(float(x.get(key) or 0) for x in sample)/len(sample)
-      for key in ("minutes","points","rebounds","assists","steals","blocks","turnovers")}
-    # Conservative replacement-value proxy from recent box-score production.
-    # This is not advertised as EPM or true on/off; it is used only to avoid
-    # ignoring a verified absence when the NBA on/off endpoint is unavailable.
-    box_value=(averages["points"]+0.65*averages["rebounds"]+0.70*averages["assists"]
-      +1.5*averages["steals"]+1.5*averages["blocks"]-0.7*averages["turnovers"])
-    impact=0.0 if averages["minutes"]<12 else min(3.2,max(0.0,(box_value-7.0)*0.095))
-    return {"minutes":averages["minutes"],"impact_points":impact,"games":len(sample),
-      "box_value":box_value,"source":"ESPN recent box-score replacement proxy"}
-
 
 def _injury_adjustment(team,injuries,season,game_date):
     from zoneinfo import ZoneInfo
