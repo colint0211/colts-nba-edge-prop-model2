@@ -8,7 +8,7 @@ import json
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
@@ -185,6 +185,7 @@ def collect(batch=None):
 
     started = time.time()
     summary = {"season":season, "snapshot_date":snapshot_date.isoformat(),
+               "advanced_games_date":(snapshot_date-timedelta(days=1)).isoformat(),
                "batch":batch, "datasets":{}, "errors":{}}
     with _db() as conn:
         run_id = conn.execute("""
@@ -215,7 +216,7 @@ def collect(batch=None):
         ("schedule_context", schedule_rows, None, "App schedule"),
         ("injury_status", injury_rows, None, "Official NBA injury report"),
         ("team_season_advanced", lambda: _bdl_team_season_advanced(season.split("-")[0]), None, "BALLDONTLIE GOAT"),
-        ("game_advanced", lambda: _bdl_daily_advanced(snapshot_date), None, "BALLDONTLIE GOAT"),
+        ("game_advanced", lambda: _bdl_daily_advanced(snapshot_date-timedelta(days=1)), None, "BALLDONTLIE GOAT"),
         ("projected_lineups", lambda: _bdl_projected_lineups(snapshot_date), None, "BALLDONTLIE GOAT"),
     ]
     with ThreadPoolExecutor(max_workers=4) as pool:
