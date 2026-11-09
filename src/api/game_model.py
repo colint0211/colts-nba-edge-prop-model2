@@ -554,9 +554,9 @@ def _score_game(game,ratings,schedule,injuries,season):
         home_points+=margin_delta/2.0
         away_points-=margin_delta/2.0
     # Distribution scales are anchored to the walk-forward residual MAEs:
-    # margin MAE 11.678 -> normal SD 14.65; total MAE 15.212 -> normal SD 19.07.
-    # Logistic margin scale is chosen to match the same variance.
-    margin_sd=14.65
+    # Walk-forward residual SD: margin 14.81, total 19.06 across 2,455 games.
+    # Logistic margin scale is chosen to match the empirical margin variance.
+    margin_sd=14.81
     total_sd=19.07
     logistic_scale=margin_sd*math.sqrt(3.0)/math.pi
     score_sd=math.sqrt((margin_sd**2+total_sd**2)/4.0)
@@ -590,9 +590,9 @@ def _logistic_cdf(x,mean,scale):
 def _candidate(game,market,model):
     candidates=[]
     dist=model.get("score_distribution") or {}
-    margin_sd=float(dist.get("margin_sd") or 14.65)
+    margin_sd=float(dist.get("margin_sd") or 14.81)
     total_sd=float(dist.get("total_sd") or 19.07)
-    logistic_scale=float(dist.get("moneyline_logistic_scale") or 8.07)
+    logistic_scale=float(dist.get("moneyline_logistic_scale") or 8.17)
     margin_mean=float(model["projected_margin"])
     total_mean=float(model["projected_total"])
     home_win=_logistic_cdf(0.0,margin_mean,logistic_scale)
@@ -884,7 +884,7 @@ def build_board(force=False,preview_date=None):
     for event_id,model in base_models.items():
         game=game_by_id.get(event_id,{})
         dist=model.get("score_distribution") or {}
-        scale=float(dist.get("moneyline_logistic_scale") or 8.07)
+        scale=float(dist.get("moneyline_logistic_scale") or 8.17)
         home_probability=1.0/(1.0+math.exp(-max(-35.0,min(35.0,float(model["projected_margin"])/scale))))
         forecasts.append({
           "event_id":event_id,"matchup":game.get("matchup"),
