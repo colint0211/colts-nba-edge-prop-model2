@@ -407,7 +407,9 @@ def _schedule(force=False):
         return _SCHEDULE_CACHE["data"]
     from zoneinfo import ZoneInfo
     today=datetime.now(ZoneInfo(_ET)).date()
-    days=[(today-timedelta(days=i)).strftime("%Y%m%d") for i in range(7)]
+    # Keep a rolling window of recent completed games for rest/travel context,
+    # plus upcoming fixtures so forecasts do not depend on sportsbook event feeds.
+    days=[(today+timedelta(days=i)).strftime("%Y%m%d") for i in range(-7,8)]
     def fetch_day(day):
         url="https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?"+urlencode({"dates":day})
         try:
@@ -909,6 +911,56 @@ def build_board(force=False,preview_date=None):
         "minimum_ev_pct":2.0 if ratings.get("data_quality")=="derived_early_season" else 1.5,
         "maximum_ev_pct":20.0 if ratings.get("data_quality")=="derived_early_season" else None,"minimum_probability":50}}
  
+def build_forecasts(forecast_date=None,force=False):
+    """Generate independent matchup score distributions without requesting sportsbook odds."""
+    from zoneinfo import ZoneInfo
+    target_date=str(forecast_date or datetime.now(ZoneInfo(_ET)).date().isoformat())
+    try:
+        target=date.fromisoformat(target_date)
+    except Exception:
+        raise ValueError("forecast_date must be YYYY-MM-DD")
+    ratings=_team_ratings(force,target_date)
+    schedule=_schedule(force)
+    forecasts=[]
+    for item in schedule:
+        if item.get("completed") or not item.get("home") or not item.get("away"):
+            continue
+        try:
+            kickoff=datetime.fromisoformat(str(item.get("date") or "").replace("Z","+00:00"))
+            local_day=kickoff.astimezone(ZoneInfo(_ET)).date()
+        except Exception:
+            continue
+        if local_day!=target:
+            continue
+        game={"event_id":str(item.get("id") or ""),
+              "commence_time":item.get("date"),
+              "home":item["home"],"away":item["away"],
+              "matchup":_TEAM_NAMES.get(item["away"],item["away"])+" @ "+_TEAM_NAMES.get(item["home"],item["home"])}
+        model=_score_game(game,ratings,schedule,[],ratings.get("season"))
+        if not model:
+            continue
+        dist=model.get("score_distribution") or {}
+        scale=float(dist.get("moneyline_logistic_scale") or 8.07)
+        home_probability=1.0/(1.0+math.exp(-max(-35.0,min(35.0,float(model["projected_margin"])/scale))))
+        forecasts.append({
+          "event_id":game["event_id"],"commence_time":game["commence_time"],"matchup":game["matchup"],
+          "home_team":game["home"],"away_team":game["away"],
+          "projected_home":model["projected_home"],"projected_away":model["projected_away"],
+          "projected_margin":model["projected_margin"],"projected_total":model["projected_total"],
+          "home_win_probability":round(home_probability,5),"away_win_probability":round(1.0-home_probability,5),
+          "score_distribution":dist,"home_adjustments":model.get("home_adjustments"),
+          "away_adjustments":model.get("away_adjustments"),
+          "rating_source":model.get("rating_source"),"data_quality":model.get("data_quality"),
+          "injury_status":"not_applied_in_independent_baseline_forecast"
+        })
+    forecasts.sort(key=lambda x:x.get("commence_time") or "")
+    return {"forecast_date":target_date,"game_count":len(forecasts),"forecasts":forecasts,
+      "source_status":{"team_ratings":ratings.get("source"),"data_quality":ratings.get("data_quality"),
+        "schedule":"ESPN scoreboard","sportsbook_odds_used":False,
+        "injury_adjustments":"not applied; this endpoint is the independent baseline forecast"},
+      "model_policy":"Independent linear team-efficiency and situational score mapping with logistic-link moneyline probabilities and provisional score uncertainty. Sportsbook lines are not inputs."}
+
+
 def history(slate_date):
     initialize()
     with _connect() as conn:
