@@ -3618,9 +3618,9 @@ def game_sides_totals_metrics():
 
 
 @app.get("/api/game-api-sports-team-probe")
-def game_api_sports_team_probe(team: str = "Phoenix Suns"):
+def game_api_sports_team_probe(team: str = "Phoenix Suns", season: str = "2025-2026"):
     try:
-        return JSONResponse(game_model.api_sports_team_probe(team))
+        return JSONResponse(game_model.api_sports_team_probe(team,season))
     except Exception as exc:
         return JSONResponse({"status":"unavailable","error":type(exc).__name__,"detail":str(exc)[:250]},status_code=503)
 
