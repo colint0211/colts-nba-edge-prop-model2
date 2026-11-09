@@ -324,7 +324,7 @@ def collect(batch=None):
     return {"success":successful > 0,"status":status,"run_id":run_id,**summary}
 
 def latest_team_ratings(max_age_days=2):
-    """Return the latest complete persisted NBA Stats team-advanced snapshot."""
+    """Return complete persisted team advanced ratings, preferring BALLDONTLIE GOAT."""
     initialize()
     with _db() as conn:
         rows = conn.execute("""
@@ -414,7 +414,10 @@ def status():
     with _db() as conn:
         latest = conn.execute("""
           SELECT metric_key, MAX(snapshot_date)::text AS snapshot_date,
-                 COUNT(*) FILTER (WHERE snapshot_date=(SELECT MAX(snapshot_date) FROM nba_metric_snapshots s2 WHERE s2.metric_key=s.metric_key)) AS rows
+                 COUNT(*) FILTER (WHERE snapshot_date=(SELECT MAX(snapshot_date) FROM nba_metric_snapshots s2 WHERE s2.metric_key=s.metric_key)) AS rows,
+                 (SELECT s2.source FROM nba_metric_snapshots s2
+                  WHERE s2.metric_key=s.metric_key
+                  ORDER BY s2.snapshot_date DESC,s2.captured_at DESC LIMIT 1) AS source
           FROM nba_metric_snapshots s GROUP BY metric_key ORDER BY metric_key
         """).fetchall()
         runs = conn.execute("""
@@ -422,11 +425,11 @@ def status():
           FROM nba_metric_collection_runs ORDER BY started_at DESC LIMIT 12
         """).fetchall()
     return {
-        "datasets":[{"metric":r[0],"latest_snapshot":r[1],"rows":r[2]} for r in latest],
+        "datasets":[{"metric":r[0],"latest_snapshot":r[1],"rows":r[2],"source":r[3]} for r in latest],
         "recent_runs":[{"id":r[0],"date":r[1],"season":r[2],"batch":r[3],"status":r[4],
                         "started_at":r[5].isoformat() if r[5] else None,
                         "finished_at":r[6].isoformat() if r[6] else None,
                         "summary":r[7]} for r in runs],
-        "rotation":"Five teams per batch; six batches rotate daily, completing a full team on/off and lineup cycle every six days.",
+        "rotation":"Daily team ratings, schedule and injury snapshots; game-level player advanced stats are paginated, and projected lineups are stored when the API tier permits.",
         "optional_player_impact":"BALLDONTLIE season/game advanced stats and projected lineups require GOAT tier; Dunks & Threes EPM requires DUNKS_AND_THREES_API_KEY.",
     }
