@@ -333,12 +333,22 @@ def _schedule(force=False):
         return _SCHEDULE_CACHE["data"]
     from zoneinfo import ZoneInfo
     today=datetime.now(ZoneInfo(_ET)).date()
-    start=(today-timedelta(days=6)).strftime("%Y%m%d")
-    end=today.strftime("%Y%m%d")
-    url="https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?"+urlencode({"dates":start+"-"+end,"limit":200})
-    payload,_=_json(url,timeout=15)
-    games=[]
-    for event in payload.get("events") or []:
+    days=[(today-timedelta(days=i)).strftime("%Y%m%d") for i in range(7)]
+    def fetch_day(day):
+        url="https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?"+urlencode({"dates":day})
+        try:
+            payload,_=_json(url,timeout=5)
+            return payload.get("events") or []
+        except Exception:
+            return []
+    events=[]
+    with ThreadPoolExecutor(max_workers=7) as pool:
+        for batch in pool.map(fetch_day,days):
+            events.extend(batch)
+    games=[]; seen=set()
+    for event in events:
+        if not isinstance(event,dict) or str(event.get("id") or "") in seen: continue
+        seen.add(str(event.get("id") or ""))
         competitions=event.get("competitions") or []
         if not competitions: continue
         competitors=competitions[0].get("competitors") or []
@@ -357,6 +367,7 @@ def _schedule(force=False):
           "away_score":next((int(float(v.get("score") or 0)) for v in teams.values() if v.get("homeAway")=="away"),0)})
     _SCHEDULE_CACHE.update({"at":now,"data":games})
     return games
+
 
 def _haversine(a,b):
     import math
