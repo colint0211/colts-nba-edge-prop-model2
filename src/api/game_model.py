@@ -513,6 +513,8 @@ def _score_game(game,ratings,schedule,injuries,season):
     return {"projected_home":round(home_points,2),"projected_away":round(away_points,2),
       "projected_margin":round(home_points-away_points,2),"projected_total":round(home_points+away_points,2),
       "projected_pace":round(pace,2),"home_adjustments":home_adj,"away_adjustments":away_adj,
+      "injury_uncertainty":bool(home_adj.get("unpriced_injury") or away_adj.get("unpriced_injury")),
+      "rating_source":ratings.get("source"),"data_quality":ratings.get("data_quality","advanced"),
       "ratings":{"home":h,"away":a}}
 
 def _candidate(game,market,model):
@@ -551,6 +553,7 @@ def _candidate(game,market,model):
     for c in candidates:
         c.update({"event_id":game["event_id"],"matchup":game["matchup"],"home_team":game["home"],
           "away_team":game["away"],"commence_time":game.get("commence_time"),
+          "selection_name":_TEAM_NAMES.get(c.get("selection"),c.get("selection")) if market=="sides" else c.get("selection"),
           "projected_home":model["projected_home"],"projected_away":model["projected_away"],
           "projected_margin":model["projected_margin"],"projected_total":model["projected_total"],
           "projected_pace":model["projected_pace"],"home_adjustments":model["home_adjustments"],
@@ -666,6 +669,8 @@ def build_board(force=False):
             raise RuntimeError("Fresh official NBA injury report is unavailable; refusing to lock picks.")
     except Exception:
         injuries=[]; injury_meta={"status":"unavailable"}
+    if injury_meta.get("status")!="fresh":
+        raise RuntimeError("Fresh official NBA injury report is unavailable; refusing to lock picks.")
     sides=[]; totals=[]; unavailable=[]
     now=datetime.now(timezone.utc)
     for game in games:
