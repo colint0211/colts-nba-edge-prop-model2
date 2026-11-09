@@ -302,9 +302,6 @@ def latest_team_ratings(max_age_days=2):
     quality = "derived_early_season"
     source = "Tank01 current-season box-score averages; estimated possessions, league-mean shrinkage, persisted daily snapshot"
     min_games = min(row["games"] for row in teams.values())
-    if len(teams) < 28:
-        return None
-    min_games = min(row["games"] for row in teams.values())
     return {
         "teams":teams, "season":_season(), "prior_season":None,
         "source":source,
