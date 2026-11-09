@@ -3174,6 +3174,91 @@ def _run_pending_settlements():
     }
     team_aliases = {"NY": "NYK", "GS": "GSW", "WSH": "WAS"}
     event_team_cache = {}
+    scoreboard_cache = {}
+    summary_cache = {}
+
+    def completed_boxscore_value(athlete_id, field, label, slate_date, expected_teams):
+        """Use completed ESPN scoreboard events when athlete gamelogs lack event IDs."""
+        try:
+            base_date = datetime.fromisoformat(str(slate_date)[:10]).date()
+        except Exception:
+            return None
+        matches = []
+        for offset in (-1, 0, 1):
+            date_key = (base_date + timedelta(days=offset)).strftime("%Y%m%d")
+            if date_key not in scoreboard_cache:
+                try:
+                    scoreboard_cache[date_key] = _get_json(
+                        "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?"
+                        + urlencode({"dates": date_key}), timeout=8
+                    )
+                except Exception:
+                    scoreboard_cache[date_key] = {}
+            for event in (scoreboard_cache[date_key] or {}).get("events") or []:
+                event_id = str(event.get("id") or "")
+                status = ((event.get("status") or {}).get("type") or {})
+                if not event_id or not status.get("completed"):
+                    continue
+                teams = set()
+                competitions = event.get("competitions") or []
+                competitors = competitions[0].get("competitors") or [] if competitions else []
+                for competitor in competitors:
+                    team = competitor.get("team") or {}
+                    code = _canonical_team_code(team.get("abbreviation") or team.get("shortDisplayName"))
+                    if code:
+                        teams.add(team_aliases.get(code, code))
+                if len(teams) != 2:
+                    teams = matchup_for_event(event_id) or set()
+                if expected_teams and not (
+                    teams == expected_teams or
+                    (len(expected_teams) == 1 and expected_teams.issubset(teams))
+                ):
+                    continue
+                if event_id not in summary_cache:
+                    try:
+                        summary_cache[event_id] = _get_json(
+                            "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/summary?"
+                            + urlencode({"event": event_id}), timeout=8
+                        )
+                    except Exception:
+                        summary_cache[event_id] = {}
+                groups = ((summary_cache[event_id] or {}).get("boxscore") or {}).get("players") or []
+                found_values = []
+                for group in groups:
+                    group_team = group.get("team") or {}
+                    group_code = _canonical_team_code(group_team.get("abbreviation") or group_team.get("shortDisplayName"))
+                    if expected_teams and len(expected_teams) == 1 and group_code and group_code not in expected_teams:
+                        continue
+                    for stat_group in group.get("statistics") or []:
+                        labels = stat_group.get("labels") or []
+                        aliases = {"3PT": ("3PM", "3P"), "PTS": ("POINTS",),
+                                   "REB": ("REBOUNDS",), "AST": ("ASSISTS",), "STL": ("STEALS",)}
+                        idx = labels.index(label) if label in labels else next(
+                            (labels.index(a) for a in aliases.get(label, ()) if a in labels), -1
+                        )
+                        if idx < 0:
+                            continue
+                        for athlete in stat_group.get("athletes") or []:
+                            athlete_info = athlete.get("athlete") or {}
+                            if str(athlete_info.get("id") or "") != str(athlete_id):
+                                continue
+                            stats = athlete.get("stats") or []
+                            if idx >= len(stats):
+                                continue
+                            raw = str(stats[idx]).strip()
+                            if label == "3PT" and "-" in raw:
+                                raw = raw.split("-", 1)[0].strip()
+                            try:
+                                value = float(raw)
+                            except (TypeError, ValueError):
+                                continue
+                            if math.isfinite(value) and value >= 0:
+                                found_values.append(value)
+                if found_values:
+                    matches.extend((event_id, value) for value in found_values)
+        unique = {event_id: value for event_id, value in matches}
+        return next(iter(unique.values())) if len(unique) == 1 else None
+
     result = {"checked": 0, "settled": 0, "skipped": 0, "errors": 0,
               "skip_reasons": {"missing_identity": 0, "no_matching_completed_game": 0,
                                "ambiguous_game": 0, "settlement_conflict": 0},
@@ -3300,6 +3385,13 @@ def _run_pending_settlements():
                         )
                     ):
                         possible.append(row)
+                # Fallback to exact athlete-ID stats in completed ESPN box scores.
+                if len(possible) == 0:
+                    boxscore_actual = completed_boxscore_value(
+                        athlete_id, field, label, created_date, expected_teams
+                    )
+                    if boxscore_actual is not None:
+                        possible = [{"value": boxscore_actual}]
                 # More than one possible event is ambiguous; do not settle it.
                 if len(possible) != 1:
                     result["skipped"] += 1
