@@ -207,6 +207,93 @@ def _parse_game_lines(events):
                     "bookmaker":"DraftKings","bookmaker_link":dk.get("link")})
     return rows
 
+
+def collect_market_snapshots():
+    """Persist a timestamped, two-sided DraftKings spread/total snapshot.
+
+    This collector deliberately bypasses the in-memory odds cache. Each scheduled
+    invocation records the actual quote set returned by PropLine at capture time.
+    It does not generate or unlock betting picks.
+    """
+    initialize()
+    events, source, quota = _fetch_lines(force=True)
+    games = _parse_game_lines(events)
+    from zoneinfo import ZoneInfo
+    now = datetime.now(timezone.utc)
+    captured_at = now.isoformat()
+    batch_id = hashlib.sha256((captured_at + str(len(games))).encode()).hexdigest()
+    records = []
+    for game in games:
+        try:
+            start = datetime.fromisoformat(str(game.get("commence_time") or "").replace("Z", "+00:00"))
+            if start.tzinfo is None:
+                start = start.replace(tzinfo=timezone.utc)
+            if start <= now:
+                continue
+            slate_date = start.astimezone(ZoneInfo(_ET)).date().isoformat()
+        except Exception:
+            continue
+        for team in (game["home"], game["away"]):
+            quote = game["spreads"].get(team) or {}
+            if quote.get("line") is not None and quote.get("odds") is not None:
+                records.append((batch_id, captured_at, str(game["event_id"]), game["commence_time"],
+                    slate_date, game["matchup"], game["home"], game["away"], "spreads", team,
+                    float(quote["line"]), int(quote["odds"]), "DraftKings", source,
+                    json.dumps(quote, separators=(",", ":"), allow_nan=False)))
+        for side in ("over", "under"):
+            quote = game["totals"].get(side) or {}
+            if quote.get("line") is not None and quote.get("odds") is not None:
+                records.append((batch_id, captured_at, str(game["event_id"]), game["commence_time"],
+                    slate_date, game["matchup"], game["home"], game["away"], "totals", side.upper(),
+                    float(quote["line"]), int(quote["odds"]), "DraftKings", source,
+                    json.dumps(quote, separators=(",", ":"), allow_nan=False)))
+    with _connect() as conn:
+        conn.execute("""
+          CREATE TABLE IF NOT EXISTS nba_market_snapshots (
+            id BIGSERIAL PRIMARY KEY,
+            batch_id TEXT NOT NULL,
+            captured_at TIMESTAMPTZ NOT NULL,
+            event_id TEXT NOT NULL,
+            commence_time TIMESTAMPTZ,
+            slate_date DATE NOT NULL,
+            matchup TEXT NOT NULL,
+            home_team TEXT NOT NULL,
+            away_team TEXT NOT NULL,
+            market TEXT NOT NULL CHECK (market IN ('spreads','totals')),
+            outcome TEXT NOT NULL,
+            line DOUBLE PRECISION NOT NULL,
+            odds INTEGER NOT NULL,
+            bookmaker TEXT NOT NULL,
+            source TEXT NOT NULL,
+            raw_quote JSONB NOT NULL DEFAULT '{}'::jsonb
+          );
+          CREATE INDEX IF NOT EXISTS nba_market_snapshots_event_time
+            ON nba_market_snapshots(event_id, market, outcome, captured_at DESC);
+          CREATE INDEX IF NOT EXISTS nba_market_snapshots_capture
+            ON nba_market_snapshots(captured_at DESC);
+          CREATE INDEX IF NOT EXISTS nba_market_snapshots_slate
+            ON nba_market_snapshots(slate_date, market);
+        """)
+        if records:
+            conn.executemany("""
+              INSERT INTO nba_market_snapshots
+                (batch_id,captured_at,event_id,commence_time,slate_date,matchup,home_team,away_team,
+                 market,outcome,line,odds,bookmaker,source,raw_quote)
+              VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb)
+            """, records)
+    return {
+        "status": "ok",
+        "captured_at": captured_at,
+        "batch_id": batch_id,
+        "source": "PropLine DraftKings",
+        "feed_source": source,
+        "upcoming_events": len({row[2] for row in records}),
+        "quote_snapshots_saved": len(records),
+        "markets": ["spreads", "totals"],
+        "prop_line_quota": quota,
+        "note": "Snapshots are append-only. Repeated unchanged quotes are retained to establish observation times; no historical data is backfilled."
+    }
+
 def _nba_stats(season,last_n=0):
     params={
       "LeagueID":"00","Season":season,"SeasonType":"Regular Season","MeasureType":"Advanced",
