@@ -122,6 +122,10 @@ def _entity(metric, row, team_code=None):
         parts = [team_code, row.get("GROUP_ID"), row.get("GROUP_NAME"),
                  row.get("GROUP_VALUE"), row.get("GROUP_SET")]
         return ":".join(str(x) for x in parts if x not in (None, ""))
+    if metric == "schedule_context":
+        return str(row.get("id") or row.get("event_id") or "")
+    if metric == "injury_status":
+        return ":".join(str(x) for x in (row.get("player"),row.get("team"),row.get("game_date")) if x)
     return str(row.get("TEAM_ID") or row.get("PLAYER_ID") or "league")
 
 def _persist(snapshot_date, season, metric, rows, team_code=None):
@@ -170,11 +174,29 @@ def collect(batch=None):
           VALUES (%s,%s,%s,'running') RETURNING id
         """, (snapshot_date,season,batch)).fetchone()[0]
 
+    def schedule_rows():
+        from . import game_model
+        rows = game_model._schedule(force=True)
+        return [("schedule", row) for row in rows]
+
+    def injury_rows():
+        from . import index as app_index
+        feed = app_index._load_official_injury_feed()
+        records = feed.get("records") or []
+        meta = feed.get("meta") or {}
+        if not records:
+            return [("feed_status", {"source_status":meta.get("status","unavailable"),
+                                     "source":meta.get("source","official injury report"),
+                                     "record_count":0,"error":meta.get("error")})]
+        return [("injury", row) for row in records]
+
     tasks = [
         ("team_advanced", lambda: _fetch("leaguedashteamstats",
             {**_base_params(season),"MeasureType":"Advanced"}), None),
         ("player_advanced", lambda: _fetch("leaguedashplayerstats",
             {**_base_params(season),"MeasureType":"Advanced"}), None),
+        ("schedule_context", schedule_rows, None),
+        ("injury_status", injury_rows, None),
     ]
     for code, team_id in selected:
         tasks.append((f"team_onoff:{code}", lambda tid=team_id: _team_request(
