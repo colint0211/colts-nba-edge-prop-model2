@@ -204,6 +204,56 @@ def collect(batch=None):
         """, (status,json.dumps(summary),run_id))
     return {"success":successful > 0,"status":status,"run_id":run_id,**summary}
 
+def latest_team_ratings(max_age_days=2):
+    """Return the latest complete persisted NBA Stats team-advanced snapshot."""
+    initialize()
+    with _db() as conn:
+        rows = conn.execute("""
+          SELECT payload FROM nba_metric_snapshots
+          WHERE metric_key='team_advanced'
+            AND snapshot_date >= (CURRENT_DATE - (%s * INTERVAL '1 day'))::date
+          ORDER BY snapshot_date DESC
+        """, (int(max_age_days),)).fetchall()
+    teams = {}
+    def number(row, key, default=0.0):
+        try:
+            value = row.get(key)
+            return float(value) if value is not None else default
+        except (TypeError, ValueError):
+            return default
+    for (payload,) in rows:
+        code = str(payload.get("TEAM_ABBREVIATION") or "").upper()
+        if len(code) != 3 or code in teams:
+            continue
+        games = int(number(payload, "GP", 0))
+        ortg = number(payload, "OFF_RATING")
+        drtg = number(payload, "DEF_RATING")
+        if games < 1 or ortg <= 0 or drtg <= 0:
+            continue
+        teams[code] = {
+            "team":code, "games":games, "ortg":ortg, "drtg":drtg,
+            "net":number(payload, "NET_RATING", ortg-drtg),
+            "pace":number(payload, "PACE"),
+            "efg":number(payload, "EFG_PCT"),
+            "tov":number(payload, "TM_TOV_PCT"),
+            "oreb":number(payload, "OREB_PCT"),
+            "dreb":number(payload, "DREB_PCT"),
+            "ts":number(payload, "TS_PCT"),
+            "source":"NBA Stats persisted advanced snapshot",
+            "recent_sample":0,
+        }
+    if len(teams) < 28:
+        return None
+    min_games = min(row["games"] for row in teams.values())
+    quality = "advanced" if min_games >= 10 else "derived_early_season"
+    return {
+        "teams":teams, "season":_season(), "prior_season":None,
+        "source":"NBA Stats LeagueDashTeamStats advanced; persisted daily snapshot",
+        "data_quality":quality, "fetched_at":datetime.now(timezone.utc).isoformat(),
+        "player_impact_source":"Team/player on-off and five-man lineup snapshots are being collected separately; EPM is optional.",
+        "epm_available":False,
+    }
+
 def status():
     initialize()
     with _db() as conn:
