@@ -122,10 +122,14 @@ def main():
     for threshold in (1.5, 2.5, 3.5, 4.5):
         selected = []
         for game in matched:
-            if game["model_home_edge_points"] >= threshold:
-                selected.append({"result": game["model_result"]})
-            elif game["model_home_edge_points"] <= -threshold:
-                selected.append({"result": "WIN" if game["model_result"] == "LOSS" else "LOSS" if game["model_result"] == "WIN" else game["model_result"]})
+            edge = game["model_home_edge_points"]
+            actual = game["actual_home_ats_margin"]
+            if edge >= threshold:
+                result = "PUSH" if abs(actual) < 1e-9 else ("WIN" if actual > 0 else "LOSS")
+                selected.append({"result": result})
+            elif edge <= -threshold:
+                result = "PUSH" if abs(actual) < 1e-9 else ("WIN" if actual < 0 else "LOSS")
+                selected.append({"result": result})
         threshold_sensitivity[str(threshold)] = summarize(selected)
 
     report = {
