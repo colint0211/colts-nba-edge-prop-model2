@@ -164,6 +164,16 @@ def collect(batch=None):
     if batch < 0 or batch > 5:
         raise ValueError("batch must be between 0 and 5")
     selected = _TEAMS[batch * 5:(batch + 1) * 5]
+    with _db() as conn:
+        previous = conn.execute("""
+          SELECT id,status,summary FROM nba_metric_collection_runs
+          WHERE snapshot_date=%s AND batch=%s AND status='complete'
+          ORDER BY started_at DESC LIMIT 1
+        """, (snapshot_date,batch)).fetchone()
+    if previous:
+        return {"success":True,"status":"already_complete","run_id":previous[0],
+                "snapshot_date":snapshot_date.isoformat(),"batch":batch,"summary":previous[2]}
+
     started = time.time()
     summary = {"season":season, "snapshot_date":snapshot_date.isoformat(),
                "batch":batch, "teams_in_batch":[x[0] for x in selected],
