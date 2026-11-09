@@ -641,9 +641,25 @@ def build_board(force=False,preview_date=None):
         if preview:
             return {"slate_date":slate_date,"preview":True,"frozen":False,"sides":[],"totals":[],
               "metrics":_metrics(),"settlement":settlement,"game_count":0,
-              "source_status":{"odds":"PropLine DraftKings ("+odds_source+")","team_ratings":"not needed; no remaining games on preview date",
+              "source_status":{"odds":"PropLine DraftKings ("+odds_source+")","team_ratings":"not needed; no lines for preview date",
                 "injuries":"not needed","prop_line_quota":quota},
-              "model_policy":"No upcoming games remain on the requested preview date. No picks were forced."}
+              "model_policy":"No DraftKings lines were available for the requested preview date. Nothing was saved."}
+        schedule_probe=_schedule(force=False)
+        if not schedule_probe:
+            raise RuntimeError("Recent ESPN schedule unavailable; refusing to freeze an empty slate.")
+        has_scheduled_game=False
+        for item in schedule_probe:
+            try:
+                game_day=datetime.fromisoformat(item["date"].replace("Z","+00:00")).astimezone(ZoneInfo(_ET)).date().isoformat()
+                if game_day==slate_date and not item.get("completed"):
+                    has_scheduled_game=True; break
+            except Exception: continue
+        if has_scheduled_game:
+            return {"slate_date":slate_date,"frozen":False,"sides":[],"totals":[],
+              "metrics":_metrics(),"settlement":settlement,"game_count":0,
+              "source_status":{"odds":"DraftKings lines not posted yet for scheduled games","team_ratings":"waiting for complete odds",
+                "injuries":"waiting for odds","prop_line_quota":quota},
+              "model_policy":"Games are scheduled for this date, but DraftKings spread/total lines are not available yet. The board will retry and will not freeze an empty slate."}
         side_picks,side_saved=_save_slate([],"sides",slate_date)
         total_picks,total_saved=_save_slate([],"totals",slate_date)
         return {"slate_date":slate_date,"frozen":True,"sides":side_picks,"totals":total_picks,
