@@ -536,55 +536,37 @@ def _team_adjustment(team,opp,game_date,schedule,injuries,season,is_home):
       "total_adjustment":rest-travel_penalty-timezone_penalty-elevation_penalty+inj["points"]}
 
 def _score_game(game,ratings,schedule,injuries,season):
+    """Build an opponent-adjusted quantitative matchup forecast."""
     home,away=game["home"],game["away"]
     h=ratings["teams"].get(home); a=ratings["teams"].get(away)
     if not h or not a: return None
-    pace=(h["pace"]+a["pace"])/2.0
-    home_eff=(h["ortg"]+a["drtg"])/2.0
-    away_eff=(a["ortg"]+h["drtg"])/2.0
     home_adj=_team_adjustment(home,away,game.get("commence_time"),schedule,injuries,season,True)
     away_adj=_team_adjustment(away,home,game.get("commence_time"),schedule,injuries,season,False)
-    home_points=home_eff*pace/100.0+2.0+home_adj["total_adjustment"]
-    away_points=away_eff*pace/100.0+away_adj["total_adjustment"]
+    from .quant_game_engine import project_matchup
+    model=project_matchup(
+      home=h,away=a,all_teams=ratings["teams"],
+      home_adjustment=home_adj["total_adjustment"],
+      away_adjustment=away_adj["total_adjustment"],
+      data_quality=ratings.get("data_quality","unknown"),
+      home_court_points=2.0,
+    )
+    model["home_adjustments"]=home_adj
+    model["away_adjustments"]=away_adj
     epm_used=bool(h.get("team_epm") is not None and a.get("team_epm") is not None)
     if epm_used:
-        epm_margin=(h["team_epm"]-a["team_epm"])*pace/100.0+2.0
-        baseline_margin=home_points-away_points
-        margin_delta=epm_margin-baseline_margin
-        home_points+=margin_delta/2.0
-        away_points-=margin_delta/2.0
-    # Distribution scales are anchored to the walk-forward residual MAEs:
-    # Walk-forward residual SD: margin 14.81, total 19.06 across 2,455 games.
-    # Logistic margin scale is chosen to match the empirical margin variance.
-    margin_sd=14.81
-    total_sd=19.06
-    logistic_scale=margin_sd*math.sqrt(3.0)/math.pi
-    score_variance=(margin_sd**2+total_sd**2)/4.0
-    score_sd=math.sqrt(score_variance)
-    score_covariance=(total_sd**2-margin_sd**2)/4.0
-    score_correlation=score_covariance/score_variance if score_variance>0 else 0.0
-    z80=1.281551565545
-    margin=home_points-away_points
-    total=home_points+away_points
-    return {"projected_home":round(home_points,2),"projected_away":round(away_points,2),
-      "projected_margin":round(margin,2),"projected_total":round(total,2),
-      "projected_pace":round(pace,2),"home_adjustments":home_adj,"away_adjustments":away_adj,
-      "epm_used":epm_used,"epm_margin":round(epm_margin,2) if epm_used else None,
-      "injury_uncertainty":bool(home_adj.get("unpriced_injury") or away_adj.get("unpriced_injury")),
-      "rating_source":ratings.get("source"),"data_quality":ratings.get("data_quality","advanced"),
-      "ratings":{"home":h,"away":a},
-      "score_distribution":{
-        "family":"joint normal score approximation; moneyline/spread margin probability uses equivalent logistic link",
-        "home_score_sd":round(score_sd,2),"away_score_sd":round(score_sd,2),
-        "home_away_score_covariance":round(score_covariance,3),"home_away_score_correlation":round(score_correlation,4),
-        "margin_sd":margin_sd,"total_sd":total_sd,"moneyline_logistic_scale":round(logistic_scale,3),
-        "home_score_80":[round(home_points-z80*score_sd,1),round(home_points+z80*score_sd,1)],
-        "away_score_80":[round(away_points-z80*score_sd,1),round(away_points+z80*score_sd,1)],
-        "margin_80":[round(margin-z80*margin_sd,1),round(margin+z80*margin_sd,1)],
-        "total_80":[round(total-z80*total_sd,1),round(total+z80*total_sd,1)],
-        "calibration_status":"provisional_walk_forward_error_scale; joint margin-total covariance not yet estimated"
-      }}
-
+        epm_margin=(h["team_epm"]-a["team_epm"])*model["projected_pace"]/100.0+2.0
+        margin_delta=epm_margin-model["projected_margin"]
+        model["projected_home"]=round(model["projected_home"]+margin_delta/2.0,2)
+        model["projected_away"]=round(model["projected_away"]-margin_delta/2.0,2)
+        model["projected_margin"]=round(model["projected_home"]-model["projected_away"],2)
+        model["projected_total"]=round(model["projected_home"]+model["projected_away"],2)
+        model["epm_margin"]=round(epm_margin,2)
+    model["epm_used"]=epm_used
+    model["injury_uncertainty"]=bool(home_adj.get("unpriced_injury") or away_adj.get("unpriced_injury"))
+    model["rating_source"]=ratings.get("source")
+    model["data_quality"]=ratings.get("data_quality","unknown")
+    model["ratings"]={"home":h,"away":a}
+    return model
 
 def _logistic_cdf(x,mean,scale):
     z=max(-35.0,min(35.0,(float(x)-float(mean))/float(scale)))
@@ -909,7 +891,7 @@ def build_board(force=False,preview_date=None):
         "player_impact":ratings.get("player_impact_source","not integrated"),
         "reviewed_games":len(review_games),"prop_line_quota":quota,"saved_sides":side_saved,"saved_totals":total_saved,
         "unavailable_games":unique_unavailable[:10]},
-      "model_policy":"Linear team-efficiency score mapping (offense vs opponent defense, shared pace and explicit rest/travel/time-zone/elevation adjustments), logistic-link moneyline and spread probabilities, and a joint score uncertainty approximation. Current uncertainty scales are provisional conversions from the first 2,455-game walk-forward MAEs; score residual covariance and fitted regression coefficients remain validation work. DraftKings odds are used only for no-vig comparison and EV, never to set model probabilities.",
+      "model_policy":"Quantitative matchup engine v1: opponent-adjusted offensive efficiency, league-relative defensive resistance, blended team/league pace, explicit rest/travel/time-zone/elevation adjustments, and a joint score distribution. DraftKings odds are used only for no-vig comparison and EV, never to set model probabilities. Four Factors are diagnostics only because their effects are already reflected in points-per-possession efficiency. Probability calibration and player-level availability valuation remain provisional; this is not yet a fully validated Benter-grade betting model.",
       "thresholds":{"minimum_edge_pp":4.0 if ratings.get("data_quality")=="derived_early_season" else 2.5,
         "maximum_edge_pp":12.0 if ratings.get("data_quality")=="derived_early_season" else None,
         "minimum_ev_pct":2.0 if ratings.get("data_quality")=="derived_early_season" else 1.5,
