@@ -248,6 +248,7 @@ def _capture_market_snapshots(force_refresh=False):
                     slate_date,game["matchup"],game["home"],game["away"],"totals",side.upper(),
                     float(quote["line"]),int(quote["odds"]),"DraftKings",source,
                     json.dumps(quote,separators=(",",":"),allow_nan=False)))
+    saved_count = 0
     with _connect() as conn:
         conn.execute("""
           CREATE TABLE IF NOT EXISTS nba_market_snapshots (
@@ -278,19 +279,21 @@ def _capture_market_snapshots(force_refresh=False):
             ON nba_market_snapshots(slate_date,market);
         """)
         if records:
-            conn.executemany("""
-              INSERT INTO nba_market_snapshots
-                (batch_id,captured_at,event_id,commence_time,slate_date,matchup,home_team,away_team,
-                 market,outcome,line,odds,bookmaker,source,raw_quote)
-              VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb)
-              ON CONFLICT (batch_id,event_id,market,outcome) DO NOTHING
-            """, records)
+            with conn.cursor() as cur:
+                cur.executemany("""
+                  INSERT INTO nba_market_snapshots
+                    (batch_id,captured_at,event_id,commence_time,slate_date,matchup,home_team,away_team,
+                     market,outcome,line,odds,bookmaker,source,raw_quote)
+                  VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb)
+                  ON CONFLICT (batch_id,event_id,market,outcome) DO NOTHING
+                """, records)
+                saved_count = max(0, cur.rowcount)
     return {
         "status":"ok","captured_at":captured_at,"batch_id":batch_id,
         "source":"PropLine DraftKings","feed_source":source,
         "upcoming_events":len({row[2] for row in records}),
         "quote_snapshots_seen":len(records),
-        "quote_snapshots_saved":len(records),
+        "quote_snapshots_saved":saved_count,
         "markets":["spreads","totals"],"prop_line_quota":quota,
         "note":"Append-only timestamped quotes; repeated reads of the same cached feed are deduplicated. No historical data is backfilled."
     }
@@ -1135,9 +1138,10 @@ def clv_report():
             quotes = conn.execute("""
               SELECT batch_id,captured_at,outcome,line,odds
               FROM nba_market_snapshots
-              WHERE event_id=%s AND market=%s AND captured_at < %s
+              WHERE event_id=%s AND market=%s
+                AND captured_at >= %s AND captured_at < %s
               ORDER BY captured_at DESC
-            """, (str(event_id), snap_market, commence)).fetchall()
+            """, (str(event_id), snap_market, created_at, commence)).fetchall()
             batches = {}
             for batch_id, captured_at, outcome, line, odds in quotes:
                 batch = batches.setdefault(batch_id, {"captured_at": captured_at, "quotes": {}})
