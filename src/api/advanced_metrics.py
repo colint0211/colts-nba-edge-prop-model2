@@ -88,6 +88,73 @@ def _tank01_team_rows():
         raise RuntimeError("Tank01 returned only " + str(len(rows)) + "/30 usable team records.")
     return rows
 
+
+def _tank01_player_rows():
+    from . import index as app_index
+    payload, headers = app_index._tank01_request(
+        "/getNBATeams", {"rosters":"true","statsToGet":"averages"}, timeout=25
+    )
+    body = payload.get("body")
+    teams = body if isinstance(body,list) else ([v for v in body.values() if isinstance(v,dict)] if isinstance(body,dict) else [])
+    rows = []
+    def value(stats, *keys):
+        for key in keys:
+            try:
+                raw = stats.get(key)
+                if raw is not None:
+                    if isinstance(raw,dict):
+                        raw = raw.get("Average") or raw.get("Total") or raw.get("avg")
+                    return float(raw)
+            except (TypeError,ValueError):
+                continue
+        return 0.0
+    for team in teams:
+        if not isinstance(team,dict):
+            continue
+        team_code = str(team.get("teamAbv") or "").upper()
+        roster = team.get("Roster") or team.get("roster") or {}
+        if isinstance(roster,dict):
+            players = list(roster.items())
+        elif isinstance(roster,list):
+            players = [(str(p.get("playerID") or p.get("id") or i),p) for i,p in enumerate(roster) if isinstance(p,dict)]
+        else:
+            players = []
+        for player_id, player in players:
+            if not isinstance(player,dict):
+                continue
+            stats = player.get("stats") or player.get("playerStats") or {}
+            if not isinstance(stats,dict) or not stats:
+                continue
+            fga = value(stats,"fga","FG_ATT")
+            fgm = value(stats,"fgm","FG_M")
+            fg3m = value(stats,"tptfgm","fg3m","threePM")
+            fta = value(stats,"fta","FT_ATT")
+            pts = value(stats,"pts","points")
+            tov = value(stats,"TOV","tov","turnovers")
+            ast = value(stats,"ast","assists")
+            minutes = value(stats,"mins","min","minutes")
+            efg = (fgm + 0.5*fg3m)/fga if fga > 0 else None
+            ts = pts/(2*(fga+0.44*fta)) if (fga+0.44*fta) > 0 else None
+            tov_rate = tov/(fga+0.44*fta+tov) if (fga+0.44*fta+tov) > 0 else None
+            row = {
+                "player_id":str(player.get("playerID") or player.get("id") or player_id),
+                "player_name":player.get("longName") or player.get("playerName") or player.get("name") or "",
+                "team_abbreviation":team_code,
+                "season":_season(),
+                "stats":stats,
+                "derived": {
+                    "efg_pct":efg, "true_shooting_pct":ts,
+                    "turnover_rate":tov_rate,
+                    "assist_to_turnover":ast/tov if tov > 0 else None,
+                    "usage_events_per_minute":(fga+0.44*fta+tov)/minutes if minutes > 0 else None,
+                },
+                "derived_metric_note":"Box-score-derived rates only; not EPM, on/off, or possession-adjusted impact."
+            }
+            rows.append(("tank01_player",row))
+    if not rows:
+        raise RuntimeError("Tank01 roster endpoint returned no player season-average rows.")
+    return rows
+
 def _bdl_team_season_advanced(season):
     payload, headers = _bdl_get("/nba/v1/team_season_averages/general", [
         ("season",season),("season_type","regular"),("type","advanced"),("per_page",100)
@@ -130,7 +197,7 @@ def _entity(metric, row, team_code=None):
     if metric in ("team_advanced","team_season_advanced"):
         team = row.get("TEAM") or row.get("team") or {}
         return str(row.get("TEAM_ID") or row.get("TEAM_ABBREVIATION") or team.get("id") or team.get("abbreviation") or "")
-    if metric in ("player_advanced","player_season_advanced"):
+    if metric in ("player_advanced","player_season_advanced","player_boxscore_season"):
         player = row.get("PLAYER") or row.get("player") or {}
         return str(row.get("PLAYER_ID") or row.get("player_id") or player.get("id") or "")
     if metric == "schedule_context":
@@ -213,6 +280,7 @@ def collect(batch=None):
 
     tasks = [
         ("team_advanced", _tank01_team_rows, None, "Tank01"),
+        ("player_boxscore_season", _tank01_player_rows, None, "Tank01"),
         ("schedule_context", schedule_rows, None, "App schedule"),
         ("injury_status", injury_rows, None, "Official NBA injury report"),
         ("team_season_advanced", lambda: _bdl_team_season_advanced(season.split("-")[0]), None, "BALLDONTLIE GOAT"),
