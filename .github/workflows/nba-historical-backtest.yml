@@ -6,6 +6,7 @@ on:
     paths:
       - ".github/workflows/nba-historical-backtest.yml"
       - "scripts/nba_historical_matchup_backtest.py"
+      - "scripts/nba_calibrate_matchup.py"
       - "src/api/quant_game_engine.py"
   workflow_dispatch:
 jobs:
@@ -45,6 +46,10 @@ jobs:
         env:
           PYTHONPATH: .
         run: python scripts/nba_historical_matchup_backtest.py
+      - name: Train on 2024-25 and evaluate calibration out-of-sample on 2025-26
+        env:
+          PYTHONPATH: .
+        run: python scripts/nba_calibrate_matchup.py
       - name: Upload backtest report
         uses: actions/upload-artifact@v4
         with:
