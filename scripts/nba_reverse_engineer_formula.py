@@ -101,12 +101,21 @@ def metrics(rows, pred_key, actual_key):
     n = len(errors)
     if not n:
         return {"games": 0}
-    return {
+    result = {
         "games": n,
         "mae": round(sum(abs(e) for e in errors) / n, 3),
         "rmse": round(math.sqrt(sum(e * e for e in errors) / n), 3),
         "bias": round(sum(errors) / n, 3),
     }
+    if actual_key == "actual_margin":
+        wins = sum((r[pred_key] > 0) == (r[actual_key] > 0) for r in rows)
+        result.update({
+            "outright_wins": wins,
+            "outright_losses": n - wins,
+            "outright_win_pct": round(100.0 * wins / n, 2),
+            "record_definition": "Predicted game winner from positive/negative projected margin; not against the spread."
+        })
+    return result
 
 
 def main():
