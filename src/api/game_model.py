@@ -894,13 +894,13 @@ def api_sports_player_probe(player_name="Nikola Jokic"):
         search_name=(first+" "+last).strip()
     headers={"x-apisports-key":key,"Accept":"application/json","User-Agent":"ColtsNBAEdge/2.0"}
     q=urlencode({"search":search_name,"season":"2026-2027"})
-    players,_=_json("https://v1.basketball.api-sports.io/players?"+q,headers,10)
+    players,_=_json("https://v1.basketball.api-sports.io/players?"+q,headers,4)
     response=players.get("response") or []
     target=_normal_name(search_name)
     player=next((x for x in response if _normal_name(x.get("name"))==target),response[0] if response else None)
     if not player: return {"player_search_count":len(response),"found":False,"sample":response[:3]}
     pid=player.get("id")
-    stats,_=_json("https://v1.basketball.api-sports.io/games/statistics/players?"+urlencode({"player":pid,"season":"2026-2027"}),headers,10)
+    stats,_=_json("https://v1.basketball.api-sports.io/games/statistics/players?"+urlencode({"player":pid,"season":"2026-2027"}),headers,4)
     rows=stats.get("response") or []
     return {"found":True,"player":player,"results":stats.get("results"),"row_count":len(rows),
       "sample":rows[:3],"sample_keys":list(rows[0].keys()) if rows else []}
