@@ -587,7 +587,7 @@ def _settle_pending():
             settled+=cur.rowcount
     return {"checked":len(rows),"settled":settled}
 
-def build_board(force=False):
+def build_board(force=False,preview_date=None):
     initialize()
     settlement={"checked":0,"settled":0}
     try: settlement=_settle_pending()
@@ -617,9 +617,15 @@ def build_board(force=False):
                 future_games.append(game)
         except Exception: continue
     if not future_games:
+        if preview:
+            return {"slate_date":slate_date,"preview":True,"frozen":False,"sides":[],"totals":[],
+              "metrics":_metrics(),"settlement":settlement,"game_count":0,
+              "source_status":{"odds":"PropLine DraftKings ("+odds_source+")","team_ratings":"not needed; no remaining games on preview date",
+                "injuries":"not needed","prop_line_quota":quota},
+              "model_policy":"No upcoming games remain on the requested preview date. No picks were forced."}
         side_picks,side_saved=_save_slate([],"sides",slate_date)
         total_picks,total_saved=_save_slate([],"totals",slate_date)
-        return {"slate_date":slate_date,"frozen":True,"sides":side_picks,"totals":total_picks,
+        return {"slate_date":slate_date,"frozen":True,"sides":side_picks,"totals":side_picks,
           "metrics":_metrics(),"settlement":settlement,"game_count":0,
           "source_status":{"odds":"PropLine DraftKings ("+odds_source+")","team_ratings":"not needed; no remaining games on this slate date",
             "injuries":"not needed","prop_line_quota":quota,"saved_sides":side_saved,"saved_totals":total_saved},
@@ -691,9 +697,12 @@ def build_board(force=False):
 
     sides.sort(key=lambda x:(-x["ev_pct"],-x["edge_pp"]))
     totals.sort(key=lambda x:(-x["ev_pct"],-x["edge_pp"]))
-    side_picks,side_saved=_save_slate(sides,"sides",slate_date)
-    total_picks,total_saved=_save_slate(totals,"totals",slate_date)
-    return {"slate_date":slate_date,"frozen":True,"sides":side_picks,"totals":total_picks,
+    if preview:
+        side_picks=sides[:5]; total_picks=totals[:5]; side_saved=0; total_saved=0
+    else:
+        side_picks,side_saved=_save_slate(sides,"sides",slate_date)
+        total_picks,total_saved=_save_slate(totals,"totals",slate_date)
+    return {"slate_date":slate_date,"preview":preview,"frozen":not preview,"sides":side_picks,"totals":total_picks,
       "metrics":_metrics(),"settlement":settlement,"game_count":len(future_games),
       "source_status":{"odds":"PropLine DraftKings ("+odds_source+")","team_ratings":ratings["source"],
         "season":ratings["season"],"injuries":injury_meta.get("status","unavailable"),
