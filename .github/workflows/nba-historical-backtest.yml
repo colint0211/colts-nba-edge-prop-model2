@@ -14,6 +14,7 @@ on:
       - "scripts/nba_reverse_engineer_ats_direct.py"
       - "scripts/nba_game_by_game_forensic_audit.py"
       - "scripts/nba_game_by_game_forensic_audit_v2.py"
+      - "scripts/nba_upset_blowout_collapse_factor_study.py"
       - "src/api/nba_historical_backtest.py"
       - "src/api/quant_game_engine.py"
   workflow_dispatch:
@@ -88,6 +89,10 @@ jobs:
         env:
           PYTHONPATH: .
         run: python scripts/nba_game_by_game_forensic_audit_v2.py
+      - name: Run matched-control upset blowout and total-collapse factor study
+        env:
+          PYTHONPATH: .
+        run: python scripts/nba_upset_blowout_collapse_factor_study.py
       - name: Upload backtest report
         uses: actions/upload-artifact@v4
         with:
