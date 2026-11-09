@@ -18,6 +18,8 @@ jobs:
         with:
           python-version: "3.12"
       - name: Run leakage-safe walk-forward backtest
+        env:
+          PYTHONPATH: .
         run: python scripts/nba_historical_matchup_backtest.py
       - name: Upload backtest report
         uses: actions/upload-artifact@v4
