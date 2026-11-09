@@ -30,10 +30,12 @@ def sigmoid(x):
 def logistic_cdf(x,mean,scale):
  return sigmoid((float(x)-float(mean))/float(scale))
 def rest_days(history,day):
+ """Full calendar days off; consecutive game dates produce zero rest days."""
  if not history:return None
  from datetime import date
  try:
-  return (date.fromisoformat(day)-date.fromisoformat(str(history[-1]["date"])[:10])).days
+  gap=(date.fromisoformat(day)-date.fromisoformat(str(history[-1]["date"])[:10])).days
+  return max(0,gap-1) if gap>=1 else None
  except Exception:return None
 def factor_breakdown(h,a,ratings,model):
  league_ortg=sum(v["ortg"] for v in ratings.values())/len(ratings)

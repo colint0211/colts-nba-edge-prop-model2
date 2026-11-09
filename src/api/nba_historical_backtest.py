@@ -117,6 +117,7 @@ def _team_rates(history, league_ppp, league_pace):
 
 
 
+# Rest deltas are full days off (0 = back-to-back); B2B flags use rest == 0.
 FEATURES=["intercept","home_off_delta","home_def_delta","away_off_delta","away_def_delta","pace_delta","home_rest_delta","away_rest_delta","home_back_to_back","away_back_to_back"]
 
 def _ridge(xtx,xty,penalty=2.0):
@@ -138,19 +139,22 @@ def _ridge(xtx,xty,penalty=2.0):
     return b
 
 def _rest_days(history,day):
-    if not history: return 2.0
-    try:
-        now=datetime.fromisoformat(str(day)[:10]).date()
-        prev=datetime.fromisoformat(str(history[-1]["date"])[:10]).date()
-        return max(0.0,min(7.0,float((now-prev).days)))
-    except Exception: return 2.0
+    """Full calendar days off between games; consecutive dates = 0 (back-to-back)."""
+    if not history:
+        raise ValueError("Cannot calculate rest days without prior game history")
+    now=datetime.fromisoformat(str(day)[:10]).date()
+    prev=datetime.fromisoformat(str(history[-1]["date"])[:10]).date()
+    gap=(now-prev).days
+    if gap < 1:
+        raise ValueError(f"Invalid prior game date {prev} for forecast date {now}")
+    return float(min(7,max(0,gap-1)))
 
 def _xfeatures(h,a,league_ppp,league_pace,hr,ar):
     hoff,hdef,hpace=h; aoff,adef,apace=a
     return [1.0,(hoff-league_ppp)*100.0,(hdef-league_ppp)*100.0,
       (aoff-league_ppp)*100.0,(adef-league_ppp)*100.0,
       (hpace+apace)/2.0-league_pace,hr-2.0,ar-2.0,
-      1.0 if hr<=1 else 0.0,1.0 if ar<=1 else 0.0]
+      1.0 if hr<=0 else 0.0,1.0 if ar<=0 else 0.0]
 
 def _resid_sd(values,fallback):
     if len(values)<30: return fallback
