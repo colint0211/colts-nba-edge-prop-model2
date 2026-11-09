@@ -16,9 +16,7 @@ from urllib.request import Request, urlopen
 _ET = "America/New_York"
 _PROP_CACHE = {"at": 0.0, "events": None, "quota": {}}
 _TEAM_CACHE = {"at": 0.0, "data": None}
-_RECENT_CACHE = {"at": 0.0, "data": None}
 _SCHEDULE_CACHE = {"at": 0.0, "data": None}
-_ONOFF_CACHE = {}\n_PLAYER_IMPACT_CACHE = {}
 _CACHE_TTL = 900
 _TEAM_NAMES = {
     "ATL":"Atlanta Hawks","BOS":"Boston Celtics","BKN":"Brooklyn Nets","CHA":"Charlotte Hornets",
