@@ -396,7 +396,7 @@ def latest_team_ratings(max_age_days=2):
         "teams":teams, "season":_season(), "prior_season":None,
         "source":source,
         "data_quality":quality, "fetched_at":datetime.now(timezone.utc).isoformat(),
-        "player_impact_source":"BALLDONTLIE game advanced data includes on-court ratings and usage/efficiency; true player on/off splits require a separately licensed source and are not fabricated.",
+        "player_impact_source":"Tank01 player averages provide box-score-derived eFG, TS, turnover and assist/turnover rates. BALLDONTLIE GOAT adds on-court advanced ratings; true player on/off splits are not inferred.",
         "epm_available":False,
     }
 
@@ -422,5 +422,5 @@ def status():
                         "finished_at":r[6].isoformat() if r[6] else None,
                         "summary":r[7]} for r in runs],
         "rotation":"Daily team ratings, schedule and injury snapshots; game-level player advanced stats are paginated, and projected lineups are stored when the API tier permits.",
-        "optional_player_impact":"BALLDONTLIE season/game advanced stats and projected lineups require GOAT tier. True on/off is not available from the verified feeds; Dunks & Threes EPM must not be used in a betting model without written provider authorization.",
+        "optional_player_impact":"Tank01 supplies player season box-score averages and derived eFG/TS/turnover rates. BALLDONTLIE game advanced stats and projected lineups require GOAT tier. True player on/off is not available from verified feeds; Dunks & Threes EPM requires written authorization for betting-model use.",
     }
