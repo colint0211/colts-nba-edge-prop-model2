@@ -136,6 +136,7 @@ function renderSources(s){
  'Official injury report: '+(s.injuries||'unavailable'),
  'Player impact: '+(s.player_impact||'EPM/on-off not integrated'),
  'Withheld games: '+(s.unavailable_games?.length??0)+' (injury uncertainty or extreme model/market gap)',
+ 'Withheld detail: '+(s.unavailable_games||[]).slice(0,5).map(g=>(g.matchup||g.event_id)+': '+g.reason).join(' · '),
  'DraftKings quota remaining: '+(s.prop_line_quota?.daily_remaining??'not supplied'),
  'Saved model picks: '+(s.saved_sides??'—')+' sides · '+(s.saved_totals??'—')+' totals'
  ];
