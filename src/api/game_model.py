@@ -625,9 +625,13 @@ def _candidate(game,market,model):
           "projected_margin":model["projected_margin"],"projected_total":model["projected_total"],
           "projected_pace":model["projected_pace"],"home_adjustments":model["home_adjustments"],
           "away_adjustments":model["away_adjustments"],"score_distribution":dist,
+          "model_stage":model.get("model_stage","quantitative_matchup_engine_v1"),
+          "probability_calibration_status":model.get("probability_calibration_status","provisional_not_validated"),
+          "factor_diagnostics":model.get("factor_diagnostics"),
+          "uncertainty_inflation":model.get("uncertainty_inflation"),
           "rating_source":model.get("rating_source","NBA Stats"),
           "data_quality":model.get("data_quality","advanced"),"base_data_quality":model.get("base_data_quality",model.get("data_quality","advanced")),"epm_used":model.get("epm_used",False),
-          "model_version":"sides-totals-distribution-v3","sportsbook":"DraftKings"})
+          "model_version":"quant-matchup-v1","sportsbook":"DraftKings"})
     return candidates
 
 
@@ -880,6 +884,10 @@ def build_board(force=False,preview_date=None):
           "home_win_probability":round(home_probability,5),"away_win_probability":round(1.0-home_probability,5),
           "score_distribution":dist,"home_adjustments":model.get("home_adjustments"),
           "away_adjustments":model.get("away_adjustments"),
+          "model_stage":model.get("model_stage"),
+          "probability_calibration_status":model.get("probability_calibration_status"),
+          "factor_diagnostics":model.get("factor_diagnostics"),
+          "uncertainty_inflation":model.get("uncertainty_inflation"),
           "injury_review_status":"reviewed" if event_id in reviewed else "not_reviewed_after_initial_candidate_screen",
           "rating_source":model.get("rating_source"),"data_quality":model.get("data_quality")
         })
@@ -943,6 +951,10 @@ def build_forecasts(forecast_date=None,force=False):
           "home_win_probability":round(home_probability,5),"away_win_probability":round(1.0-home_probability,5),
           "score_distribution":dist,"home_adjustments":model.get("home_adjustments"),
           "away_adjustments":model.get("away_adjustments"),
+          "model_stage":model.get("model_stage"),
+          "probability_calibration_status":model.get("probability_calibration_status"),
+          "factor_diagnostics":model.get("factor_diagnostics"),
+          "uncertainty_inflation":model.get("uncertainty_inflation"),
           "rating_source":model.get("rating_source"),"data_quality":model.get("data_quality"),
           "injury_status":"fresh_official_report_applied" if injury_meta.get("status")=="fresh" else "not_applied_report_"+str(injury_meta.get("status","unavailable")),
           "injury_report_snapshot":injury_meta.get("snapshot_date")
@@ -952,7 +964,7 @@ def build_forecasts(forecast_date=None,force=False):
       "source_status":{"team_ratings":ratings.get("source"),"data_quality":ratings.get("data_quality"),
         "schedule":"ESPN scoreboard","sportsbook_odds_used":False,
         "injury_adjustments":"fresh official report applied" if injury_meta.get("status")=="fresh" else "not applied; report "+str(injury_meta.get("status","unavailable"))},
-      "model_policy":"Independent linear team-efficiency and situational score mapping with logistic-link moneyline probabilities and provisional score uncertainty. Sportsbook lines are not inputs."}
+      "model_policy":"Quantitative matchup engine v1: opponent-adjusted offensive efficiency, league-relative defensive resistance, blended team/league pace, explicit rest/travel/time-zone/elevation adjustments, and a joint score distribution. Sportsbook lines are not inputs. Probability calibration and player-level availability valuation remain provisional."}
 
 
 def history(slate_date):
