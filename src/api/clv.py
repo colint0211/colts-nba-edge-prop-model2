@@ -5,7 +5,10 @@ def signed_line_clv(market, selection, bet_line, observed_line):
     bet_line = float(bet_line)
     observed_line = float(observed_line)
     if market == "sides":
-        return observed_line - bet_line
+        # A negative spread is the favorite's handicap: moving toward zero
+        # is favorable to that favorite. For a positive underdog handicap,
+        # moving farther positive is favorable.
+        return (bet_line - observed_line) if bet_line < 0 else (observed_line - bet_line)
     if market == "totals":
         return (observed_line - bet_line) if str(selection).upper() == "OVER" else (bet_line - observed_line)
     raise ValueError("market must be 'sides' or 'totals'")
