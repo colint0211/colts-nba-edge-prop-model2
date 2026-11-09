@@ -289,6 +289,18 @@ def _tank01_ratings(force=False):
 
 
 def _base_team_ratings(force=False):
+    # Prefer a complete, recently persisted NBA Stats advanced snapshot. The
+    # Tank01 estimated-possession feed remains a transparent fallback only.
+    try:
+        from . import advanced_metrics
+        persisted=advanced_metrics.latest_team_ratings(max_age_days=2)
+        if persisted and len(persisted.get("teams",{}))>=28:
+            _TEAM_CACHE.update({"at":time.time(),"data":persisted})
+            return persisted
+    except Exception:
+        # Collection status records source failures; never invent a replacement
+        # metric. Continue to the existing authenticated fallback.
+        pass
     # The NBA Stats endpoint has repeatedly timed out from the Vercel runtime.
     # Use it only when explicitly enabled; Tank01 is the authenticated fallback.
     if os.getenv("USE_NBA_STATS_TEAM_RATINGS","").strip().lower() in ("1","true","yes"):
