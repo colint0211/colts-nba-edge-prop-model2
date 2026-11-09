@@ -99,6 +99,77 @@ def _fetch(endpoint, params):
         raise RuntimeError(f"{endpoint} returned no tabular rows.")
     return output
 
+
+def _bdl_get(path, params=None, timeout=12):
+    api_key = os.getenv("BALLDONTLIE_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError("BALLDONTLIE_API_KEY is not configured.")
+    query = urlencode(params or [])
+    url = "https://api.balldontlie.io" + path + (("?" + query) if query else "")
+    req = Request(url, headers={"Authorization":api_key,"Accept":"application/json","User-Agent":"ColtsNBAEdge/2.0"})
+    try:
+        with urlopen(req, timeout=timeout) as response:
+            return json.loads(response.read().decode("utf-8","replace")), dict(response.headers.items())
+    except Exception as exc:
+        from urllib.error import HTTPError
+        if isinstance(exc, HTTPError):
+            raise RuntimeError("BALLDONTLIE " + path + " returned HTTP " + str(exc.code) + "; endpoint may require GOAT tier.") from exc
+        raise
+
+def _tank01_team_rows():
+    from . import game_model
+    ratings = game_model._tank01_ratings(force=True)
+    rows = []
+    for code, values in (ratings.get("teams") or {}).items():
+        rows.append(("tank01_team", {
+            "TEAM_ABBREVIATION":code, "GP":values.get("games"),
+            "OFF_RATING":values.get("ortg"), "DEF_RATING":values.get("drtg"),
+            "NET_RATING":values.get("net"), "PACE":values.get("pace"),
+            "EFG_PCT":values.get("efg"), "TM_TOV_PCT":values.get("tov"),
+            "OREB_PCT":values.get("oreb"), "TS_PCT":values.get("ts"),
+            "source_detail":values.get("source"), "prior_weight":values.get("prior_weight"),
+            "recent_sample":values.get("recent_sample")
+        }))
+    if len(rows) < 28:
+        raise RuntimeError("Tank01 returned only " + str(len(rows)) + "/30 usable team records.")
+    return rows
+
+def _bdl_team_season_advanced(season):
+    payload, headers = _bdl_get("/nba/v1/team_season_averages/general", [
+        ("season",season),("season_type","regular"),("type","advanced")
+    ])
+    rows = payload.get("data")
+    if not isinstance(rows,list) or not rows:
+        raise RuntimeError("BALLDONTLIE team season advanced returned no data.")
+    return [("team_season_advanced",row) for row in rows]
+
+def _bdl_player_season_advanced(season):
+    payload, headers = _bdl_get("/nba/v1/season_averages/general", [
+        ("season",season),("season_type","regular"),("type","advanced")
+    ])
+    rows = payload.get("data")
+    if not isinstance(rows,list) or not rows:
+        raise RuntimeError("BALLDONTLIE player season advanced returned no data.")
+    return [("player_season_advanced",row) for row in rows]
+
+def _bdl_daily_advanced(snapshot_date):
+    payload, headers = _bdl_get("/nba/v2/stats/advanced", [
+        ("dates[]",snapshot_date.isoformat()),("period",0),("per_page",100)
+    ])
+    rows = payload.get("data")
+    if not isinstance(rows,list):
+        raise RuntimeError("BALLDONTLIE daily advanced stats response was invalid.")
+    return [("game_advanced",row) for row in rows]
+
+def _bdl_projected_lineups(snapshot_date):
+    payload, headers = _bdl_get("/nba/v1/projected_lineups", [
+        ("dates[]",snapshot_date.isoformat()),("per_page",100)
+    ])
+    rows = payload.get("data")
+    if not isinstance(rows,list):
+        raise RuntimeError("BALLDONTLIE projected lineups response was invalid.")
+    return [("projected_lineup",row) for row in rows]
+
 def _base_params(season):
     return {
         "LeagueID":"00", "Season":season, "SeasonType":"Regular Season",
@@ -109,10 +180,12 @@ def _base_params(season):
     }
 
 def _entity(metric, row, team_code=None):
-    if metric == "team_advanced":
-        return str(row.get("TEAM_ID") or row.get("TEAM_ABBREVIATION") or "")
-    if metric == "player_advanced":
-        return str(row.get("PLAYER_ID") or "")
+    if metric in ("team_advanced","team_season_advanced"):
+        team = row.get("TEAM") or row.get("team") or {}
+        return str(row.get("TEAM_ID") or row.get("TEAM_ABBREVIATION") or team.get("id") or team.get("abbreviation") or "")
+    if metric in ("player_advanced","player_season_advanced"):
+        player = row.get("PLAYER") or row.get("player") or {}
+        return str(row.get("PLAYER_ID") or row.get("player_id") or player.get("id") or "")
     if metric == "team_onoff":
         parts = [team_code, row.get("PLAYER_ID"), row.get("VS_PLAYER_ID"),
                  row.get("GROUP_ID"), row.get("GROUP_NAME"), row.get("GROUP_VALUE"),
@@ -124,11 +197,17 @@ def _entity(metric, row, team_code=None):
         return ":".join(str(x) for x in parts if x not in (None, ""))
     if metric == "schedule_context":
         return str(row.get("id") or row.get("event_id") or "")
+    if metric == "game_advanced":
+        game = row.get("game") or {}
+        player = row.get("player") or {}
+        return str(game.get("id","")) + ":" + str(player.get("id","")) + ":" + str(row.get("period",0))
+    if metric == "projected_lineup":
+        return str(row.get("game_id","")) + ":" + str(row.get("team_id",""))
     if metric == "injury_status":
         return ":".join(str(x) for x in (row.get("player"),row.get("team"),row.get("game_date")) if x)
     return str(row.get("TEAM_ID") or row.get("PLAYER_ID") or "league")
 
-def _persist(snapshot_date, season, metric, rows, team_code=None):
+def _persist(snapshot_date, season, metric, rows, team_code=None, source="NBA Stats"):
     saved = 0
     with _db() as conn:
         for index, (set_name, row) in enumerate(rows):
@@ -139,10 +218,10 @@ def _persist(snapshot_date, season, metric, rows, team_code=None):
             conn.execute("""
               INSERT INTO nba_metric_snapshots
                 (snapshot_date,season,metric_key,entity_key,source,payload)
-              VALUES (%s,%s,%s,%s,'NBA Stats',%s::jsonb)
+              VALUES (%s,%s,%s,%s,%s,%s::jsonb)
               ON CONFLICT(snapshot_date,metric_key,entity_key)
               DO UPDATE SET captured_at=NOW(), payload=EXCLUDED.payload
-            """, (snapshot_date,season,metric,entity,json.dumps(payload,default=str)))
+            """, (snapshot_date,season,metric,entity,source,json.dumps(payload,default=str)))
             saved += 1
     return saved
 
@@ -201,34 +280,32 @@ def collect(batch=None):
         return [("injury", row) for row in records]
 
     tasks = [
-        ("team_advanced", lambda: _fetch("leaguedashteamstats",
-            {**_base_params(season),"MeasureType":"Advanced"}), None),
-        ("player_advanced", lambda: _fetch("leaguedashplayerstats",
-            {**_base_params(season),"MeasureType":"Advanced"}), None),
-        ("schedule_context", schedule_rows, None),
-        ("injury_status", injury_rows, None),
+        ("team_advanced", _tank01_team_rows, None, "Tank01"),
+        ("schedule_context", schedule_rows, None, "App schedule"),
+        ("injury_status", injury_rows, None, "Official NBA injury report"),
+        ("team_season_advanced", lambda: _bdl_team_season_advanced(season.split("-")[0]), None, "BALLDONTLIE GOAT"),
+        ("player_season_advanced", lambda: _bdl_player_season_advanced(season.split("-")[0]), None, "BALLDONTLIE GOAT"),
+        ("game_advanced", lambda: _bdl_daily_advanced(snapshot_date), None, "BALLDONTLIE GOAT"),
+        ("projected_lineups", lambda: _bdl_projected_lineups(snapshot_date), None, "BALLDONTLIE GOAT"),
     ]
-    for code, team_id in selected:
-        tasks.append((f"team_onoff:{code}", lambda tid=team_id: _team_request(
-            "team_onoff","teamplayeronoffsummary",tid,season), code))
-        tasks.append((f"lineups_5:{code}", lambda tid=team_id: _team_request(
-            "lineups_5","teamdashlineups",tid,season), code))
-
     with ThreadPoolExecutor(max_workers=4) as pool:
-        futures = {pool.submit(fn):(key,team) for key,fn,team in tasks}
+        futures = {pool.submit(fn):(key,team,source) for key,fn,team,source in tasks}
         for future in as_completed(futures):
-            key, team_code = futures[future]
+            key, team_code, source = futures[future]
             metric = key.split(":")[0]
             try:
                 rows = future.result()
-                saved = _persist(snapshot_date,season,metric,rows,team_code)
-                summary["datasets"][key] = {"rows_received":len(rows),"rows_saved":saved}
+                saved = _persist(snapshot_date,season,metric,rows,team_code,source)
+                summary["datasets"][key] = {"rows_received":len(rows),"rows_saved":saved,"source":source}
             except Exception as exc:
                 summary["errors"][key] = f"{type(exc).__name__}: {str(exc)[:220]}"
 
     summary["elapsed_seconds"] = round(time.time()-started,2)
     successful = len(summary["datasets"])
-    status = "complete" if successful == len(tasks) else ("partial" if successful else "failed")
+    required = {"team_advanced","schedule_context","injury_status"}
+    required_ok = required.issubset(summary["datasets"])
+    status = "complete" if required_ok else ("partial" if successful else "failed")
+    summary["optional_tier_note"] = "BALLDONTLIE season advanced, game advanced and projected-lineup feeds require GOAT tier."
     with _db() as conn:
         conn.execute("""
           UPDATE nba_metric_collection_runs
@@ -257,21 +334,21 @@ def latest_team_ratings(max_age_days=2):
         code = str(payload.get("TEAM_ABBREVIATION") or "").upper()
         if len(code) != 3 or code in teams:
             continue
-        games = int(number(payload, "GP", 0))
-        ortg = number(payload, "OFF_RATING")
-        drtg = number(payload, "DEF_RATING")
+        games = int(number(payload, "GP", payload.get("games",0)))
+        ortg = number(payload, "OFF_RATING", payload.get("ortg",0))
+        drtg = number(payload, "DEF_RATING", payload.get("drtg",0))
         if games < 1 or ortg <= 0 or drtg <= 0:
             continue
         teams[code] = {
             "team":code, "games":games, "ortg":ortg, "drtg":drtg,
-            "net":number(payload, "NET_RATING", ortg-drtg),
-            "pace":number(payload, "PACE"),
-            "efg":number(payload, "EFG_PCT"),
-            "tov":number(payload, "TM_TOV_PCT"),
-            "oreb":number(payload, "OREB_PCT"),
-            "dreb":number(payload, "DREB_PCT"),
-            "ts":number(payload, "TS_PCT"),
-            "source":"NBA Stats persisted advanced snapshot",
+            "net":number(payload, "NET_RATING", payload.get("net",ortg-drtg)),
+            "pace":number(payload, "PACE", payload.get("pace",0)),
+            "efg":number(payload, "EFG_PCT", payload.get("efg",0)),
+            "tov":number(payload, "TM_TOV_PCT", payload.get("tov",0)),
+            "oreb":number(payload, "OREB_PCT", payload.get("oreb",0)),
+            "dreb":number(payload, "DREB_PCT", payload.get("dreb",0)),
+            "ts":number(payload, "TS_PCT", payload.get("ts",0)),
+            "source":"Tank01 persisted team efficiency snapshot",
             "recent_sample":0,
         }
     if len(teams) < 28:
@@ -305,5 +382,5 @@ def status():
                         "finished_at":r[6].isoformat() if r[6] else None,
                         "summary":r[7]} for r in runs],
         "rotation":"Five teams per batch; six batches rotate daily, completing a full team on/off and lineup cycle every six days.",
-        "optional_player_impact":"Dunks & Threes Team EPM requires DUNKS_AND_THREES_API_KEY; it is not assumed available.",
+        "optional_player_impact":"BALLDONTLIE season/game advanced stats and projected lineups require GOAT tier; Dunks & Threes EPM requires DUNKS_AND_THREES_API_KEY.",
     }
