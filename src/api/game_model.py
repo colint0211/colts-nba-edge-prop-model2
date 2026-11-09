@@ -208,20 +208,20 @@ def _parse_game_lines(events):
     return rows
 
 
-def collect_market_snapshots():
-    """Persist a timestamped, two-sided DraftKings spread/total snapshot.
+def _capture_market_snapshots(force_refresh=False):
+    """Persist an append-only two-sided DraftKings quote snapshot.
 
-    This collector deliberately bypasses the in-memory odds cache. Each scheduled
-    invocation records the actual quote set returned by PropLine at capture time.
-    It does not generate or unlock betting picks.
+    The capture timestamp is the time PropLine was actually fetched, not the
+    time a cached quote was merely read by the application.
     """
     initialize()
-    events, source, quota = _fetch_lines(force=True)
+    events, source, quota = _fetch_lines(force=force_refresh)
     games = _parse_game_lines(events)
+    fetched_at = float(_PROP_CACHE.get("at") or time.time())
+    captured_at = datetime.fromtimestamp(fetched_at, timezone.utc).isoformat()
+    batch_id = hashlib.sha256(captured_at.encode()).hexdigest()
     from zoneinfo import ZoneInfo
     now = datetime.now(timezone.utc)
-    captured_at = now.isoformat()
-    batch_id = hashlib.sha256((captured_at + str(len(games))).encode()).hexdigest()
     records = []
     for game in games:
         try:
@@ -236,17 +236,17 @@ def collect_market_snapshots():
         for team in (game["home"], game["away"]):
             quote = game["spreads"].get(team) or {}
             if quote.get("line") is not None and quote.get("odds") is not None:
-                records.append((batch_id, captured_at, str(game["event_id"]), game["commence_time"],
-                    slate_date, game["matchup"], game["home"], game["away"], "spreads", team,
-                    float(quote["line"]), int(quote["odds"]), "DraftKings", source,
-                    json.dumps(quote, separators=(",", ":"), allow_nan=False)))
-        for side in ("over", "under"):
+                records.append((batch_id,captured_at,str(game["event_id"]),game["commence_time"],
+                    slate_date,game["matchup"],game["home"],game["away"],"spreads",team,
+                    float(quote["line"]),int(quote["odds"]),"DraftKings",source,
+                    json.dumps(quote,separators=(",",":"),allow_nan=False)))
+        for side in ("over","under"):
             quote = game["totals"].get(side) or {}
             if quote.get("line") is not None and quote.get("odds") is not None:
-                records.append((batch_id, captured_at, str(game["event_id"]), game["commence_time"],
-                    slate_date, game["matchup"], game["home"], game["away"], "totals", side.upper(),
-                    float(quote["line"]), int(quote["odds"]), "DraftKings", source,
-                    json.dumps(quote, separators=(",", ":"), allow_nan=False)))
+                records.append((batch_id,captured_at,str(game["event_id"]),game["commence_time"],
+                    slate_date,game["matchup"],game["home"],game["away"],"totals",side.upper(),
+                    float(quote["line"]),int(quote["odds"]),"DraftKings",source,
+                    json.dumps(quote,separators=(",",":"),allow_nan=False)))
     with _connect() as conn:
         conn.execute("""
           CREATE TABLE IF NOT EXISTS nba_market_snapshots (
@@ -267,12 +267,14 @@ def collect_market_snapshots():
             source TEXT NOT NULL,
             raw_quote JSONB NOT NULL DEFAULT '{}'::jsonb
           );
+          CREATE UNIQUE INDEX IF NOT EXISTS nba_market_snapshots_batch_quote
+            ON nba_market_snapshots(batch_id,event_id,market,outcome);
           CREATE INDEX IF NOT EXISTS nba_market_snapshots_event_time
-            ON nba_market_snapshots(event_id, market, outcome, captured_at DESC);
+            ON nba_market_snapshots(event_id,market,outcome,captured_at DESC);
           CREATE INDEX IF NOT EXISTS nba_market_snapshots_capture
             ON nba_market_snapshots(captured_at DESC);
           CREATE INDEX IF NOT EXISTS nba_market_snapshots_slate
-            ON nba_market_snapshots(slate_date, market);
+            ON nba_market_snapshots(slate_date,market);
         """)
         if records:
             conn.executemany("""
@@ -280,19 +282,22 @@ def collect_market_snapshots():
                 (batch_id,captured_at,event_id,commence_time,slate_date,matchup,home_team,away_team,
                  market,outcome,line,odds,bookmaker,source,raw_quote)
               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb)
+              ON CONFLICT (batch_id,event_id,market,outcome) DO NOTHING
             """, records)
     return {
-        "status": "ok",
-        "captured_at": captured_at,
-        "batch_id": batch_id,
-        "source": "PropLine DraftKings",
-        "feed_source": source,
-        "upcoming_events": len({row[2] for row in records}),
-        "quote_snapshots_saved": len(records),
-        "markets": ["spreads", "totals"],
-        "prop_line_quota": quota,
-        "note": "Snapshots are append-only. Repeated unchanged quotes are retained to establish observation times; no historical data is backfilled."
+        "status":"ok","captured_at":captured_at,"batch_id":batch_id,
+        "source":"PropLine DraftKings","feed_source":source,
+        "upcoming_events":len({row[2] for row in records}),
+        "quote_snapshots_seen":len(records),
+        "quote_snapshots_saved":len(records),
+        "markets":["spreads","totals"],"prop_line_quota":quota,
+        "note":"Append-only timestamped quotes; repeated reads of the same cached feed are deduplicated. No historical data is backfilled."
     }
+
+
+def collect_market_snapshots():
+    """Force a fresh DraftKings feed read and persist its timestamped quotes."""
+    return _capture_market_snapshots(force_refresh=True)
 
 def _nba_stats(season,last_n=0):
     params={
@@ -819,6 +824,11 @@ def _settle_pending():
 
 def build_board(force=False,preview_date=None):
     initialize()
+    # Capture newly fetched odds even when today's official pick slate is already frozen.
+    try:
+        _capture_market_snapshots(force_refresh=False)
+    except Exception:
+        pass  # Snapshot capture must never take the live board down.
     settlement={"checked":0,"settled":0}
     try: settlement=_settle_pending()
     except Exception: pass
