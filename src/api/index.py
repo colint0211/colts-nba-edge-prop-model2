@@ -3635,9 +3635,9 @@ def game_stats_probe():
 
 
 @app.get("/api/game-tank01-probe")
-def game_tank01_probe():
+def game_tank01_probe(season: str = ""):
     try:
-        return JSONResponse(game_model.tank01_team_probe())
+        return JSONResponse(game_model.tank01_team_probe(season or None))
     except Exception as exc:
         return JSONResponse({"status":"unavailable","error":type(exc).__name__,"detail":str(exc)[:250]},status_code=503)
 
