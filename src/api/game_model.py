@@ -344,9 +344,10 @@ def _base_team_ratings(force=False):
 _DNT_CACHE = {"date": None, "at": 0.0, "teams": None}
 
 def _dnt_team_epm(target_date, force=False):
-    """Optional Dunks & Threes next-game team EPM; requires a paid API key."""
+    """Optional next-game team EPM; only enabled with written betting-use authorization."""
     key=os.getenv("DUNKS_AND_THREES_API_KEY","").strip()
-    if not key:
+    authorized=os.getenv("DNT_BETTING_USE_AUTHORIZED","").strip().lower() in ("1","true","yes")
+    if not key or not authorized:
         return None
     now=time.time()
     if (not force and _DNT_CACHE["teams"] is not None
@@ -381,7 +382,7 @@ def _team_ratings(force=False,target_date=None):
     base=_base_team_ratings(force)
     epm=_dnt_team_epm(target_date,force) if target_date else None
     if not epm:
-        base.setdefault("player_impact_source","not configured; team box-score baseline only")
+        base.setdefault("player_impact_source","Dunks & Threes EPM disabled unless its provider has explicitly authorized betting-model use in writing.")
         base["epm_available"]=False
         return base
     merged=dict(base)
