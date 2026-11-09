@@ -381,7 +381,7 @@ def _team_ratings(force=False,target_date=None):
     base=_base_team_ratings(force)
     epm=_dnt_team_epm(target_date,force) if target_date else None
     if not epm:
-        base["player_impact_source"]="not configured; team box-score baseline only"
+        base.setdefault("player_impact_source","not configured; team box-score baseline only")
         base["epm_available"]=False
         return base
     merged=dict(base)
