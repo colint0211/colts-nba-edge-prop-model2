@@ -55,21 +55,21 @@ table{width:100%;border-collapse:collapse;min-width:800px;font-size:12px}th,td{p
 </header>
 <main>
  <div class="grid">
-  <div class="stat"><div class="statlabel">Official settled picks</div><div id="settled" class="num">—</div></div>
-  <div class="stat"><div class="statlabel">Wins – Losses</div><div id="record" class="num">—</div></div>
+  <div class="stat"><div class="statlabel">Settled model picks</div><div id="settled" class="num">—</div></div>
+  <div class="stat"><div class="statlabel">Model W – L</div><div id="record" class="num">—</div></div>
   <div class="stat"><div class="statlabel">Win rate</div><div id="winrate" class="num">—</div></div>
-  <div class="stat"><div class="statlabel">Net units</div><div id="units" class="num">—</div></div>
+  <div class="stat"><div class="statlabel">Hypothetical units</div><div id="units" class="num">—</div></div>
  </div>
 
- <div class="section">Today's official opportunities</div>
- <div class="hint">Only positive expected-value picks that clear the model's minimum edge are shown. The board does not force five bets.</div>
+ <div class="section">Today's model candidates</div>
+ <div class="hint">New sides-and-totals model. Early-season team ratings are estimated and the model has not yet passed a historical backtest. Candidates and units are for tracking, not proof of a betting edge.</div>
  <div class="tabs">
   <button id="tab-sides" class="active" onclick="setMarket('sides')">Point spreads</button>
   <button id="tab-totals" onclick="setMarket('totals')">Game totals</button>
  </div>
  <div id="board" class="cards"><div class="empty">Loading team ratings and DraftKings lines…</div></div>
 
- <div class="section">Daily results</div>
+ <div class="section">Daily model results</div>
  <div class="hint">The official record below belongs only to this sides-and-totals model. The former player-prop ledger is preserved separately and is not included.</div>
  <div class="filters">
   <label class="muted">Slate date <input id="historyDate" type="date"></label>
@@ -102,7 +102,7 @@ function renderMetrics(m){
 }
 function adjustmentText(x){
  if(!x)return 'No situational data';
- const inj=(x.injuries||[]).map(p=>p.player+' · '+p.status+' · on/off '+(p.on_off_net_rating==null?'unavailable':fmt(p.on_off_net_rating,1))).join('; ');
+ const inj=(x.injuries||[]).map(p=>p.player+' · '+p.status+' · '+(p.impact_source||'impact unavailable')+' · '+signed(p.estimated_team_points||0)).join('; ');
  return 'Rest '+x.rest_days+' day(s) · travel '+x.travel_miles+' miles · time-zone change '+fmt(x.timezone_change_hours,1)+'h · altitude change '+fmt(x.altitude_change_feet,0)+' ft · rest adj '+signed(x.rest_adjustment)+' · travel adj '+signed(x.travel_adjustment)+' · injury adj '+signed(x.injury_adjustment)+(inj?' · '+inj:'');
 }
 function card(p,i){
@@ -113,7 +113,7 @@ function card(p,i){
  const edge=Number(p.edge_pp);
  const score=p.projected_away+' @ '+p.projected_home;
  const home= p.home_adjustments||{},away=p.away_adjustments||{};
- return '<article class="card"><div class="top"><div><div class="name">'+(i+1)+'. '+esc(p.selection_name||p.selection)+'</div><div class="match">'+esc(p.matchup)+' · DraftKings</div></div><span class="decision">QUALIFIED VALUE</span></div>'+
+ return '<article class="card"><div class="top"><div><div class="name">'+(i+1)+'. '+esc(p.selection_name||p.selection)+'</div><div class="match">'+esc(p.matchup)+' · DraftKings</div></div><span class="decision">MODEL CANDIDATE</span></div>'+
  '<div class="linebox"><div><div class="line-label">'+label+'</div><div class="line">'+esc(pick)+'</div></div><div style="text-align:right"><div class="line-label">Sportsbook price</div><div class="line">'+odds(p.odds)+'</div></div></div>'+
  '<div class="metrics"><div class="mini"><div class="mini-label">Our probability</div><div class="mini-value">'+fmt(p.model_probability*100,1)+'%</div></div>'+
  '<div class="mini"><div class="mini-label">No-vig market</div><div class="mini-value">'+fmt(p.market_probability*100,1)+'%</div></div>'+
@@ -134,9 +134,9 @@ function renderSources(s){
  'Team ratings: '+(s.team_ratings||'unavailable'),
  'Season: '+(s.season||'—'),
  'Official injury report: '+(s.injuries||'unavailable'),
- 'Player on/off: '+(s.on_off||'not available'),
+ 'Player impact: '+(s.player_impact||'EPM/on-off not integrated'),
  'DraftKings quota remaining: '+(s.prop_line_quota?.daily_remaining??'not supplied'),
- 'Saved official picks: '+(s.saved_sides??'—')+' sides · '+(s.saved_totals??'—')+' totals'
+ 'Saved model picks: '+(s.saved_sides??'—')+' sides · '+(s.saved_totals??'—')+' totals'
  ];
  el('sources').innerHTML=lines.map(x=>'<div>• '+esc(x)+'</div>').join('');
 }
