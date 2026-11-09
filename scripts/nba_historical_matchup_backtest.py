@@ -84,14 +84,22 @@ def load_team_games(season):
         })
     return games_by_date,len(raw)
 def build_ratings(history):
-    teams={}
+    raw={}
     for code,games in history.items():
         if not games: continue
         p=sum(g["points"] for g in games); ap=sum(g["allowed"] for g in games)
         poss_sum=sum(g["poss"] for g in games); oppposs=sum(g["opp_poss"] for g in games)
         if poss_sum<=0 or oppposs<=0: continue
-        teams[code]={"ortg":100*p/poss_sum,"drtg":100*ap/oppposs,
+        raw[code]={"ortg":100*p/poss_sum,"drtg":100*ap/oppposs,
           "pace":sum(g["pace"] for g in games)/len(games),"games":len(games)}
+    if not raw: return {}
+    league={k:sum(v[k] for v in raw.values())/len(raw) for k in ("ortg","drtg","pace")}
+    teams={}
+    for code,row in raw.items():
+        # Match the live Tank01 fallback's regression toward the current league mean.
+        weight=max(0.18,min(0.60,6.0/(row["games"]+6.0)))
+        teams[code]={k:row[k]*(1-weight)+league[k]*weight for k in league}
+        teams[code].update({"games":row["games"],"prior_weight":weight})
     return teams
 def make_candidates(game,model):
     margin_sd=float(model["score_distribution"]["margin_sd"])
