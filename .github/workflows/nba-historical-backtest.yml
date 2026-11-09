@@ -11,6 +11,7 @@ on:
       - "scripts/nba_reverse_engineer_formula.py"
       - "scripts/nba_reverse_engineer_ats.py"
       - "scripts/nba_reverse_engineer_ats_multiseason.py"
+      - "scripts/nba_reverse_engineer_ats_direct.py"
       - "src/api/nba_historical_backtest.py"
       - "src/api/quant_game_engine.py"
   workflow_dispatch:
@@ -73,6 +74,10 @@ jobs:
         env:
           PYTHONPATH: .
         run: python scripts/nba_reverse_engineer_ats_multiseason.py
+      - name: Run direct ATS-margin reverse-engineering holdout test
+        env:
+          PYTHONPATH: .
+        run: python scripts/nba_reverse_engineer_ats_direct.py
       - name: Upload backtest report
         uses: actions/upload-artifact@v4
         with:
