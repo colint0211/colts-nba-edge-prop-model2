@@ -548,32 +548,64 @@ def _score_game(game,ratings,schedule,injuries,season):
     if epm_used:
         epm_margin=(h["team_epm"]-a["team_epm"])*pace/100.0+2.0
         baseline_margin=home_points-away_points
-        # Use next-game lineup-adjusted EPM as the spread-strength anchor.
-        # Do not invent a blend weight before a walk-forward fit exists.
-        blended_margin=epm_margin
-        margin_delta=blended_margin-baseline_margin
+        margin_delta=epm_margin-baseline_margin
         home_points+=margin_delta/2.0
         away_points-=margin_delta/2.0
+    # Distribution scales are anchored to the walk-forward residual MAEs:
+    # margin MAE 11.678 -> normal SD 14.65; total MAE 15.212 -> normal SD 19.07.
+    # Logistic margin scale is chosen to match the same variance.
+    margin_sd=14.65
+    total_sd=19.07
+    logistic_scale=margin_sd*math.sqrt(3.0)/math.pi
+    score_sd=math.sqrt((margin_sd**2+total_sd**2)/4.0)
+    z80=1.281551565545
+    margin=home_points-away_points
+    total=home_points+away_points
     return {"projected_home":round(home_points,2),"projected_away":round(away_points,2),
-      "projected_margin":round(home_points-away_points,2),"projected_total":round(home_points+away_points,2),
+      "projected_margin":round(margin,2),"projected_total":round(total,2),
       "projected_pace":round(pace,2),"home_adjustments":home_adj,"away_adjustments":away_adj,
       "epm_used":epm_used,"epm_margin":round(epm_margin,2) if epm_used else None,
       "injury_uncertainty":bool(home_adj.get("unpriced_injury") or away_adj.get("unpriced_injury")),
       "rating_source":ratings.get("source"),"data_quality":ratings.get("data_quality","advanced"),
-      "ratings":{"home":h,"away":a}}
+      "ratings":{"home":h,"away":a},
+      "score_distribution":{
+        "family":"joint normal score approximation; moneyline/spread margin probability uses equivalent logistic link",
+        "home_score_sd":round(score_sd,2),"away_score_sd":round(score_sd,2),
+        "margin_sd":margin_sd,"total_sd":total_sd,"moneyline_logistic_scale":round(logistic_scale,3),
+        "home_score_80":[round(home_points-z80*score_sd,1),round(home_points+z80*score_sd,1)],
+        "away_score_80":[round(away_points-z80*score_sd,1),round(away_points+z80*score_sd,1)],
+        "margin_80":[round(margin-z80*margin_sd,1),round(margin+z80*margin_sd,1)],
+        "total_80":[round(total-z80*total_sd,1),round(total+z80*total_sd,1)],
+        "calibration_status":"provisional_walk_forward_error_scale; joint margin-total covariance not yet estimated"
+      }}
+
+
+def _logistic_cdf(x,mean,scale):
+    z=max(-35.0,min(35.0,(float(x)-float(mean))/float(scale)))
+    return 1.0/(1.0+math.exp(-z))
+
 
 def _candidate(game,market,model):
     candidates=[]
+    dist=model.get("score_distribution") or {}
+    margin_sd=float(dist.get("margin_sd") or 14.65)
+    total_sd=float(dist.get("total_sd") or 19.07)
+    logistic_scale=float(dist.get("moneyline_logistic_scale") or 8.07)
+    margin_mean=float(model["projected_margin"])
+    total_mean=float(model["projected_total"])
+    home_win=_logistic_cdf(0.0,margin_mean,logistic_scale)
+    away_win=1.0-home_win
     if market=="sides":
-        mean=model["projected_margin"]; sd=13.5 if model.get("data_quality")=="derived_early_season" else 12.3
         for team in (game["home"],game["away"]):
             quote=game["spreads"][team]; line=quote["line"]; odds=quote["odds"]
-            team_mean=mean if team==game["home"] else -mean
-            if abs(line-round(line))<1e-9:
-                win=1-_cdf(-line+0.5,team_mean,sd)
-                push=_cdf(-line+0.5,team_mean,sd)-_cdf(-line-0.5,team_mean,sd)
-            else:
-                win=1-_cdf(-line,team_mean,sd); push=0.0
+            team_mean=margin_mean if team==game["home"] else -margin_mean
+            # Cover event is team margin + quoted handicap > 0.
+            cover_mean=team_mean+float(line)
+            win=1.0-_logistic_cdf(0.0,cover_mean,logistic_scale)
+            push=0.0
+            if abs(float(line)-round(float(line)))<1e-9:
+                push=_logistic_cdf(0.5,cover_mean,logistic_scale)-_logistic_cdf(-0.5,cover_mean,logistic_scale)
+                win=max(0.0,win-push/2.0)
             market_raw=[_american_probability(game["spreads"][t]["odds"]) for t in (game["home"],game["away"])]
             selected_raw=_american_probability(odds)
             no_vig=selected_raw/sum(market_raw) if selected_raw and sum(market_raw)>0 else None
@@ -581,12 +613,12 @@ def _candidate(game,market,model):
             candidates.append({"market":"sides","selection":team,"line":line,"odds":odds,
               "model_probability":win,"push_probability":push,"market_probability":no_vig,
               "edge_pp":(win-no_vig)*100 if no_vig is not None else None,"ev_pct":ev*100,
-              "expected_margin_after_spread":round(team_mean+line,2)})
+              "expected_margin_after_spread":round(cover_mean,2),
+              "home_win_probability":round(home_win,5),"away_win_probability":round(away_win,5)})
     else:
-        mean=model["projected_total"]; sd=18.0 if model.get("data_quality")=="derived_early_season" else 17.0
         for side in ("over","under"):
             quote=game["totals"][side]; line=quote["line"]; odds=quote["odds"]
-            win,push=_normal_market_probs(mean,sd,line,over=(side=="over"))
+            win,push=_normal_market_probs(total_mean,total_sd,line,over=(side=="over"))
             other="under" if side=="over" else "over"
             raw=_american_probability(odds); other_raw=_american_probability(game["totals"][other]["odds"])
             no_vig=raw/(raw+other_raw) if raw is not None and other_raw is not None else None
@@ -594,7 +626,8 @@ def _candidate(game,market,model):
             candidates.append({"market":"totals","selection":side.upper(),"line":line,"odds":odds,
               "model_probability":win,"push_probability":push,"market_probability":no_vig,
               "edge_pp":(win-no_vig)*100 if no_vig is not None else None,"ev_pct":ev*100,
-              "projected_total_edge":round(mean-line,2)})
+              "projected_total_edge":round(total_mean-line,2),
+              "home_win_probability":round(home_win,5),"away_win_probability":round(away_win,5)})
     for c in candidates:
         c.update({"event_id":game["event_id"],"matchup":game["matchup"],"home_team":game["home"],
           "away_team":game["away"],"commence_time":game.get("commence_time"),
@@ -602,10 +635,12 @@ def _candidate(game,market,model):
           "projected_home":model["projected_home"],"projected_away":model["projected_away"],
           "projected_margin":model["projected_margin"],"projected_total":model["projected_total"],
           "projected_pace":model["projected_pace"],"home_adjustments":model["home_adjustments"],
-          "away_adjustments":model["away_adjustments"],"rating_source":model.get("rating_source","NBA Stats"),
+          "away_adjustments":model["away_adjustments"],"score_distribution":dist,
+          "rating_source":model.get("rating_source","NBA Stats"),
           "data_quality":model.get("data_quality","advanced"),"base_data_quality":model.get("base_data_quality",model.get("data_quality","advanced")),"epm_used":model.get("epm_used",False),
-          "model_version":"sides-totals-hybrid-v2","sportsbook":"DraftKings"})
+          "model_version":"sides-totals-distribution-v3","sportsbook":"DraftKings"})
     return candidates
+
 
 def _qualified(row):
     derived=(row.get("data_quality")=="derived_early_season" or row.get("base_data_quality")=="derived_early_season")
