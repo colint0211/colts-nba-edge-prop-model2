@@ -592,18 +592,22 @@ def build_board(force=False,preview_date=None):
     settlement={"checked":0,"settled":0}
     try: settlement=_settle_pending()
     except Exception: pass
-    slate_date=_active_slate_date()
-    # A frozen slate is immutable. Later line movement must not rewrite the official pick.
-    with _connect() as conn:
-        frozen={}
-        for market in ("sides","totals"):
-            item=conn.execute("SELECT candidates,created_at FROM nba_game_slates WHERE market=%s AND slate_date=%s",(market,slate_date)).fetchone()
-            if item:
-                data=item[0] if isinstance(item[0],list) else json.loads(item[0] or "[]")
-                frozen[market]={"picks":data,"saved_at":item[1].isoformat() if item[1] else None}
-    if len(frozen)==2:
-        return {"slate_date":slate_date,"frozen":True,"sides":frozen["sides"]["picks"],"totals":frozen["totals"]["picks"],
-          "metrics":_metrics(),"settlement":settlement,"source_status":{"odds":"frozen DraftKings snapshot","team_ratings":"frozen pregame snapshot"}}
+    preview=bool(preview_date)
+    slate_date=str(preview_date) if preview else _active_slate_date()
+    try: date.fromisoformat(slate_date)
+    except Exception: raise RuntimeError("Slate date must be YYYY-MM-DD.")
+    # Frozen official slates are immutable. Preview dates calculate without saving.
+    if not preview:
+        with _connect() as conn:
+            frozen={}
+            for market in ("sides","totals"):
+                item=conn.execute("SELECT candidates,created_at FROM nba_game_slates WHERE market=%s AND slate_date=%s",(market,slate_date)).fetchone()
+                if item:
+                    data=item[0] if isinstance(item[0],list) else json.loads(item[0] or "[]")
+                    frozen[market]={"picks":data,"saved_at":item[1].isoformat() if item[1] else None}
+        if len(frozen)==2:
+            return {"slate_date":slate_date,"frozen":True,"sides":frozen["sides"]["picks"],"totals":frozen["totals"]["picks"],
+              "metrics":_metrics(),"settlement":settlement,"source_status":{"odds":"frozen DraftKings snapshot","team_ratings":"frozen pregame snapshot"}}
     events,odds_source,quota=_fetch_lines(force)
     games=_parse_game_lines(events)
     if not games: raise RuntimeError("PropLine returned no upcoming NBA games with both DraftKings spread and full-game total quotes.")
