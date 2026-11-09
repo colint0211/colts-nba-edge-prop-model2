@@ -10,7 +10,7 @@
     },
     {
       "path": "/api/odds-snapshots/collect",
-      "schedule": "*/15 * * * *"
+      "schedule": "0 12 * * *"
     }
   ],
   "git": {
