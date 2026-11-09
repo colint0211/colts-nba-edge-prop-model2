@@ -109,9 +109,13 @@ def inspect_current_season():
                 count = connection.execute(
                     f"SELECT COUNT(*) FROM read_parquet('{escaped}')"
                 ).fetchone()[0]
-                sample = connection.execute(
+                cursor = connection.execute(
                     f"SELECT * FROM read_parquet('{escaped}') LIMIT 2"
-                ).fetchdf().to_dict(orient="records")
+                )
+                sample = [
+                    dict(zip([item[0] for item in cursor.description], row))
+                    for row in cursor.fetchall()
+                ]
                 details["tables"][table] = {
                     "file": filename,
                     "download_bytes": size,
