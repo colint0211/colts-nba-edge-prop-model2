@@ -524,8 +524,13 @@ def _candidate(game,market,model):
     return candidates
 
 def _qualified(row):
-    edge_floor=4.0 if row.get("data_quality")=="derived_early_season" else 2.5
-    ev_floor=2.0 if row.get("data_quality")=="derived_early_season" else 1.5
+    derived=row.get("data_quality")=="derived_early_season"
+    edge_floor=4.0 if derived else 2.5
+    ev_floor=2.0 if derived else 1.5
+    # Prevent uncalibrated early-season ratings from treating extreme
+    # model/market disagreements as actionable value.
+    if derived and (row.get("edge_pp",0)>12.0 or row.get("ev_pct",0)>20.0):
+        return False
     return (row.get("market_probability") is not None and row.get("edge_pp") is not None
       and row["edge_pp"]>=edge_floor and row["ev_pct"]>=ev_floor and row["model_probability"]>=0.50)
 
@@ -668,8 +673,12 @@ def build_board(force=False,preview_date=None):
             base_models[game["event_id"]]=model; game_by_id[game["event_id"]]=game
             for candidate in _candidate(game,"sides",model):
                 if _qualified(candidate): base_sides.append(candidate)
+                elif ratings.get("data_quality")=="derived_early_season" and (candidate.get("edge_pp",0)>12 or candidate.get("ev_pct",0)>20):
+                    unavailable.append({"event_id":game.get("event_id"),"reason":"extreme early-season model/market gap withheld pending calibration"})
             for candidate in _candidate(game,"totals",model):
                 if _qualified(candidate): base_totals.append(candidate)
+                elif ratings.get("data_quality")=="derived_early_season" and (candidate.get("edge_pp",0)>12 or candidate.get("ev_pct",0)>20):
+                    unavailable.append({"event_id":game.get("event_id"),"reason":"extreme early-season model/market gap withheld pending calibration"})
         except Exception as exc:
             unavailable.append({"event_id":game.get("event_id"),"reason":type(exc).__name__})
     base_sides.sort(key=lambda x:(-x["ev_pct"],-x["edge_pp"]))
@@ -727,7 +736,9 @@ def build_board(force=False,preview_date=None):
         "unavailable_games":unavailable[:10]},
       "model_policy":"Team-efficiency ratings projection with explicit early-season uncertainty. Not yet a historically fitted regression. Market odds are used only for EV and no-vig comparison, never as the model probability.",
       "thresholds":{"minimum_edge_pp":4.0 if ratings.get("data_quality")=="derived_early_season" else 2.5,
-        "minimum_ev_pct":2.0 if ratings.get("data_quality")=="derived_early_season" else 1.5,"minimum_probability":50}}
+        "maximum_edge_pp":12.0 if ratings.get("data_quality")=="derived_early_season" else None,
+        "minimum_ev_pct":2.0 if ratings.get("data_quality")=="derived_early_season" else 1.5,
+        "maximum_ev_pct":20.0 if ratings.get("data_quality")=="derived_early_season" else None,"minimum_probability":50}}
  
 def history(slate_date):
     initialize()
