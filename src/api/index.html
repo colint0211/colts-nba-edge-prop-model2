@@ -193,7 +193,9 @@ async function loadHistory(){
 }
 el('historyDate').addEventListener('change',loadHistory);
 loadBoard();
+loadAdvancedMetrics();
 setInterval(()=>loadBoard(false),60000);
+setInterval(loadAdvancedMetrics,300000);
 </script>
 </body>
 </html>
