@@ -772,6 +772,23 @@ def build_board(force=False):
     events,odds_source,quota=_fetch_lines(force)
     games=_parse_game_lines(events)
     if not games: raise RuntimeError("PropLine returned no upcoming NBA games with both DraftKings spread and full-game total quotes.")
+    from zoneinfo import ZoneInfo
+    now=datetime.now(timezone.utc)
+    future_games=[]
+    for game in games:
+        try:
+            start_time=datetime.fromisoformat(game["commence_time"].replace("Z","+00:00"))
+            if start_time>now and start_time.astimezone(ZoneInfo(_ET)).date().isoformat()==slate_date:
+                future_games.append(game)
+        except Exception: continue
+    if not future_games:
+        side_picks,side_saved=_save_slate([],"sides",slate_date)
+        total_picks,total_saved=_save_slate([],"totals",slate_date)
+        return {"slate_date":slate_date,"frozen":True,"sides":side_picks,"totals":total_picks,
+          "metrics":_metrics(),"settlement":settlement,"game_count":0,
+          "source_status":{"odds":"PropLine DraftKings ("+odds_source+")","team_ratings":"not needed; no remaining games on this slate date",
+            "injuries":"not needed","prop_line_quota":quota,"saved_sides":side_saved,"saved_totals":total_saved},
+          "model_policy":"No upcoming games remain on the active Eastern slate date. No picks were forced."}
     ratings=_team_ratings(force)
     schedule=_schedule(force)
     try:
@@ -779,49 +796,79 @@ def build_board(force=False):
         injury_feed=app_index._load_official_injury_feed()
         injury_meta=injury_feed.get("meta") or {}
         injuries=(injury_feed.get("records") or []) if injury_meta.get("status")=="fresh" else []
-        if injury_meta.get("status")!="fresh":
-            raise RuntimeError("Fresh official NBA injury report is unavailable; refusing to lock picks.")
     except Exception:
         injuries=[]; injury_meta={"status":"unavailable"}
     if injury_meta.get("status")!="fresh":
         raise RuntimeError("Fresh official NBA injury report is unavailable; refusing to lock picks.")
-    sides=[]; totals=[]; unavailable=[]
-    now=datetime.now(timezone.utc)
-    for game in games:
+
+    # Stage 1: score every game from team efficiency, pace and travel/rest features.
+    # Stage 2: review injury negatives only for the strongest initial candidates.
+    base_models={}; game_by_id={}; base_sides=[]; base_totals=[]; unavailable=[]
+    for game in future_games:
         try:
-            if game.get("commence_time"):
-                from zoneinfo import ZoneInfo
-                start=datetime.fromisoformat(game["commence_time"].replace("Z","+00:00"))
-                if start<=now or start.astimezone(ZoneInfo(_ET)).date().isoformat()!=slate_date: continue
-            else:
-                continue
-            model=_score_game(game,ratings,schedule,injuries,ratings["season"])
+            model=_score_game(game,ratings,schedule,[],ratings["season"])
             if not model: continue
-            if model.get("injury_uncertainty"):
-                unavailable.append({"event_id":game.get("event_id"),"reason":"injury impact unavailable; no pick"})
-                continue
+            base_models[game["event_id"]]=model; game_by_id[game["event_id"]]=game
             for candidate in _candidate(game,"sides",model):
-                if _qualified(candidate): sides.append(candidate)
+                if _qualified(candidate): base_sides.append(candidate)
             for candidate in _candidate(game,"totals",model):
-                if _qualified(candidate): totals.append(candidate)
+                if _qualified(candidate): base_totals.append(candidate)
         except Exception as exc:
             unavailable.append({"event_id":game.get("event_id"),"reason":type(exc).__name__})
+    base_sides.sort(key=lambda x:(-x["ev_pct"],-x["edge_pp"]))
+    base_totals.sort(key=lambda x:(-x["ev_pct"],-x["edge_pp"]))
+    review_ids={x["event_id"] for x in base_sides[:10]+base_totals[:10]}
+    review_games=[game_by_id[event_id] for event_id in review_ids if event_id in game_by_id]
+
+    def review_game(game):
+        home=_injury_adjustment(game["home"],injuries,ratings["season"],game["commence_time"])
+        away=_injury_adjustment(game["away"],injuries,ratings["season"],game["commence_time"])
+        return game["event_id"],home,away
+
+    reviewed={}
+    if review_games:
+        with ThreadPoolExecutor(max_workers=5) as pool:
+            for event_id,home_injury,away_injury in pool.map(review_game,review_games):
+                reviewed[event_id]=(home_injury,away_injury)
+
+    sides=[]; totals=[]
+    for event_id,(home_injury,away_injury) in reviewed.items():
+        game=game_by_id[event_id]
+        model=dict(base_models[event_id])
+        if home_injury.get("unpriced_injury") or away_injury.get("unpriced_injury"):
+            unavailable.append({"event_id":event_id,"reason":"rotation-player injury impact could not be verified; no pick"})
+            continue
+        home_adjustments=dict(model["home_adjustments"])
+        away_adjustments=dict(model["away_adjustments"])
+        home_adjustments.update({"injury_adjustment":home_injury["points"],"injuries":home_injury["players"],"unpriced_injury":False})
+        away_adjustments.update({"injury_adjustment":away_injury["points"],"injuries":away_injury["players"],"unpriced_injury":False})
+        home_adjustments["total_adjustment"]+=home_injury["points"]
+        away_adjustments["total_adjustment"]+=away_injury["points"]
+        model["projected_home"]=round(model["projected_home"]+home_injury["points"],2)
+        model["projected_away"]=round(model["projected_away"]+away_injury["points"],2)
+        model["projected_margin"]=round(model["projected_home"]-model["projected_away"],2)
+        model["projected_total"]=round(model["projected_home"]+model["projected_away"],2)
+        model["home_adjustments"]=home_adjustments; model["away_adjustments"]=away_adjustments
+        for candidate in _candidate(game,"sides",model):
+            if _qualified(candidate): sides.append(candidate)
+        for candidate in _candidate(game,"totals",model):
+            if _qualified(candidate): totals.append(candidate)
+
     sides.sort(key=lambda x:(-x["ev_pct"],-x["edge_pp"]))
     totals.sort(key=lambda x:(-x["ev_pct"],-x["edge_pp"]))
-    # Do not create a false official slate when odds or ratings are unavailable.
     side_picks,side_saved=_save_slate(sides,"sides",slate_date)
     total_picks,total_saved=_save_slate(totals,"totals",slate_date)
     return {"slate_date":slate_date,"frozen":True,"sides":side_picks,"totals":total_picks,
-      "metrics":_metrics(),"settlement":settlement,"game_count":len(games),
+      "metrics":_metrics(),"settlement":settlement,"game_count":len(future_games),
       "source_status":{"odds":"PropLine DraftKings ("+odds_source+")","team_ratings":ratings["source"],
         "season":ratings["season"],"injuries":injury_meta.get("status","unavailable"),
-        "on_off":"True EPM/on-off unavailable; ESPN player game-log box-score proxy used for flagged rotation absences",
-        "prop_line_quota":quota,"saved_sides":side_saved,"saved_totals":total_saved,
+        "player_impact":"ESPN player game-log box-score replacement proxy (not EPM/on/off); post-selection review only",
+        "reviewed_games":len(review_games),"prop_line_quota":quota,"saved_sides":side_saved,"saved_totals":total_saved,
         "unavailable_games":unavailable[:10]},
       "model_policy":"Team-efficiency ratings projection with explicit early-season uncertainty. Not yet a historically fitted regression. Market odds are used only for EV and no-vig comparison, never as the model probability.",
       "thresholds":{"minimum_edge_pp":4.0 if ratings.get("data_quality")=="derived_early_season" else 2.5,
         "minimum_ev_pct":2.0 if ratings.get("data_quality")=="derived_early_season" else 1.5,"minimum_probability":50}}
-
+ 
 def history(slate_date):
     initialize()
     with _connect() as conn:
