@@ -70,7 +70,7 @@ table{width:100%;border-collapse:collapse;min-width:800px;font-size:12px}th,td{p
  <div id="board" class="cards"><div class="empty">Loading team ratings and DraftKings lines…</div></div>
 
  <div class="section">Daily model results</div>
- <div class="hint">The official record below belongs only to this sides-and-totals model. The former player-prop ledger is preserved separately and is not included.</div>
+ <div class="hint">The model record below belongs only to this sides-and-totals model. Units are hypothetical at 1u per pick. The former player-prop ledger is preserved separately and is not included.</div>
  <div class="filters">
   <label class="muted">Slate date <input id="historyDate" type="date"></label>
   <button onclick="loadHistory()">↻ Refresh results</button>
@@ -83,7 +83,7 @@ table{width:100%;border-collapse:collapse;min-width:800px;font-size:12px}th,td{p
 
  <div class="section">Model data and methodology</div>
  <div id="sources" class="panel muted">Checking data sources…</div>
- <div class="source">Team strength uses adjusted offensive rating, defensive rating, net rating, pace and four-factor metrics. Situational features include rest, back-to-backs, travel, time-zone changes and elevation. Official injury reports are checked after initial candidate ranking. Games with questionable/doubtful rotation availability are withheld until that absence can be valued reliably. True EPM and reliable on/off ratings are not yet integrated. DraftKings lines are used to calculate market-relative edge and expected value; they are not used to create the model's projected score or probability. Historical player-prop results remain archived and are never blended into this record.</div>
+ <div class="source">Team strength uses estimated offensive/defensive efficiency, net rating, pace, effective field-goal percentage and turnover rate. Offensive rebounds are approximated in the possession estimate. Situational features include rest, back-to-backs, travel, time-zone changes and elevation. Official injury reports are checked after initial candidate ranking. Games with questionable/doubtful rotation availability are withheld until that absence can be valued reliably. True EPM and reliable on/off ratings are not yet integrated. DraftKings lines are used to calculate market-relative edge and expected value; they are not used to create the model's projected score or probability. Historical player-prop results remain archived and are never blended into this record.</div>
 </main>
 <script>
 let boardData=null,market='sides',historyRows=[];
@@ -169,7 +169,7 @@ async function loadHistory(){
   historyRows=d.predictions||[];renderMetrics(d.metrics);
   const wins=historyRows.filter(x=>x.outcome==='WIN').length,losses=historyRows.filter(x=>x.outcome==='LOSS').length;
   const pending=historyRows.filter(x=>!x.outcome).length;
-  el('historyStatus').textContent=historyRows.length+' official picks · '+wins+' wins · '+losses+' losses · '+pending+' pending';
+  el('historyStatus').textContent=historyRows.length+' model picks · '+wins+' wins · '+losses+' losses · '+pending+' pending';
   el('historyRows').innerHTML=historyRows.length?historyRows.map(p=>{
    const result=p.outcome||'PENDING',cls=result==='WIN'?'win':result==='LOSS'?'loss':result==='PUSH'?'push':'';
    return '<tr><td>'+esc(p.market)+'</td><td>'+esc(p.matchup)+'</td><td>'+esc(p.selection)+'</td><td>'+esc(p.line)+'</td><td>'+odds(p.odds)+'</td><td>'+fmt(p.model_probability_pct,1)+'%</td><td>'+fmt(p.market_probability_pct,1)+'%</td><td>'+fmt(p.projected_away,1)+' – '+fmt(p.projected_home,1)+'</td><td>'+fmt(p.actual_value,1)+'</td><td class="'+cls+'">'+result+'</td><td>'+(p.profit_units==null?'—':(p.profit_units>0?'+':'')+fmt(p.profit_units,2)+'u')+'</td></tr>';
