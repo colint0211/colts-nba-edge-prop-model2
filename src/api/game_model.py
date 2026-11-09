@@ -333,9 +333,9 @@ def _schedule(force=False):
         return _SCHEDULE_CACHE["data"]
     from zoneinfo import ZoneInfo
     today=datetime.now(ZoneInfo(_ET)).date()
-    start=(today-timedelta(days=12)).strftime("%Y%m%d")
-    end=(today+timedelta(days=1)).strftime("%Y%m%d")
-    url="https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?"+urlencode({"dates":start+"-"+end,"limit":500})
+    start=(today-timedelta(days=6)).strftime("%Y%m%d")
+    end=today.strftime("%Y%m%d")
+    url="https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?"+urlencode({"dates":start+"-"+end,"limit":200})
     payload,_=_json(url,timeout=15)
     games=[]
     for event in payload.get("events") or []:
