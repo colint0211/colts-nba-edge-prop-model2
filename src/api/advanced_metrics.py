@@ -1,8 +1,8 @@
 """NBA advanced-metrics collection and immutable daily snapshots.
 
 The collector stores source rows as received; it does not manufacture missing
-metrics. League-wide team/player dashboards are collected every run, while
-team-specific on/off and five-man lineup endpoints rotate across six batches.
+metrics. Tank01 supplies a fallback team baseline; BALLDONTLIE GOAT adds
+official team/player advanced data and projected lineups when authorized.
 """
 import json
 import os
@@ -143,15 +143,6 @@ def _bdl_team_season_advanced(season):
         raise RuntimeError("BALLDONTLIE team season advanced returned no data.")
     return [("team_season_advanced",row) for row in rows]
 
-def _bdl_player_season_advanced(season):
-    payload, headers = _bdl_get("/nba/v1/season_averages/general", [
-        ("season",season),("season_type","regular"),("type","advanced")
-    ])
-    rows = payload.get("data")
-    if not isinstance(rows,list) or not rows:
-        raise RuntimeError("BALLDONTLIE player season advanced returned no data.")
-    return [("player_season_advanced",row) for row in rows]
-
 def _bdl_daily_advanced(snapshot_date):
     day = snapshot_date.isoformat()
     rows = []
@@ -235,13 +226,6 @@ def _persist(snapshot_date, season, metric, rows, team_code=None, source="NBA St
             """, (snapshot_date,season,metric,entity,source,json.dumps(payload,default=str)))
             saved += 1
     return saved
-
-def _team_request(metric, endpoint, team_id, season):
-    params = _base_params(season)
-    params.update({"TeamID":str(team_id), "MeasureType":"Advanced"})
-    if metric == "lineups_5":
-        params.update({"GroupQuantity":"5"})
-    return _fetch(endpoint, params)
 
 def collect(batch=None):
     """Collect reliable team, schedule and injury data plus licensed advanced feeds."""
