@@ -6,7 +6,8 @@ on:
     paths:
       - ".github/workflows/nba-historical-backtest.yml"
       - "scripts/nba_historical_matchup_backtest.py"
-      - "scripts/nba_calibrate_matchup.py"\n      - "scripts/nba_market_validation.py"
+      - "scripts/nba_calibrate_matchup.py"
+      - "scripts/nba_market_validation.py"
       - "src/api/quant_game_engine.py"
   workflow_dispatch:
 jobs:
@@ -50,7 +51,11 @@ jobs:
         env:
           PYTHONPATH: .
         run: python scripts/nba_calibrate_matchup.py
-      - name: Compare market-only versus market-plus-fundamental probabilities on untouched test season\n        env:\n          PYTHONPATH: .\n        run: python scripts/nba_market_validation.py\n      - name: Upload backtest report
+      - name: Compare market-only versus market-plus-fundamental probabilities on untouched test season
+        env:
+          PYTHONPATH: .
+        run: python scripts/nba_market_validation.py
+      - name: Upload backtest report
         uses: actions/upload-artifact@v4
         with:
           name: nba-historical-matchup-backtest
