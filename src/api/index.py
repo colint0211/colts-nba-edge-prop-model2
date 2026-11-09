@@ -3698,6 +3698,22 @@ def game_sides_totals_board(refresh: bool = False, preview_date: str = ""):
         }, status_code=503)
 
 
+
+@app.get("/api/odds-snapshots/collect")
+def collect_draftkings_market_snapshots(request: FastRequest):
+    """Vercel Cron endpoint; requires CRON_SECRET and never exposes the odds API key."""
+    expected = os.getenv("CRON_SECRET", "").strip()
+    if not expected:
+        raise HTTPException(status_code=503, detail="CRON_SECRET is not configured; scheduled market capture is disabled.")
+    supplied = request.headers.get("authorization", "")
+    if not secrets.compare_digest(supplied, "Bearer " + expected):
+        raise HTTPException(status_code=401, detail="Unauthorized.")
+    try:
+        return JSONResponse(game_model.collect_market_snapshots())
+    except Exception as exc:
+        message = str(exc).replace(os.getenv("PROPLINE_API_KEY", "___never_match___"), "[redacted]")
+        return JSONResponse({"status":"unavailable","error":type(exc).__name__,"detail":message[:240]},status_code=503)
+
 @app.get("/api/game-history")
 def game_sides_totals_history(slate_date: str):
     try:
