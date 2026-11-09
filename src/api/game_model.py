@@ -673,3 +673,10 @@ def data_probe():
           "bookmakers":books})
     return {"source":source,"event_count":len(events or []),"parsed_game_count":len(_parse_game_lines(events)),
       "quota":quota,"sample_events":samples}
+
+
+def team_stats_probe():
+    ratings=_team_ratings(force=True)
+    return {"source":ratings.get("source"),"season":ratings.get("season"),
+      "prior_season":ratings.get("prior_season"),"team_count":len(ratings.get("teams") or {}),
+      "sample":{k:ratings["teams"].get(k) for k in ("BOS","DEN","LAL","NYK")}}
