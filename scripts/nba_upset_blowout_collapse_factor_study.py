@@ -75,7 +75,7 @@ def sigmoid(z):
     z = max(-30.0, min(30.0, z))
     return 1.0 / (1.0 + math.exp(-z))
 
-def fit_logistic(train, feature_names, target_name, ridge=2.0, steps=3500, lr=0.035):
+def fit_logistic(train, feature_names, target_name, ridge=2.0, steps=500, lr=0.035):
     # Standardized, deterministic batch-gradient logistic regression with L2
     # regularization. No third-party packages or postgame predictors.
     columns = {}
