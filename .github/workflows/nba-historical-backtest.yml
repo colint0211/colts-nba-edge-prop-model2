@@ -12,6 +12,7 @@ on:
       - "scripts/nba_reverse_engineer_ats.py"
       - "scripts/nba_reverse_engineer_ats_multiseason.py"
       - "scripts/nba_reverse_engineer_ats_direct.py"
+      - "scripts/nba_ats_2026_27_current_season_test.py"
       - "scripts/nba_game_by_game_forensic_audit.py"
       - "scripts/nba_game_by_game_forensic_audit_v2.py"
       - "scripts/nba_upset_blowout_collapse_factor_study.py"
@@ -70,6 +71,10 @@ jobs:
         env:
           PYTHONPATH: .
         run: python scripts/nba_reverse_engineer_formula.py
+      - name: Run frozen 2026-27 current-season ATS holdout test
+        env:
+          PYTHONPATH: .
+        run: python scripts/nba_ats_2026_27_current_season_test.py
       - name: Run leakage-safe reverse-engineered ATS holdout test
         env:
           PYTHONPATH: .
