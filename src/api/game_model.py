@@ -106,6 +106,25 @@ def _canonical(value):
     for code,name in _TEAM_NAMES.items():
         if low == name.lower() or low == name.lower().replace("la ","los angeles "):
             return code
+    # PropLine outcome labels often use a two- or three-letter city code
+    # followed by the mascot (for example "DAL Mavericks", "NO Pelicans").
+    prefixed = {
+      "ATL":"ATL","BOS":"BOS","BKN":"BKN","CHA":"CHA","CHI":"CHI","CLE":"CLE",
+      "DAL":"DAL","DEN":"DEN","DET":"DET","GS":"GSW","GSW":"GSW","HOU":"HOU",
+      "IND":"IND","LA":"LAC","LAC":"LAC","LAL":"LAL","MEM":"MEM","MIA":"MIA",
+      "MIL":"MIL","MIN":"MIN","NO":"NOP","NOP":"NOP","NY":"NYK","NYK":"NYK",
+      "OKC":"OKC","ORL":"ORL","PHI":"PHI","PHO":"PHX","PHX":"PHX","POR":"POR",
+      "SAC":"SAC","SA":"SAS","SAS":"SAS","TOR":"TOR","UTA":"UTA","WAS":"WAS","WSH":"WAS"
+    }
+    parts=up.split()
+    if len(parts)>=2 and parts[0] in prefixed:
+        code=prefixed[parts[0]]
+        mascot=" ".join(parts[1:]).lower()
+        if code=="LAC" and "clipper" in mascot: return "LAC"
+        if code=="LAL" and "laker" in mascot: return "LAL"
+        return code
+    if low.startswith("los angeles clippers"): return "LAC"
+    if low.startswith("los angeles lakers"): return "LAL"
     return None
 
 def _normal_name(value):
