@@ -257,7 +257,7 @@ def collect(batch=None):
     with _db() as conn:
         previous = conn.execute("""
           SELECT id,status,summary FROM nba_metric_collection_runs
-          WHERE snapshot_date=%s AND batch=%s AND status='complete'
+          WHERE snapshot_date=%s AND batch=%s AND status IN ('complete','core_complete')
           ORDER BY started_at DESC LIMIT 1
         """, (snapshot_date,batch)).fetchone()
     if previous:
@@ -314,7 +314,9 @@ def collect(batch=None):
     successful = len(summary["datasets"])
     required = {"team_advanced","schedule_context","injury_status"}
     required_ok = required.issubset(summary["datasets"])
-    status = "complete" if required_ok else ("partial" if successful else "failed")
+    status = ("complete" if required_ok and not summary["errors"]
+              else "core_complete" if required_ok
+              else "partial" if successful else "failed")
     summary["optional_tier_note"] = "BALLDONTLIE season advanced, game advanced and projected-lineup feeds require GOAT tier."
     with _db() as conn:
         conn.execute("""
@@ -405,7 +407,7 @@ def latest_team_ratings(max_age_days=2):
         "teams":teams, "season":_season(), "prior_season":None,
         "source":source,
         "data_quality":quality, "fetched_at":datetime.now(timezone.utc).isoformat(),
-        "player_impact_source":"Team/player on-off and five-man lineup snapshots are being collected separately; EPM is optional.",
+        "player_impact_source":"BALLDONTLIE game advanced data includes on-court ratings and usage/efficiency; true player on/off splits require a separately licensed source and are not fabricated.",
         "epm_available":False,
     }
 
