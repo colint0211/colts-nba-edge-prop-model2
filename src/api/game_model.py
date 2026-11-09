@@ -745,14 +745,15 @@ def _normalise_team_name(value):
     return "".join(ch.lower() for ch in str(value or "") if ch.isalnum())
 
 
-def api_sports_team_probe(team_name="Phoenix Suns"):
+def api_sports_team_probe(team_name="Phoenix Suns",season="2025-2026"):
     key=os.getenv("API_SPORTS_KEY","").strip()
     if not key: raise RuntimeError("API_SPORTS_KEY missing")
     headers={"x-apisports-key":key,"Accept":"application/json"}
-    teams,_=_json("https://v1.basketball.api-sports.io/teams?"+urlencode({"league":"12","season":"2026-2027"}),headers,5)
+    q=urlencode({"search":str(team_name),"season":str(season)})
+    teams,_=_json("https://v1.basketball.api-sports.io/teams?"+q,headers,5)
     rows=teams.get("response") or []
     target=_normalise_team_name(team_name)
     team=next((x for x in rows if _normalise_team_name(x.get("name"))==target),None)
-    if not team: return {"team_count":len(rows),"sample":rows[:3],"found":False}
-    stats,_=_json("https://v1.basketball.api-sports.io/statistics?"+urlencode({"league":"12","season":"2026-2027","team":team.get("id")}),headers,5)
+    if not team: return {"team_count":len(rows),"sample":rows[:5],"found":False,"results":teams.get("results")}
+    stats,_=_json("https://v1.basketball.api-sports.io/statistics?"+urlencode({"league":"12","season":str(season),"team":team.get("id")}),headers,5)
     return {"team":team,"results":stats.get("results"),"response":stats.get("response")}
