@@ -330,7 +330,7 @@ def _team_ratings(force=False):
 
 def _schedule(force=False):
     now=time.time()
-    if not force and _SCHEDULE_CACHE["data"] and now-_SCHEDULE_CACHE["at"]<1800:
+    if not force and _SCHEDULE_CACHE["data"] and now-_SCHEDULE_CACHE["at"]<60:
         return _SCHEDULE_CACHE["data"]
     from zoneinfo import ZoneInfo
     today=datetime.now(ZoneInfo(_ET)).date()
@@ -577,7 +577,7 @@ def _settle_pending():
         rows=conn.execute("""SELECT id,slate_date,event_id,market,selection,line,odds,home_team,away_team
           FROM nba_game_predictions WHERE settled_at IS NULL ORDER BY created_at LIMIT 300""").fetchall()
     if not rows: return {"checked":0,"settled":0}
-    schedule=_schedule(force=True); settled=0
+    schedule=_schedule(force=False); settled=0
     for row in rows:
         pid,slate,event_id,market,selection,line,odds,home,away=row
         try: slate_day=date.fromisoformat(str(slate)[:10])
