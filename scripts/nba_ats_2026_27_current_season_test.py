@@ -56,7 +56,12 @@ def summarize(picks):
 def main():
     # Fit once on two completed seasons, then freeze the formula.
     train = make_examples(season_rows(2025)) + make_examples(season_rows(2026))
-    test = make_examples(season_rows(2027))
+    test_source_rows = season_rows(2027)
+    test = make_examples(test_source_rows)
+    rows_missing_valid_possessions = sum(
+        1 for row in test_source_rows
+        if row[6] is None or row[7] is None or float(row[6]) <= 0 or float(row[7]) <= 0
+    )
     if len(train) < 1500 or len(test) < 30:
         raise RuntimeError(f"Insufficient data: train={len(train)} holdout={len(test)}")
     beta = fit(train, "actual_margin")
@@ -136,7 +141,11 @@ def main():
         "experiment":"frozen_2026_27_current_season_ats_holdout",
         "training_seasons":["2024-25","2025-26"],
         "holdout_season":"2026-27",
-        "training_games":len(train),"holdout_score_games":len(test),
+        "training_games":len(train),
+        "holdout_source_completed_games":len(test_source_rows),
+        "holdout_score_games":len(test),
+        "holdout_rows_missing_valid_possessions":rows_missing_valid_possessions,
+        "holdout_rows_not_modelled":len(test_source_rows)-len(test),
         "odds_source":ODDS_URL,
         "odds_rows_regular_season":sum(str(x.get("season_type","")).lower()=="regular" for x in odds),
         "matched_games":len(matched),"unmatched_odds_rows":len(unmatched),
@@ -156,6 +165,7 @@ def main():
         "limitations":[
             "Consensus closing spread dataset; this is a closing-line diagnostic, not proof the picks were available at an earlier price.",
             "No historical executable DraftKings prices; unit returns assume -110.",
+            "Early-season ratings use a league-shrunk cold-start prior until a team has three prior games; this is still a score-margin model, not an injury-aware model.",
             "No timestamp-verified injury or starting-lineup adjustment is included in this first current-season ATS test.",
             "The 2026-27 sample is small and in progress; do not treat it as a stable long-run estimate."
         ],
