@@ -5,6 +5,7 @@ immutable ledger and daily slate tables so archived prop results can never be
 mixed with the new sides/totals record.
 """
 import hashlib
+from concurrent.futures import ThreadPoolExecutor
 import json
 import math
 import os
