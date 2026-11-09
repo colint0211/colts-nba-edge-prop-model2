@@ -11,28 +11,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
-from zoneinfo import ZoneInfo
-
-_ET = ZoneInfo("America/New_York")
-_BASE = "https://stats.nba.com/stats/"
-_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126 Safari/537.36",
-    "Accept": "application/json, text/plain, */*",
-    "Referer": "https://www.nba.com/",
-    "Origin": "https://www.nba.com",
-    "x-nba-stats-origin": "stats",
-    "x-nba-stats-token": "true",
-}
-_TEAMS = [
-    ("ATL",1610612737),("BOS",1610612738),("BKN",1610612751),("CHA",1610612766),
-    ("CHI",1610612741),("CLE",1610612739),("DAL",1610612742),("DEN",1610612743),
-    ("DET",1610612765),("GSW",1610612744),("HOU",1610612745),("IND",1610612754),
-    ("LAC",1610612746),("LAL",1610612747),("MEM",1610612763),("MIA",1610612748),
-    ("MIL",1610612749),("MIN",1610612750),("NOP",1610612740),("NYK",1610612752),
-    ("OKC",1610612760),("ORL",1610612753),("PHI",1610612755),("PHX",1610612756),
-    ("POR",1610612757),("SAC",1610612758),("SAS",1610612759),("TOR",1610612761),
-    ("UTA",1610612762),("WAS",1610612764),
-]
 
 def _season():
     now = datetime.now(timezone.utc)
@@ -75,30 +53,6 @@ def initialize():
         CREATE INDEX IF NOT EXISTS nba_metric_runs_date
           ON nba_metric_collection_runs(snapshot_date DESC, started_at DESC);
         """)
-
-def _fetch(endpoint, params):
-    req = Request(_BASE + endpoint + "?" + urlencode(params), headers=_HEADERS)
-    with urlopen(req, timeout=12) as response:
-        payload = json.loads(response.read().decode("utf-8", "replace"))
-    sets = payload.get("resultSets") or payload.get("resultSet") or []
-    if isinstance(sets, dict):
-        sets = [sets]
-    output = []
-    for result_set in sets:
-        if not isinstance(result_set, dict):
-            continue
-        headers = result_set.get("headers") or []
-        rows = result_set.get("rowSet") or []
-        if not headers:
-            continue
-        name = str(result_set.get("name") or "result").lower()
-        for row in rows:
-            if isinstance(row, (list, tuple)):
-                output.append((name, dict(zip(headers, row))))
-    if not output:
-        raise RuntimeError(f"{endpoint} returned no tabular rows.")
-    return output
-
 
 def _bdl_get(path, params=None, timeout=12):
     api_key = os.getenv("BALLDONTLIE_API_KEY", "").strip()
@@ -172,15 +126,6 @@ def _bdl_projected_lineups(snapshot_date):
         raise RuntimeError("BALLDONTLIE projected lineups response was invalid.")
     return [("projected_lineup",row) for row in rows]
 
-def _base_params(season):
-    return {
-        "LeagueID":"00", "Season":season, "SeasonType":"Regular Season",
-        "PerMode":"PerGame", "PlusMinus":"N", "PaceAdjust":"N", "Rank":"N",
-        "LastNGames":"0", "Month":"0", "OpponentTeamID":"0", "Location":"",
-        "Outcome":"", "DateFrom":"", "DateTo":"", "SeasonSegment":"",
-        "VsConference":"", "VsDivision":"", "GameSegment":"", "Period":"0",
-    }
-
 def _entity(metric, row, team_code=None):
     if metric in ("team_advanced","team_season_advanced"):
         team = row.get("TEAM") or row.get("team") or {}
@@ -188,15 +133,6 @@ def _entity(metric, row, team_code=None):
     if metric in ("player_advanced","player_season_advanced"):
         player = row.get("PLAYER") or row.get("player") or {}
         return str(row.get("PLAYER_ID") or row.get("player_id") or player.get("id") or "")
-    if metric == "team_onoff":
-        parts = [team_code, row.get("PLAYER_ID"), row.get("VS_PLAYER_ID"),
-                 row.get("GROUP_ID"), row.get("GROUP_NAME"), row.get("GROUP_VALUE"),
-                 row.get("GROUP_SET")]
-        return ":".join(str(x) for x in parts if x not in (None, ""))
-    if metric == "lineups_5":
-        parts = [team_code, row.get("GROUP_ID"), row.get("GROUP_NAME"),
-                 row.get("GROUP_VALUE"), row.get("GROUP_SET")]
-        return ":".join(str(x) for x in parts if x not in (None, ""))
     if metric == "schedule_context":
         return str(row.get("id") or row.get("event_id") or "")
     if metric == "game_advanced":
