@@ -698,3 +698,10 @@ def tank01_team_probe(season=None):
       "defensive_stats_keys":list((sample.get("defensiveStats") or {}).keys()),
       "defensive_stats_sample":sample.get("defensiveStats"),
       "rate_limit_remaining":headers.get("x-ratelimit-requests-remaining")}
+
+
+def onoff_probe():
+    data=_team_onoff("BOS","2026-27",force=True)
+    return {"team":"BOS","player_count":len(data),
+      "sample":list(data.values())[:5],
+      "players_with_on_off":sum(1 for x in data.values() if x.get("net_rating") is not None)}
