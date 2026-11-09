@@ -113,7 +113,7 @@ function card(p,i){
  const edge=Number(p.edge_pp);
  const score=p.projected_away+' @ '+p.projected_home;
  const home= p.home_adjustments||{},away=p.away_adjustments||{};
- return '<article class="card"><div class="top"><div><div class="name">'+(i+1)+'. '+esc(p.selection)+'</div><div class="match">'+esc(p.matchup)+' · DraftKings</div></div><span class="decision">QUALIFIED VALUE</span></div>'+
+ return '<article class="card"><div class="top"><div><div class="name">'+(i+1)+'. '+esc(p.selection_name||p.selection)+'</div><div class="match">'+esc(p.matchup)+' · DraftKings</div></div><span class="decision">QUALIFIED VALUE</span></div>'+
  '<div class="linebox"><div><div class="line-label">'+label+'</div><div class="line">'+esc(pick)+'</div></div><div style="text-align:right"><div class="line-label">Sportsbook price</div><div class="line">'+odds(p.odds)+'</div></div></div>'+
  '<div class="metrics"><div class="mini"><div class="mini-label">Our probability</div><div class="mini-value">'+fmt(p.model_probability*100,1)+'%</div></div>'+
  '<div class="mini"><div class="mini-label">No-vig market</div><div class="mini-value">'+fmt(p.market_probability*100,1)+'%</div></div>'+
