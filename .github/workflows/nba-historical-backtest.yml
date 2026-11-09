@@ -13,6 +13,7 @@ on:
       - "scripts/nba_reverse_engineer_ats_multiseason.py"
       - "scripts/nba_reverse_engineer_ats_direct.py"
       - "scripts/nba_ats_2026_27_current_season_test.py"
+      - "scripts/nba_ats_error_diagnostics.py"
       - "scripts/nba_game_by_game_forensic_audit.py"
       - "scripts/nba_game_by_game_forensic_audit_v2.py"
       - "scripts/nba_upset_blowout_collapse_factor_study.py"
@@ -75,6 +76,10 @@ jobs:
         env:
           PYTHONPATH: .
         run: python scripts/nba_ats_2026_27_current_season_test.py
+      - name: Diagnose where ATS model forecast errors cluster
+        env:
+          PYTHONPATH: .
+        run: python scripts/nba_ats_error_diagnostics.py
       - name: Run leakage-safe reverse-engineered ATS holdout test
         env:
           PYTHONPATH: .
