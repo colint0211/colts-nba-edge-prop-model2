@@ -458,13 +458,13 @@ def _team_onoff(team,season,force=False):
     except Exception:
         return {}
 
-def _season_player_boxscore(athlete_id,season_year):
+def _season_player_boxscore(athlete_id,season_year,timeout=3):
     key=(str(athlete_id),int(season_year))
     cached=_PLAYER_IMPACT_CACHE.get(key)
     if cached and time.time()-cached["at"]<21600: return cached["data"]
     from . import index as app_index
     url=app_index.ESPN_BASE+"/athletes/"+str(athlete_id)+"/gamelog?"+urlencode({"season":int(season_year)})
-    payload=app_index._get_json(url)
+    payload=app_index._get_json(url,timeout=timeout)
     labels=payload.get("labels") or []
     season_types=payload.get("seasonTypes") or []
     def is_regular(st):
@@ -512,16 +512,21 @@ def _player_boxscore_impact(injury,season):
     if "," in raw_name:
         last,first=[x.strip() for x in raw_name.split(",",1)]
         search_name=(first+" "+last).strip()
-    athlete_id=app_index._espn_player_id(search_name)
+    athlete_id=app_index._espn_player_id(search_name,timeout=3)
     if not athlete_id: return None
     try: current_year=int(str(season).split("-")[0])+1
     except Exception: current_year=2027
-    current=_season_player_boxscore(athlete_id,current_year)
+    current=_season_player_boxscore(athlete_id,current_year,timeout=3)
+    if len(current)==0:
+        # If the player has not appeared this season, the current-season team
+        # efficiency sample already reflects the roster without that player.
+        return {"minutes":0.0,"impact_points":0.0,"games":0,"box_value":0.0,
+          "source":"no current-season games; absence already reflected in team sample"}
     sample=current
-    if len(current)<4:
-        prior=_season_player_boxscore(athlete_id,current_year-1)
-        if len(prior)>=4: sample=prior
-    if len(sample)<3: return None
+    if len(current)<3:
+        prior=_season_player_boxscore(athlete_id,current_year-1,timeout=3)
+        if len(prior)>=3: sample=prior
+    if len(sample)<2: return None
     averages={key:sum(float(x.get(key) or 0) for x in sample)/len(sample)
       for key in ("minutes","points","rebounds","assists","steals","blocks","turnovers")}
     # Conservative replacement-value proxy from recent box-score production.
