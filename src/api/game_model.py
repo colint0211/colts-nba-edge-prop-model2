@@ -305,11 +305,14 @@ def _haversine(a,b):
     h=math.sin(dlat/2)**2+math.cos(lat1*p)*math.cos(lat2*p)*math.sin(dlon/2)**2
     return 3958.8*2*math.asin(min(1,math.sqrt(h)))
 
-def _situational(team,game_date,schedule,opponent):
+def _situational(team,game_date,schedule,opponent,current_venue):
     from zoneinfo import ZoneInfo
-    try: target=date.fromisoformat(str(game_date)[:10])
-    except Exception: target=date.today()
-    venue=_VENUES.get(team)
+    try:
+        target_dt=datetime.fromisoformat(str(game_date).replace("Z","+00:00"))
+        target=target_dt.date()
+    except Exception:
+        target_dt=datetime.now(timezone.utc); target=target_dt.date()
+    current=_VENUES.get(current_venue)
     prior=[]
     for g in schedule:
         if not g.get("completed") or team not in (g.get("home"),g.get("away")): continue
@@ -321,15 +324,19 @@ def _situational(team,game_date,schedule,opponent):
         return {"rest_days":2,"travel_miles":0,"tz_change":0,"altitude_change":0}
     last_date,last_game=prior[0]
     rest=max(0,(target-last_date).days-1)
-    last_venue=_VENUES.get(team)
-    travel=0.0
-    if last_venue and venue and (last_game.get("home")==team or last_game.get("away")==team):
-        travel=_haversine(last_venue,venue)
-    tz_change=0
-    altitude_change=0
-    if venue and _VENUES.get(opponent):
-        altitude_change=venue[3]-_VENUES[opponent][3]
-    return {"rest_days":rest,"travel_miles":round(travel),"tz_change":tz_change,"altitude_change":altitude_change}
+    last_venue_code=team if last_game.get("home")==team else last_game.get("home")
+    previous=_VENUES.get(last_venue_code)
+    travel=_haversine(previous,current) if previous and current else 0.0
+    tz_change=0.0
+    if previous and current:
+        try:
+            prev_offset=target_dt.astimezone(ZoneInfo(previous[2])).utcoffset().total_seconds()/3600
+            curr_offset=target_dt.astimezone(ZoneInfo(current[2])).utcoffset().total_seconds()/3600
+            tz_change=curr_offset-prev_offset
+        except Exception: pass
+    home_venue=_VENUES.get(team)
+    altitude_change=(current[3]-home_venue[3]) if current and home_venue else 0
+    return {"rest_days":rest,"travel_miles":round(travel),"tz_change":round(tz_change,1),"altitude_change":altitude_change}
 
 def _team_onoff(team,season,force=False):
     now=time.time()
@@ -347,16 +354,27 @@ def _team_onoff(team,season,force=False):
         parsed={}
         for rs in sets:
             if not isinstance(rs,dict): continue
+            title=str(rs.get("name") or rs.get("resultSetName") or "").lower()
             heads=rs.get("headers") or []; rows=rs.get("rowSet") or []
             for row in rows:
                 item=dict(zip(heads,row))
                 name=item.get("PLAYER_NAME") or item.get("PLAYER")
                 if not name: continue
-                net=item.get("NET_RATING")
-                mins=item.get("MIN")
-                try: net=float(net); mins=float(mins or 0)
+                try:
+                    net=float(item.get("NET_RATING"))
+                    mins=float(item.get("MIN") or 0)
                 except (TypeError,ValueError): continue
-                parsed[_normal_name(name)]={"name":name,"net_rating":net,"minutes":mins}
+                key=_normal_name(name)
+                parsed.setdefault(key,{"name":name,"on_net":None,"off_net":None,"minutes":mins})
+                if "off_court" in title or "offcourt" in title:
+                    parsed[key]["off_net"]=net
+                elif "on_court" in title or "oncourt" in title:
+                    parsed[key]["on_net"]=net
+                elif parsed[key]["on_net"] is None:
+                    parsed[key]["on_net"]=net
+        for item in parsed.values():
+            on=item.get("on_net"); off=item.get("off_net")
+            item["net_rating"]=(on-off) if on is not None and off is not None else None
         _ONOFF_CACHE[team]={"at":now,"data":parsed}
         return parsed
     except Exception:
@@ -373,7 +391,7 @@ def _injury_adjustment(team,injuries,season):
         status=str(injury.get("status") or "").lower()
         absence={"out":1.0,"doubtful":0.8,"questionable":0.45,"day-to-day":0.35,"probable":0.15}.get(status,0.0)
         delta=0.0
-        if impact:
+        if impact and impact.get("net_rating") is not None:
             # Shrink noisy on/off net-rating differences and cap a single absence.
             delta=max(-3.0,min(3.0,float(impact["net_rating"])*0.30))
             delta*=min(1.0,max(0.25,float(impact["minutes"])/28.0))
@@ -385,18 +403,21 @@ def _injury_adjustment(team,injuries,season):
                        "impact_data_available":bool(impact)})
     return {"points":max(-5.0,min(5.0,total)),"players":detail,"source":"NBA official injury report + NBA Stats on/off when available"}
 
-def _team_adjustment(team,opp,game_date,schedule,injuries,season):
-    sit=_situational(team,game_date,schedule,opp)
+def _team_adjustment(team,opp,game_date,schedule,injuries,season,is_home):
+    current_venue=team if is_home else opp
+    sit=_situational(team,game_date,schedule,opp,current_venue)
     inj=_injury_adjustment(team,injuries,season)
     rest=0.0
     if sit["rest_days"]==0: rest-=1.0
     elif sit["rest_days"]>=2: rest+=0.25
     travel_penalty=min(1.0,sit["travel_miles"]/2500.0)*0.65
-    elevation_penalty=max(0.0,abs(sit["altitude_change"])/5000.0)*0.35
+    timezone_penalty=min(0.6,abs(sit["tz_change"])*0.15)
+    elevation_penalty=max(0.0,sit["altitude_change"]/5000.0)*0.35
     return {"rest_days":sit["rest_days"],"travel_miles":sit["travel_miles"],
-      "rest_adjustment":rest,"travel_adjustment":-travel_penalty,
+      "timezone_change_hours":sit["tz_change"],"altitude_change_feet":sit["altitude_change"],
+      "rest_adjustment":rest,"travel_adjustment":-travel_penalty-timezone_penalty,
       "injury_adjustment":inj["points"],"injuries":inj["players"],
-      "total_adjustment":rest-travel_penalty-elevation_penalty+inj["points"]}
+      "total_adjustment":rest-travel_penalty-timezone_penalty-elevation_penalty+inj["points"]}
 
 def _score_game(game,ratings,schedule,injuries,season):
     home,away=game["home"],game["away"]
@@ -405,8 +426,8 @@ def _score_game(game,ratings,schedule,injuries,season):
     pace=(h["pace"]+a["pace"])/2.0
     home_eff=(h["ortg"]+a["drtg"])/2.0
     away_eff=(a["ortg"]+h["drtg"])/2.0
-    home_adj=_team_adjustment(home,away,game.get("commence_time"),schedule,injuries,season)
-    away_adj=_team_adjustment(away,home,game.get("commence_time"),schedule,injuries,season)
+    home_adj=_team_adjustment(home,away,game.get("commence_time"),schedule,injuries,season,True)
+    away_adj=_team_adjustment(away,home,game.get("commence_time"),schedule,injuries,season,False)
     home_points=home_eff*pace/100.0+2.0+home_adj["total_adjustment"]
     away_points=away_eff*pace/100.0+away_adj["total_adjustment"]
     return {"projected_home":round(home_points,2),"projected_away":round(away_points,2),
