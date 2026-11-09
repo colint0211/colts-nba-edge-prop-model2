@@ -3665,6 +3665,22 @@ def collect_advanced_metrics(request: FastRequest, batch: int = None):
         raise HTTPException(status_code=503, detail="Advanced-metrics collection failed: " + type(exc).__name__)
 
 
+@app.get("/api/game-forecasts")
+def game_sides_totals_forecasts(forecast_date: str = "", refresh: bool = False):
+    """Return independent NBA matchup score distributions; sportsbook odds are not required."""
+    try:
+        return JSONResponse(game_model.build_forecasts(forecast_date or None,force=refresh))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        return JSONResponse({
+            "status":"unavailable",
+            "error":type(exc).__name__,
+            "detail":str(exc)[:300],
+            "board_type":"independent_game_forecasts"
+        },status_code=503)
+
+
 @app.get("/api/game-board")
 def game_sides_totals_board(refresh: bool = False, preview_date: str = ""):
     """Return the independent point-spread and game-total board."""
