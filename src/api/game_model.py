@@ -878,3 +878,8 @@ def onoff_probe():
     return {"team":"BOS","player_count":len(data),
       "sample":list(data.values())[:5],
       "players_with_on_off":sum(1 for x in data.values() if x.get("net_rating") is not None)}
+
+
+def player_impact_probe(player_name="Nikola Jokic"):
+    injury={"player":str(player_name),"team":"DEN","status":"Questionable","reason":"probe"}
+    return _player_boxscore_impact(injury,"2026-27") or {"available":False}
