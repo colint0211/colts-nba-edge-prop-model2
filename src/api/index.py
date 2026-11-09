@@ -3578,6 +3578,35 @@ async def model_recalculate(request: FastRequest):
         raise HTTPException(status_code=503, detail="Could not recalculate and save this custom line.") from exc
 
 
+@app.get("/api/nba-data/status")
+def nba_data_status():
+    try:
+        from . import nba_data_source
+        return JSONResponse(nba_data_source.status())
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="NBA Data source status unavailable: " + type(exc).__name__)
+
+
+@app.api_route("/api/nba-data/inspect", methods=["GET", "POST"])
+def inspect_nba_data(request: FastRequest):
+    """Inspect current-season public Parquet files; never changes predictions."""
+    secret = os.getenv("CRON_SECRET", "").strip()
+    supplied = request.headers.get("authorization", "")
+    cron_authorized = bool(secret) and secrets.compare_digest(supplied, "Bearer " + secret)
+    preview_authorized = (
+        os.getenv("VERCEL_ENV", "") == "preview"
+        and os.getenv("VERCEL_GIT_COMMIT_REF", "") == "sides-totals-rebuild"
+        and os.getenv("METRICS_PREVIEW_RUN", "").strip().lower() == "true"
+    )
+    if not cron_authorized and not preview_authorized:
+        raise HTTPException(status_code=401, detail="Unauthorized NBA Data inspection request.")
+    try:
+        from . import nba_data_source
+        return JSONResponse(nba_data_source.inspect_current_season())
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="NBA Data inspection failed: " + type(exc).__name__)
+
+
 @app.get("/api/advanced-metrics/status")
 def advanced_metrics_status():
     try:
