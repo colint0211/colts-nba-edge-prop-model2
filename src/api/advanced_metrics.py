@@ -168,12 +168,11 @@ def collect(batch=None):
     initialize()
     season = _season()
     snapshot_date = datetime.now(timezone.utc).date()
-    if batch is None:
-        batch = datetime.now(timezone.utc).timetuple().tm_yday % 6
-    batch = int(batch)
-    if batch < 0 or batch > 5:
-        raise ValueError("batch must be between 0 and 5")
-    selected = _TEAMS[batch * 5:(batch + 1) * 5]
+    # One daily collector now gathers all required feeds; the legacy batch
+    # column remains at zero for compatibility with existing run history.
+    if batch not in (None, 0, "0"):
+        raise ValueError("The advanced-metrics collector no longer uses team batches.")
+    batch = 0
     with _db() as conn:
         previous = conn.execute("""
           SELECT id,status,summary FROM nba_metric_collection_runs
@@ -186,8 +185,7 @@ def collect(batch=None):
 
     started = time.time()
     summary = {"season":season, "snapshot_date":snapshot_date.isoformat(),
-               "batch":batch, "teams_in_batch":[x[0] for x in selected],
-               "datasets":{}, "errors":{}}
+               "batch":batch, "datasets":{}, "errors":{}}
     with _db() as conn:
         run_id = conn.execute("""
           INSERT INTO nba_metric_collection_runs(snapshot_date,season,batch,status)
