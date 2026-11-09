@@ -3633,6 +3633,15 @@ def game_stats_probe():
         return JSONResponse({"status":"unavailable","error":type(exc).__name__,"detail":str(exc)[:250]},status_code=503)
 
 
+
+@app.get("/api/game-tank01-probe")
+def game_tank01_probe():
+    try:
+        return JSONResponse(game_model.tank01_team_probe())
+    except Exception as exc:
+        return JSONResponse({"status":"unavailable","error":type(exc).__name__,"detail":str(exc)[:250]},status_code=503)
+
+
 @app.api_route("/api/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
 async def api_proxy(path: str, request: FastRequest):
     base = LIVE_UPSTREAM if path == "live-stats" else UPSTREAM
