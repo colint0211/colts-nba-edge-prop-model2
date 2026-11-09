@@ -6,7 +6,8 @@ dependencies = [
     "fastapi>=0.115.0",
     "numpy>=2.0,<3",
     "psycopg[binary]>=3.2,<4",
-    "duckdb>=1.2,<2"
+    "duckdb>=1.2,<2",
+    "pytz>=2024.1"
 ]
 
 [tool.vercel]
