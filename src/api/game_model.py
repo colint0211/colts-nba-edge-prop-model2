@@ -426,7 +426,7 @@ def _team_onoff(team,season,force=False):
     url="https://stats.nba.com/stats/teamplayeronoffsummary?"+params
     headers={"Referer":"https://www.nba.com/","Origin":"https://www.nba.com","x-nba-stats-origin":"stats","x-nba-stats-token":"true"}
     try:
-        payload,_=_json(url,headers,16)
+        payload,_=_json(url,headers,7)
         sets=payload.get("resultSets") or payload.get("resultSet") or []
         if isinstance(sets,dict): sets=[sets]
         parsed={}
@@ -479,7 +479,9 @@ def _injury_adjustment(team,injuries,season):
                        "on_off_net_rating":impact.get("net_rating") if impact else None,
                        "estimated_team_points_per_100":round(adjustment,2),
                        "impact_data_available":bool(impact)})
-    return {"points":max(-5.0,min(5.0,total)),"players":detail,"source":"NBA official injury report + NBA Stats on/off when available"}
+    unpriced=any((str(x.get("status") or "").lower() in ("out","doubtful","questionable","day-to-day") and not x.get("impact_data_available")) for x in detail)
+    return {"points":max(-5.0,min(5.0,total)),"players":detail,"unpriced_injury":unpriced,
+      "source":"NBA official injury report + NBA Stats on/off when available"}
 
 def _team_adjustment(team,opp,game_date,schedule,injuries,season,is_home):
     current_venue=team if is_home else opp
@@ -494,7 +496,7 @@ def _team_adjustment(team,opp,game_date,schedule,injuries,season,is_home):
     return {"rest_days":sit["rest_days"],"travel_miles":sit["travel_miles"],
       "timezone_change_hours":sit["tz_change"],"altitude_change_feet":sit["altitude_change"],
       "rest_adjustment":rest,"travel_adjustment":-travel_penalty-timezone_penalty,
-      "injury_adjustment":inj["points"],"injuries":inj["players"],
+      "injury_adjustment":inj["points"],"injuries":inj["players"],"unpriced_injury":inj.get("unpriced_injury",False),
       "total_adjustment":rest-travel_penalty-timezone_penalty-elevation_penalty+inj["points"]}
 
 def _score_game(game,ratings,schedule,injuries,season):
@@ -516,7 +518,7 @@ def _score_game(game,ratings,schedule,injuries,season):
 def _candidate(game,market,model):
     candidates=[]
     if market=="sides":
-        mean=model["projected_margin"]; sd=12.3
+        mean=model["projected_margin"]; sd=13.5 if model.get("data_quality")=="derived_early_season" else 12.3
         for team in (game["home"],game["away"]):
             quote=game["spreads"][team]; line=quote["line"]; odds=quote["odds"]
             team_mean=mean if team==game["home"] else -mean
@@ -534,7 +536,7 @@ def _candidate(game,market,model):
               "edge_pp":(win-no_vig)*100 if no_vig is not None else None,"ev_pct":ev*100,
               "expected_margin_after_spread":round(team_mean+line,2)})
     else:
-        mean=model["projected_total"]; sd=17.0
+        mean=model["projected_total"]; sd=18.0 if model.get("data_quality")=="derived_early_season" else 17.0
         for side in ("over","under"):
             quote=game["totals"][side]; line=quote["line"]; odds=quote["odds"]
             win,push=_normal_market_probs(mean,sd,line,over=(side=="over"))
@@ -552,13 +554,16 @@ def _candidate(game,market,model):
           "projected_home":model["projected_home"],"projected_away":model["projected_away"],
           "projected_margin":model["projected_margin"],"projected_total":model["projected_total"],
           "projected_pace":model["projected_pace"],"home_adjustments":model["home_adjustments"],
-          "away_adjustments":model["away_adjustments"],"rating_source":model["ratings"]["home"].get("source","NBA Stats"),
+          "away_adjustments":model["away_adjustments"],"rating_source":model.get("rating_source","NBA Stats"),
+          "data_quality":model.get("data_quality","advanced"),
           "model_version":"sides-totals-regression-v1","sportsbook":"DraftKings"})
     return candidates
 
 def _qualified(row):
+    edge_floor=4.0 if row.get("data_quality")=="derived_early_season" else 2.5
+    ev_floor=2.0 if row.get("data_quality")=="derived_early_season" else 1.5
     return (row.get("market_probability") is not None and row.get("edge_pp") is not None
-      and row["edge_pp"]>=2.5 and row["ev_pct"]>=1.5 and row["model_probability"]>=0.50)
+      and row["edge_pp"]>=edge_floor and row["ev_pct"]>=ev_floor and row["model_probability"]>=0.50)
 
 def _save_slate(rows,market,slate_date):
     safe=[]
@@ -657,6 +662,8 @@ def build_board(force=False):
         injury_feed=app_index._load_official_injury_feed()
         injury_meta=injury_feed.get("meta") or {}
         injuries=(injury_feed.get("records") or []) if injury_meta.get("status")=="fresh" else []
+        if injury_meta.get("status")!="fresh":
+            raise RuntimeError("Fresh official NBA injury report is unavailable; refusing to lock picks.")
     except Exception:
         injuries=[]; injury_meta={"status":"unavailable"}
     sides=[]; totals=[]; unavailable=[]
@@ -671,6 +678,9 @@ def build_board(force=False):
                 continue
             model=_score_game(game,ratings,schedule,injuries,ratings["season"])
             if not model: continue
+            if model.get("injury_uncertainty"):
+                unavailable.append({"event_id":game.get("event_id"),"reason":"injury impact unavailable; no pick"})
+                continue
             for candidate in _candidate(game,"sides",model):
                 if _qualified(candidate): sides.append(candidate)
             for candidate in _candidate(game,"totals",model):
@@ -690,7 +700,8 @@ def build_board(force=False):
         "prop_line_quota":quota,"saved_sides":side_saved,"saved_totals":total_saved,
         "unavailable_games":unavailable[:10]},
       "model_policy":"Independent team-efficiency regression. Market odds are used only for EV and no-vig comparison, never as the model probability.",
-      "thresholds":{"minimum_edge_pp":2.5,"minimum_ev_pct":1.5,"minimum_probability":50}}
+      "thresholds":{"minimum_edge_pp":4.0 if ratings.get("data_quality")=="derived_early_season" else 2.5,
+        "minimum_ev_pct":2.0 if ratings.get("data_quality")=="derived_early_season" else 1.5,"minimum_probability":50}}
 
 def history(slate_date):
     initialize()
