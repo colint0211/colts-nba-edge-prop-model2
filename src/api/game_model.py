@@ -8,12 +8,10 @@ import hashlib
 import json
 import math
 import os
-import re
 import time
 from datetime import date, datetime, timedelta, timezone
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
-from urllib.error import HTTPError
 
 _ET = "America/New_York"
 _PROP_CACHE = {"at": 0.0, "events": None, "quota": {}}
