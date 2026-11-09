@@ -651,7 +651,8 @@ def build_board(force=False,preview_date=None):
         for item in schedule_probe:
             try:
                 game_day=datetime.fromisoformat(item["date"].replace("Z","+00:00")).astimezone(ZoneInfo(_ET)).date().isoformat()
-                if game_day==slate_date and not item.get("completed"):
+                game_start=datetime.fromisoformat(item["date"].replace("Z","+00:00"))
+                if game_day==slate_date and game_start>now and not item.get("completed"):
                     has_scheduled_game=True; break
             except Exception: continue
         if has_scheduled_game:
