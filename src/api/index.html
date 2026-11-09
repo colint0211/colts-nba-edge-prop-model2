@@ -157,7 +157,7 @@ async function loadBoard(refresh=false){
  }catch(e){
   el('status').textContent='DATA UNAVAILABLE';
   el('board').innerHTML='<div class="empty">The model did not generate picks because required data could not be verified.<br><br>'+esc(e.message||e)+'</div>';
-  el('sources').textContent='No official picks were created. The model will not substitute guessed team ratings or sportsbook-implied probabilities.';
+  el('sources').textContent='No model picks were created. The model will not substitute guessed team ratings or sportsbook-implied probabilities.';
  }
 }
 async function refreshBoard(){await loadBoard(true)}
@@ -174,7 +174,7 @@ async function loadHistory(){
   el('historyRows').innerHTML=historyRows.length?historyRows.map(p=>{
    const result=p.outcome||'PENDING',cls=result==='WIN'?'win':result==='LOSS'?'loss':result==='PUSH'?'push':'';
    return '<tr><td>'+esc(p.market)+'</td><td>'+esc(p.matchup)+'</td><td>'+esc(p.selection)+'</td><td>'+esc(p.line)+'</td><td>'+odds(p.odds)+'</td><td>'+fmt(p.model_probability_pct,1)+'%</td><td>'+fmt(p.market_probability_pct,1)+'%</td><td>'+fmt(p.projected_away,1)+' – '+fmt(p.projected_home,1)+'</td><td>'+fmt(p.actual_value,1)+'</td><td class="'+cls+'">'+result+'</td><td>'+(p.profit_units==null?'—':(p.profit_units>0?'+':'')+fmt(p.profit_units,2)+'u')+'</td></tr>';
-  }).join(''):'<tr><td colspan="11">No official sides or totals picks saved for this date.</td></tr>';
+  }).join(''):'<tr><td colspan="11">No sides or totals model picks saved for this date.</td></tr>';
  }catch(e){el('historyStatus').textContent='History unavailable: '+(e.message||e);el('historyRows').innerHTML='<tr><td colspan="11">Could not load game-model results.</td></tr>'}
 }
 el('historyDate').addEventListener('change',loadHistory);
