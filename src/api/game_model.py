@@ -20,7 +20,7 @@ _PROP_CACHE = {"at": 0.0, "events": None, "quota": {}}
 _TEAM_CACHE = {"at": 0.0, "data": None}
 _RECENT_CACHE = {"at": 0.0, "data": None}
 _SCHEDULE_CACHE = {"at": 0.0, "data": None}
-_ONOFF_CACHE = {}
+_ONOFF_CACHE = {}\n_PLAYER_IMPACT_CACHE = {}
 _CACHE_TTL = 900
 _TEAM_IDS = {
     "ATL":1610612737,"BOS":1610612738,"BKN":1610612751,"CHA":1610612766,
@@ -458,35 +458,137 @@ def _team_onoff(team,season,force=False):
     except Exception:
         return {}
 
-def _injury_adjustment(team,injuries,season):
-    relevant=[x for x in injuries if x.get("team")==team and str(x.get("status") or "").lower() not in ("available","active","probable")]
-    if not relevant: return {"points":0.0,"players":[],"source":"official injury report"}
-    onoff=_team_onoff(team,season)
-    total=0.0; detail=[]
+def _season_player_boxscore(athlete_id,season_year):
+    key=(str(athlete_id),int(season_year))
+    cached=_PLAYER_IMPACT_CACHE.get(key)
+    if cached and time.time()-cached["at"]<21600: return cached["data"]
+    from . import index as app_index
+    url=app_index.ESPN_BASE+"/athletes/"+str(athlete_id)+"/gamelog?"+urlencode({"season":int(season_year)})
+    payload=app_index._get_json(url)
+    labels=payload.get("labels") or []
+    season_types=payload.get("seasonTypes") or []
+    def is_regular(st):
+        info=st.get("type") if isinstance(st.get("type"),dict) else {}
+        ids={str(st.get("id") or "").lower(),str(info.get("id") or "").lower()}
+        names=[st.get("name"),st.get("displayName"),st.get("abbreviation"),
+          info.get("name"),info.get("displayName"),info.get("abbreviation")]
+        norm={"".join(ch.lower() for ch in str(x or "") if ch.isalnum()) for x in names}
+        return "2" in ids or any("regularseason" in x and "playin" not in x for x in norm) or "reg" in norm
+    records=[]
+    for st in season_types:
+        if not isinstance(st,dict) or not is_regular(st): continue
+        for cat in st.get("categories") or []:
+            if not isinstance(cat,dict): continue
+            cat_labels=cat.get("labels") or labels
+            index={str(label).upper():i for i,label in enumerate(cat_labels)}
+            events=cat.get("events") or []
+            if isinstance(events,dict): events=list(events.values())
+            for event in events if isinstance(events,list) else []:
+                stats=event.get("stats") if isinstance(event,dict) else None
+                if not isinstance(stats,list): continue
+                def value(label):
+                    i=index.get(label)
+                    if i is None or i>=len(stats): return None
+                    raw=str(stats[i]).replace(",","").strip()
+                    try:
+                        if ":" in raw:
+                            mm,ss=raw.split(":",1); return float(mm)+float(ss)/60.0
+                        return float(raw)
+                    except (TypeError,ValueError): return None
+                mins=value("MIN"); pts=value("PTS")
+                if mins is None or pts is None or mins<=0: continue
+                records.append({"minutes":mins,"points":pts,"rebounds":value("REB") or 0,
+                  "assists":value("AST") or 0,"steals":value("STL") or 0,
+                  "blocks":value("BLK") or 0,"turnovers":value("TO") or 0})
+    data=records[-10:]
+    _PLAYER_IMPACT_CACHE[key]={"at":time.time(),"data":data}
+    return data
+
+
+def _player_boxscore_impact(injury,season):
+    from . import index as app_index
+    raw_name=str(injury.get("player") or "").strip()
+    search_name=raw_name
+    if "," in raw_name:
+        last,first=[x.strip() for x in raw_name.split(",",1)]
+        search_name=(first+" "+last).strip()
+    athlete_id=app_index._espn_player_id(search_name)
+    if not athlete_id: return None
+    try: current_year=int(str(season).split("-")[0])+1
+    except Exception: current_year=2027
+    current=_season_player_boxscore(athlete_id,current_year)
+    sample=current
+    if len(current)<4:
+        prior=_season_player_boxscore(athlete_id,current_year-1)
+        if len(prior)>=4: sample=prior
+    if len(sample)<3: return None
+    averages={key:sum(float(x.get(key) or 0) for x in sample)/len(sample)
+      for key in ("minutes","points","rebounds","assists","steals","blocks","turnovers")}
+    # Conservative replacement-value proxy from recent box-score production.
+    # This is not advertised as EPM or true on/off; it is used only to avoid
+    # ignoring a verified absence when the NBA on/off endpoint is unavailable.
+    box_value=(averages["points"]+0.65*averages["rebounds"]+0.70*averages["assists"]
+      +1.5*averages["steals"]+1.5*averages["blocks"]-0.7*averages["turnovers"])
+    impact=0.0 if averages["minutes"]<12 else min(3.2,max(0.0,(box_value-7.0)*0.095))
+    return {"minutes":averages["minutes"],"impact_points":impact,"games":len(sample),
+      "box_value":box_value,"source":"ESPN recent box-score replacement proxy"}
+
+
+def _injury_adjustment(team,injuries,season,game_date):
+    from zoneinfo import ZoneInfo
+    try:
+        target=datetime.fromisoformat(str(game_date).replace("Z","+00:00")).astimezone(ZoneInfo(_ET)).date()
+    except Exception: target=date.today()
+    relevant=[]
+    for item in injuries:
+        if item.get("team")!=team: continue
+        status=str(item.get("status") or "").lower()
+        if status not in ("out","doubtful","questionable","day-to-day"): continue
+        reason=str(item.get("reason") or "").lower()
+        if "g league" in reason or "two-way" in reason or "on assignment" in reason: continue
+        raw_date=str(item.get("game_date") or "")
+        try: report_date=datetime.strptime(raw_date,"%m/%d/%Y").date()
+        except Exception: report_date=target
+        if report_date!=target: continue
+        relevant.append(item)
+    if not relevant: return {"points":0.0,"players":[],"unpriced_injury":False,"source":"fresh official injury report"}
+    onoff={}
+    if os.getenv("USE_NBA_STATS_ONOFF","").strip().lower() in ("1","true","yes"):
+        onoff=_team_onoff(team,season)
+    total=0.0; detail=[]; unpriced=False
     for injury in relevant:
-        name=_normal_name(injury.get("player"))
-        impact=onoff.get(name)
         status=str(injury.get("status") or "").lower()
-        absence={"out":1.0,"doubtful":0.8,"questionable":0.45,"day-to-day":0.35,"probable":0.15}.get(status,0.0)
-        delta=0.0
+        absence={"out":1.0,"doubtful":0.8,"questionable":0.45,"day-to-day":0.35}.get(status,0.0)
+        name=str(injury.get("player") or "")
+        normalized=name
+        if "," in name:
+            last,first=[x.strip() for x in name.split(",",1)]
+            normalized=(first+" "+last).strip()
+        impact=onoff.get(_normal_name(normalized))
         if impact and impact.get("net_rating") is not None:
-            # Shrink noisy on/off net-rating differences and cap a single absence.
-            delta=max(-3.0,min(3.0,float(impact["net_rating"])*0.30))
-            delta*=min(1.0,max(0.25,float(impact["minutes"])/28.0))
-        adjustment=-delta*absence
+            adjustment=-max(-3.0,min(3.0,float(impact["net_rating"])*0.30))*min(1.0,max(0.25,float(impact["minutes"])/28.0))*absence
+            source="NBA Stats on/off net-rating differential"
+            available=True
+            minutes=impact.get("minutes")
+        else:
+            proxy=_player_boxscore_impact(injury,season)
+            if proxy is None:
+                adjustment=0.0; source="unavailable"; available=False; minutes=None
+                unpriced=True
+            else:
+                adjustment=-float(proxy["impact_points"])*absence
+                source=proxy["source"]; available=True; minutes=proxy["minutes"]
         total+=adjustment
-        detail.append({"player":injury.get("player"),"status":injury.get("status"),
-                       "on_off_net_rating":impact.get("net_rating") if impact else None,
-                       "estimated_team_points_per_100":round(adjustment,2),
-                       "impact_data_available":bool(impact)})
-    unpriced=any((str(x.get("status") or "").lower() in ("out","doubtful","questionable","day-to-day") and not x.get("impact_data_available")) for x in detail)
-    return {"points":max(-5.0,min(5.0,total)),"players":detail,"unpriced_injury":unpriced,
-      "source":"NBA official injury report + NBA Stats on/off when available"}
+        detail.append({"player":name,"status":injury.get("status"),"minutes":round(minutes,1) if minutes is not None else None,
+          "estimated_team_points":round(adjustment,2),"impact_data_available":available,"impact_source":source})
+    return {"points":max(-6.0,min(6.0,total)),"players":detail,"unpriced_injury":unpriced,
+      "source":"official injury report + player box-score impact proxy (not EPM/on/off)"}
+
 
 def _team_adjustment(team,opp,game_date,schedule,injuries,season,is_home):
     current_venue=team if is_home else opp
     sit=_situational(team,game_date,schedule,opp,current_venue)
-    inj=_injury_adjustment(team,injuries,season)
+    inj=_injury_adjustment(team,injuries,season,game_date)
     rest=0.0
     if sit["rest_days"]==0: rest-=1.0
     elif sit["rest_days"]>=2: rest+=0.25
