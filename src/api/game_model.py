@@ -344,7 +344,7 @@ def _team_onoff(team,season,force=False):
     if not force and cached and now-cached["at"]<21600: return cached["data"]
     team_id=_TEAM_IDS.get(team)
     if not team_id: return {}
-    params=urlencode({"TeamID":str(team_id),"Season":season,"SeasonType":"Regular Season","LeagueID":"00"})
+    params=urlencode({"TeamID":str(team_id),"Season":season,"SeasonType":"Regular Season","MeasureType":"Advanced","PerMode":"PerGame","PlusMinus":"N","PaceAdjust":"N","Rank":"N","LeagueID":"00","LastNGames":"0","Month":"0","OpponentTeamID":"0","Location":"","Outcome":""})
     url="https://stats.nba.com/stats/teamplayeronoffsummary?"+params
     headers={"Referer":"https://www.nba.com/","Origin":"https://www.nba.com","x-nba-stats-origin":"stats","x-nba-stats-token":"true"}
     try:
@@ -577,8 +577,8 @@ def build_board(force=False):
     try:
         from . import index as app_index
         injury_feed=app_index._load_official_injury_feed()
-        injuries=injury_feed.get("records") or []
         injury_meta=injury_feed.get("meta") or {}
+        injuries=(injury_feed.get("records") or []) if injury_meta.get("status")=="fresh" else []
     except Exception:
         injuries=[]; injury_meta={"status":"unavailable"}
     sides=[]; totals=[]; unavailable=[]
