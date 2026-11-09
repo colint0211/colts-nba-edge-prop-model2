@@ -288,7 +288,7 @@ def _tank01_ratings(force=False):
     return result
 
 
-def _team_ratings(force=False):
+def _base_team_ratings(force=False):
     # The NBA Stats endpoint has repeatedly timed out from the Vercel runtime.
     # Use it only when explicitly enabled; Tank01 is the authenticated fallback.
     if os.getenv("USE_NBA_STATS_TEAM_RATINGS","").strip().lower() in ("1","true","yes"):
@@ -326,6 +326,66 @@ def _team_ratings(force=False):
         _TEAM_CACHE.update({"at":now,"data":result})
         return result
     return _tank01_ratings(force)
+
+
+
+_DNT_CACHE = {"date": None, "at": 0.0, "teams": None}
+
+def _dnt_team_epm(target_date, force=False):
+    """Optional Dunks & Threes next-game team EPM; requires a paid API key."""
+    key=os.getenv("DUNKS_AND_THREES_API_KEY","").strip()
+    if not key:
+        return None
+    now=time.time()
+    if (not force and _DNT_CACHE["teams"] is not None
+        and _DNT_CACHE["date"]==str(target_date)
+        and now-_DNT_CACHE["at"]<21600):
+        return _DNT_CACHE["teams"]
+    url="https://dunksandthrees.com/api/v2/team-epm?"+urlencode({"date":str(target_date)})
+    payload,_=_json(url,{"Authorization":key,"Accept":"application/json","Accept-Encoding":"gzip"},20)
+    rows=payload if isinstance(payload,list) else []
+    teams={}
+    for item in rows:
+        if not isinstance(item,dict):
+            continue
+        code=_canonical(item.get("team_alias"))
+        try:
+            epm=float(item.get("team_epm_next"))
+            oepm=float(item.get("team_oepm_next"))
+            depm=float(item.get("team_depm_next"))
+        except (TypeError,ValueError):
+            continue
+        if code:
+            teams[code]={"team_epm":epm,"team_oepm":oepm,"team_depm":depm,
+              "team_epm_date":item.get("asof_dt"),"team_epm_updated":item.get("updated_at"),
+              "team_epm_window_games":item.get("window_games"),"team_epm_sos":item.get("sos")}
+    if len(teams)<28:
+        raise RuntimeError("Dunks & Threes Team EPM returned fewer than 28 teams.")
+    _DNT_CACHE.update({"date":str(target_date),"at":now,"teams":teams})
+    return teams
+
+
+def _team_ratings(force=False,target_date=None):
+    base=_base_team_ratings(force)
+    epm=_dnt_team_epm(target_date,force) if target_date else None
+    if not epm:
+        base["player_impact_source"]="not configured; team box-score baseline only"
+        base["epm_available"]=False
+        return base
+    merged=dict(base)
+    teams={code:dict(row) for code,row in base.get("teams",{}).items()}
+    for code,ratings in epm.items():
+        if code in teams:
+            teams[code].update(ratings)
+    if len([x for x in teams.values() if x.get("team_epm") is not None])<28:
+        raise RuntimeError("Team EPM did not match at least 28 NBA teams.")
+    merged["teams"]=teams
+    merged["source"]=str(base.get("source",""))+" + Dunks & Threes next-game Team EPM"
+    merged["base_data_quality"]=base.get("data_quality")
+    merged["data_quality"]="epm_enhanced"
+    merged["epm_available"]=True
+    merged["player_impact_source"]="Dunks & Threes next-game Team EPM; expected lineup availability incorporated in provider ratings"
+    return merged
 
 
 def _schedule(force=False):
@@ -471,9 +531,17 @@ def _score_game(game,ratings,schedule,injuries,season):
     away_adj=_team_adjustment(away,home,game.get("commence_time"),schedule,injuries,season,False)
     home_points=home_eff*pace/100.0+2.0+home_adj["total_adjustment"]
     away_points=away_eff*pace/100.0+away_adj["total_adjustment"]
+    epm_used=bool(h.get("team_epm") is not None and a.get("team_epm") is not None)
+    if epm_used:
+        epm_margin=(h["team_epm"]-a["team_epm"])*pace/100.0+2.0
+        baseline_margin=home_points-away_points
+        blended_margin=0.55*baseline_margin+0.45*epm_margin
+        margin_delta=blended_margin-baseline_margin
+        home_points+=margin_delta/2.0
+        away_points-=margin_delta/2.0
     return {"projected_home":round(home_points,2),"projected_away":round(away_points,2),
       "projected_margin":round(home_points-away_points,2),"projected_total":round(home_points+away_points,2),
-      "projected_pace":round(pace,2),"home_adjustments":home_adj,"away_adjustments":away_adj,
+      "projected_pace":round(pace,2),"home_adjustments":home_adj,"away_adjustments":away_adj,\n      "epm_used":epm_used,"epm_margin":round(epm_margin,2) if epm_used else None,
       "injury_uncertainty":bool(home_adj.get("unpriced_injury") or away_adj.get("unpriced_injury")),
       "rating_source":ratings.get("source"),"data_quality":ratings.get("data_quality","advanced"),
       "ratings":{"home":h,"away":a}}
@@ -519,8 +587,8 @@ def _candidate(game,market,model):
           "projected_margin":model["projected_margin"],"projected_total":model["projected_total"],
           "projected_pace":model["projected_pace"],"home_adjustments":model["home_adjustments"],
           "away_adjustments":model["away_adjustments"],"rating_source":model.get("rating_source","NBA Stats"),
-          "data_quality":model.get("data_quality","advanced"),
-          "model_version":"sides-totals-efficiency-v1","sportsbook":"DraftKings"})
+          "data_quality":model.get("data_quality","advanced"),"epm_used":model.get("epm_used",False),
+          "model_version":"sides-totals-hybrid-v2","sportsbook":"DraftKings"})
     return candidates
 
 def _qualified(row):
@@ -668,7 +736,7 @@ def build_board(force=False,preview_date=None):
           "source_status":{"odds":"PropLine DraftKings ("+odds_source+")","team_ratings":"not needed; no remaining games on this slate date",
             "injuries":"not needed","prop_line_quota":quota,"saved_sides":side_saved,"saved_totals":total_saved},
           "model_policy":"No upcoming games remain on the active Eastern slate date. No picks were forced."}
-    ratings=_team_ratings(force)
+    ratings=_team_ratings(force,slate_date)
     schedule=_schedule(force)
     try:
         from . import index as app_index
@@ -718,7 +786,7 @@ def build_board(force=False,preview_date=None):
     for event_id,(home_injury,away_injury) in reviewed.items():
         game=game_by_id[event_id]
         model=dict(base_models[event_id])
-        if home_injury.get("unpriced_injury") or away_injury.get("unpriced_injury"):
+        if (home_injury.get("unpriced_injury") or away_injury.get("unpriced_injury")) and not base_models[event_id].get("epm_used"):
             unavailable.append({"event_id":event_id,"reason":"questionable/doubtful/day-to-day rotation availability cannot be valued reliably; no pick"})
             continue
         home_adjustments=dict(model["home_adjustments"])
@@ -757,10 +825,10 @@ def build_board(force=False,preview_date=None):
       "metrics":_metrics(),"settlement":settlement,"game_count":len(future_games),
       "source_status":{"odds":"PropLine DraftKings ("+odds_source+")","team_ratings":ratings["source"],
         "season":ratings["season"],"injuries":injury_meta.get("status","unavailable"),
-        "player_impact":"True EPM/on-off not integrated; uncertain rotation availability blocks the game; known OUT players are disclosed but not individually valued",
+        "player_impact":ratings.get("player_impact_source","not integrated"),
         "reviewed_games":len(review_games),"prop_line_quota":quota,"saved_sides":side_saved,"saved_totals":total_saved,
         "unavailable_games":unique_unavailable[:10]},
-      "model_policy":"Team-efficiency ratings projection with explicit early-season uncertainty. Not yet a historically fitted regression. Market odds are used only for EV and no-vig comparison, never as the model probability.",
+      "model_policy":"Hybrid team-efficiency and next-game Team EPM projection when DUNKS_AND_THREES_API_KEY is configured. EPM incorporates expected lineup availability. This is not yet a historically fitted or calibrated proprietary regression. Market odds are used only for EV and no-vig comparison, never as the model probability.",
       "thresholds":{"minimum_edge_pp":4.0 if ratings.get("data_quality")=="derived_early_season" else 2.5,
         "maximum_edge_pp":12.0 if ratings.get("data_quality")=="derived_early_season" else None,
         "minimum_ev_pct":2.0 if ratings.get("data_quality")=="derived_early_season" else 1.5,
