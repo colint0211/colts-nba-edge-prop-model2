@@ -557,11 +557,16 @@ def _injury_adjustment(team,injuries,season,game_date):
         if report_date!=target: continue
         relevant.append(item)
     if not relevant: return {"points":0.0,"players":[],"unpriced_injury":False,"source":"fresh official injury report"}
+    status_rank={"out":0,"doubtful":1,"questionable":2,"day-to-day":3}
+    relevant.sort(key=lambda x:status_rank.get(str(x.get("status") or "").lower(),9))
+    # Review the three highest-priority non-G-League absences per team; the
+    # remaining bench/inactive report entries are not allowed to dominate the
+    # game model merely because the injury feed lists them.
+    relevant=relevant[:3]
     onoff={}
     if os.getenv("USE_NBA_STATS_ONOFF","").strip().lower() in ("1","true","yes"):
         onoff=_team_onoff(team,season)
-    total=0.0; detail=[]; unpriced=False
-    for injury in relevant:
+    def evaluate(injury):
         status=str(injury.get("status") or "").lower()
         absence={"out":1.0,"doubtful":0.8,"questionable":0.45,"day-to-day":0.35}.get(status,0.0)
         name=str(injury.get("player") or "")
@@ -572,22 +577,24 @@ def _injury_adjustment(team,injuries,season,game_date):
         impact=onoff.get(_normal_name(normalized))
         if impact and impact.get("net_rating") is not None:
             adjustment=-max(-3.0,min(3.0,float(impact["net_rating"])*0.30))*min(1.0,max(0.25,float(impact["minutes"])/28.0))*absence
-            source="NBA Stats on/off net-rating differential"
-            available=True
-            minutes=impact.get("minutes")
+            source="NBA Stats on/off net-rating differential"; available=True; minutes=impact.get("minutes")
         else:
             proxy=_player_boxscore_impact(injury,season)
             if proxy is None:
-                adjustment=0.0; source="unavailable"; available=False; minutes=None
-                unpriced=True
+                adjustment=0.0; source="unavailable"; available=False; minutes=None; unpriced=True
             else:
                 adjustment=-float(proxy["impact_points"])*absence
-                source=proxy["source"]; available=True; minutes=proxy["minutes"]
-        total+=adjustment
-        detail.append({"player":name,"status":injury.get("status"),"minutes":round(minutes,1) if minutes is not None else None,
-          "estimated_team_points":round(adjustment,2),"impact_data_available":available,"impact_source":source})
+                source=proxy["source"]; available=True; minutes=proxy["minutes"]; unpriced=False
+        detail={"player":name,"status":injury.get("status"),"minutes":round(minutes,1) if minutes is not None else None,
+          "estimated_team_points":round(adjustment,2),"impact_data_available":available,"impact_source":source}
+        return adjustment,detail,unpriced
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        results=list(pool.map(evaluate,relevant))
+    total=sum(x[0] for x in results)
+    detail=[x[1] for x in results]
+    unpriced=any(x[2] for x in results)
     return {"points":max(-6.0,min(6.0,total)),"players":detail,"unpriced_injury":unpriced,
-      "source":"official injury report + player box-score impact proxy (not EPM/on/off)"}
+      "source":"official injury report + ESPN player box-score replacement proxy (not EPM/on/off)"}
 
 
 def _team_adjustment(team,opp,game_date,schedule,injuries,season,is_home):
