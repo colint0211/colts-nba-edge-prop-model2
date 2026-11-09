@@ -28,7 +28,7 @@ def _json_safe(value):
 class JSONResponse(StarletteJSONResponse):
     def render(self, content):
         return super().render(_json_safe(content))
-from . import prediction_ledger
+from . import prediction_ledger, game_model
 from pathlib import Path
 from html.parser import HTMLParser
 from zoneinfo import ZoneInfo
@@ -3576,6 +3576,44 @@ async def model_recalculate(request: FastRequest):
         raise HTTPException(status_code=503, detail="Player history or prediction database is temporarily unavailable.") from exc
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Could not recalculate and save this custom line.") from exc
+
+
+@app.get("/api/game-board")
+def game_sides_totals_board(refresh: bool = False):
+    """Return the independent point-spread and game-total board."""
+    try:
+        return JSONResponse(game_model.build_board(force=refresh))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        message = str(exc).replace(os.getenv("PROPLINE_API_KEY", "___never_match___"), "[redacted]")
+        return JSONResponse({
+            "status": "unavailable",
+            "error": type(exc).__name__,
+            "detail": message[:300],
+            "board_type": "sides_and_totals",
+        }, status_code=503)
+
+
+@app.get("/api/game-history")
+def game_sides_totals_history(slate_date: str):
+    try:
+        return JSONResponse({
+            "slate_date": slate_date,
+            "predictions": game_model.history(slate_date),
+            "metrics": game_model._metrics(),
+        })
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Game-model history is temporarily unavailable: " + type(exc).__name__)
+
+
+@app.get("/api/game-metrics")
+def game_sides_totals_metrics():
+    try:
+        return JSONResponse(game_model._metrics())
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Game-model record is temporarily unavailable: " + type(exc).__name__)
+
 
 @app.api_route("/api/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
 async def api_proxy(path: str, request: FastRequest):
