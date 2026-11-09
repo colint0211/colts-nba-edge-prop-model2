@@ -28,7 +28,7 @@ def _json_safe(value):
 class JSONResponse(StarletteJSONResponse):
     def render(self, content):
         return super().render(_json_safe(content))
-from . import prediction_ledger, game_model
+from . import prediction_ledger, game_model, advanced_metrics
 from pathlib import Path
 from html.parser import HTMLParser
 from zoneinfo import ZoneInfo
@@ -3576,6 +3576,29 @@ async def model_recalculate(request: FastRequest):
         raise HTTPException(status_code=503, detail="Player history or prediction database is temporarily unavailable.") from exc
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Could not recalculate and save this custom line.") from exc
+
+
+@app.get("/api/advanced-metrics/status")
+def advanced_metrics_status():
+    try:
+        return JSONResponse(advanced_metrics.status())
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Advanced-metrics status unavailable: " + type(exc).__name__)
+
+
+@app.api_route("/api/advanced-metrics/collect", methods=["GET", "POST"])
+def collect_advanced_metrics(request: FastRequest, batch: int = None):
+    """Vercel Cron collector. Requires the project's CRON_SECRET bearer token."""
+    secret = os.getenv("CRON_SECRET", "").strip()
+    supplied = request.headers.get("authorization", "")
+    if not secret or not secrets.compare_digest(supplied, "Bearer " + secret):
+        raise HTTPException(status_code=401, detail="Unauthorized metrics collection request.")
+    try:
+        return JSONResponse(advanced_metrics.collect(batch))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Advanced-metrics collection failed: " + type(exc).__name__)
 
 
 @app.get("/api/game-board")
