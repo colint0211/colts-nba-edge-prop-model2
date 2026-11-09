@@ -1,699 +1,183 @@
-<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#07111f"><title>Colt's NBA Edge</title><style>
-:root{color-scheme:dark;--bg:#07111f;--panel:#101d30;--panel2:#14243a;--line:#263a53;--text:#eff6ff;--muted:#9aacc3;--green:#47e0a1;--red:#ff7e8a;--gold:#ffd27a}*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at top,#132b46 0%,var(--bg) 55%);color:var(--text);font:14px/1.45 system-ui,-apple-system,Segoe UI,sans-serif}header{padding:24px clamp(14px,4vw,42px);background:rgba(8,18,32,.86);border-bottom:1px solid var(--line)}main{max-width:1440px;margin:auto;padding:22px clamp(12px,3vw,30px) 44px}.headrow{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap}h1{font-size:clamp(23px,4vw,34px);letter-spacing:-.7px;margin:0;font-weight:850}.brand{color:var(--green)}p,.muted,small{color:var(--muted)}.bar,.controls,.tabs{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin:16px 0}.pill,button,input,select{padding:10px 12px;background:var(--panel2);color:inherit;border:1px solid var(--line);border-radius:10px}button{cursor:pointer;font-weight:750}button:hover{border-color:var(--green)}button.active{background:#123c32;border-color:#2d9876;color:var(--green)}.statuspill{border-radius:999px;padding:7px 11px;background:#102b2a;border:1px solid #215b50;color:var(--green);font-size:12px;font-weight:800}.statrow{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:11px}.stat{padding:15px;background:linear-gradient(145deg,#14243a,#0e1a2c);border:1px solid var(--line);border-radius:15px}.statlabel{color:var(--muted);font-size:12px}.num{font-size:27px;font-weight:850;margin-top:3px}.sectiontitle{font-size:19px;font-weight:850;margin:25px 0 5px}.sectionhint{color:var(--muted);font-size:12px;margin-bottom:12px}.games{display:flex;flex-wrap:wrap;gap:7px}.game{padding:7px 10px;border:1px solid var(--line);border-radius:9px;background:#0f1d30;color:#dbe8f9;font-size:12px}.game.live{border-color:#2c8d6b;background:#102e2a}.controls input{flex:1;min-width:180px}.cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:13px}.player-card{min-width:0;padding:16px;background:linear-gradient(145deg,#14253b,#0c1828);border:1px solid var(--line);border-radius:16px;box-shadow:0 10px 30px #0002;position:relative;overflow:hidden}.player-card:before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:#38506d}.player-card.value:before{background:var(--green)}.player-top{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.player-name{font-size:17px;font-weight:850;line-height:1.2}.matchup{font-size:12px;color:var(--muted);margin-top:5px}.decision{font-size:10px;font-weight:850;letter-spacing:.4px;border-radius:999px;padding:5px 8px;background:#27354a;color:#dce7f5;white-space:nowrap}.decision.value{background:#103c30;color:var(--green)}.decision.lean{background:#3b3020;color:var(--gold)}.decision.pass{background:#3b2029;color:var(--red)}.scorebox{display:flex;justify-content:space-between;align-items:center;gap:10px;margin:15px 0 12px;padding:11px 12px;background:#091625;border:1px solid #20354d;border-radius:12px}.score-label{font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);font-weight:850}.score{font-size:16px;font-weight:900;white-space:nowrap}.game-status{font-size:11px;color:var(--muted);text-align:right}.live-dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--green);margin-right:5px;vertical-align:middle}.statline{display:grid;grid-template-columns:1fr 1fr;gap:10px}.mini{background:#15263c;border:1px solid #293e58;border-radius:12px;padding:11px}.mini-label{font-size:11px;color:var(--muted)}.mini-value{font-size:23px;font-weight:900;margin-top:2px}.mini-value span{font-size:12px;color:var(--muted);font-weight:700}.progress{height:5px;border-radius:99px;background:#263950;overflow:hidden;margin-top:8px}.progress>span{display:block;height:100%;background:linear-gradient(90deg,#31c98c,#8af0c5);border-radius:99px;width:0}.card-bottom{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;border-top:1px solid #243850;margin-top:13px;padding-top:11px;font-size:12px;color:var(--muted)}.grade{font-weight:900}.grade.hit{color:var(--green)}.grade.miss{color:var(--red)}.empty{padding:28px;border:1px dashed var(--line);border-radius:14px;text-align:center;color:var(--muted);grid-column:1/-1}.ev{font-size:17px;font-weight:900;color:var(--green)}.footer{font-size:12px;margin-top:22px;color:var(--muted)}@media(max-width:1050px){.cards{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:650px){header{padding:18px 14px}main{padding:16px 11px 32px}.statrow{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.stat{padding:12px}.num{font-size:23px}.cards{grid-template-columns:1fr;gap:10px}.player-card{padding:14px}.sectiontitle{margin-top:20px}.tabs button{flex:1;min-width:28%}}
-.reasoning{margin-top:12px;border:1px solid #2a4058;border-radius:11px;background:#0b1727;padding:10px 12px}.reasoning summary{cursor:pointer;font-weight:800;color:#cde3ff}.reasoning-body{padding-top:9px;color:var(--muted);font-size:12px}.reasoning-body div{margin:5px 0}.reasoning-body b{color:var(--text)}.reason-warning{color:var(--gold)!important}.history-table-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:13px;margin-top:12px}.history-table{width:100%;border-collapse:collapse;min-width:760px;font-size:12px}.history-table th,.history-table td{padding:10px 11px;text-align:left;border-bottom:1px solid #243850;white-space:nowrap}.history-table th{color:var(--muted);font-weight:800;background:#0b1727}.history-table tr:last-child td{border-bottom:0}.history-status{font-weight:900}.history-status.win{color:var(--green)}.history-status.loss{color:var(--red)}.history-status.push{color:var(--gold)}.history-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px;margin:12px 0}.history-summary .stat{padding:11px}.history-summary .num{font-size:21px}.history-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.history-actions input,.history-actions select{min-width:130px}@media(max-width:650px){.history-summary{grid-template-columns:repeat(2,minmax(0,1fr))}}</style></head><body><header><div class="headrow"><div><h1><span class="brand">COLT'S</span> NBA EDGE</h1><p style="margin:6px 0 0">NBA player prop value board · live game scores · live player stats</p></div><span class="statuspill" id="status">LOADING SLATE</span></div><div class="bar"><button class="active" onclick="showYesterdayPlays()">Yesterday’s Plays</button><button onclick="document.getElementById('overallRecordPanel').scrollIntoView({behavior:'smooth',block:'start'})">Overall Record</button><button onclick="load(true)">↻ Refresh board</button><label style="display:flex;gap:7px;align-items:center;color:var(--muted);font-size:12px">Bankroll ($)<input id="bankroll" type="number" min="0" step="1" placeholder="Enter bankroll" style="width:145px" oninput="render();renderFull()"></label><span id="updated" class="muted">Loading today's games…</span><span id="liveUpdated" class="muted"></span></div></header><main>
-<section id="overallRecordPanel" style="margin:0 0 18px;padding:16px;border:2px solid #2d9876;border-radius:16px;background:linear-gradient(135deg,#12352f,#101d30);scroll-margin-top:12px">
-<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><div><div style="font-size:12px;font-weight:900;letter-spacing:1px;color:var(--green)">OFFICIAL ALL-TIME RECORD</div><div class="sectionhint" style="margin:4px 0 0">Settled official Top 5 picks only · pending picks excluded</div></div><button onclick="loadPastPlays()">↻ Update record</button></div>
-<div class="history-summary" style="margin-bottom:0">
-<div class="stat"><div class="statlabel">Settled picks</div><div id="allTopCount" class="num">Loading…</div></div>
-<div class="stat"><div class="statlabel">Wins – Losses</div><div id="allTopRecord" class="num">—</div></div>
-<div class="stat"><div class="statlabel">Win rate</div><div id="allTopWinRate" class="num">—</div></div>
-<div class="stat"><div class="statlabel">Net units</div><div id="allTopProfit" class="num">—</div></div>
-</div></section>
-<div class="statrow"><div class="stat"><div class="statlabel">Today's games</div><div id="ng" class="num">—</div></div><div class="stat"><div class="statlabel">Prop lines loaded</div><div id="nl" class="num">—</div></div><div class="stat"><div class="statlabel">Projections calculated</div><div id="np" class="num">—</div></div><div class="stat"><div class="statlabel">Positive EV candidates</div><div id="nv" class="num">—</div></div></div>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#07111f">
+<title>Colt's NBA Edge — Sides & Totals</title>
+<style>
+:root{color-scheme:dark;--bg:#07111f;--panel:#101d30;--panel2:#14243a;--line:#263a53;--text:#eff6ff;--muted:#9aacc3;--green:#47e0a1;--red:#ff7e8a;--gold:#ffd27a}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at top,#132b46 0%,var(--bg) 55%);color:var(--text);font:14px/1.5 system-ui,-apple-system,Segoe UI,sans-serif}
+header{padding:22px clamp(14px,4vw,42px);background:rgba(8,18,32,.9);border-bottom:1px solid var(--line)}
+main{max-width:1280px;margin:auto;padding:20px clamp(12px,3vw,30px) 44px}
+.head{display:flex;justify-content:space-between;align-items:center;gap:15px;flex-wrap:wrap}
+h1{font-size:clamp(24px,4vw,34px);letter-spacing:-.7px;margin:0;font-weight:900}.brand{color:var(--green)}
+.sub{color:var(--muted);margin:5px 0 0}.status{border:1px solid #31516a;border-radius:99px;padding:7px 11px;font-size:11px;font-weight:900;letter-spacing:.5px}
+.toolbar,.tabs,.filters{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin:15px 0}
+button,input,select{padding:10px 12px;background:var(--panel2);color:inherit;border:1px solid var(--line);border-radius:10px;font:inherit}
+button{cursor:pointer;font-weight:800}button:hover{border-color:var(--green)}button.active{background:#123c32;border-color:#2d9876;color:var(--green)}
+.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.stat,.card,.panel{padding:14px;background:linear-gradient(145deg,#14243a,#0e1a2c);border:1px solid var(--line);border-radius:14px;min-width:0}
+.statlabel,.muted,.hint{color:var(--muted)}.statlabel{font-size:11px}.num{font-size:25px;font-weight:900;margin-top:3px}
+.section{font-size:19px;font-weight:900;margin:24px 0 4px}.hint{font-size:12px;margin-bottom:12px}
+.cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.card{position:relative;overflow:hidden}.card:before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--green)}
+.card.pass:before{background:var(--gold)}
+.top{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.name{font-size:17px;font-weight:900}.match{font-size:12px;color:var(--muted);margin-top:4px}
+.decision{font-size:10px;font-weight:900;border-radius:99px;padding:5px 8px;background:#103c30;color:var(--green);white-space:nowrap}
+.linebox{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:13px 0;padding:12px;background:#091625;border:1px solid #20354d;border-radius:11px}
+.line-label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.8px}.line{font-size:21px;font-weight:950}
+.metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.mini{background:#15263c;border:1px solid #293e58;border-radius:10px;padding:10px;min-width:0}
+.mini-label{font-size:10px;color:var(--muted)}.mini-value{font-size:19px;font-weight:900;margin-top:3px;overflow-wrap:anywhere}
+.positive{color:var(--green)}.negative{color:var(--red)}.gold{color:var(--gold)}
+.bottom{border-top:1px solid #243850;margin-top:12px;padding-top:10px;display:flex;gap:8px;justify-content:space-between;flex-wrap:wrap;color:var(--muted);font-size:11px}
+details{margin-top:10px;color:var(--muted);font-size:12px}summary{cursor:pointer;font-weight:800;color:#cde3ff}
+.empty{padding:26px;border:1px dashed var(--line);border-radius:14px;text-align:center;color:var(--muted);grid-column:1/-1}
+.tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:12px;margin-top:12px}
+table{width:100%;border-collapse:collapse;min-width:800px;font-size:12px}th,td{padding:10px;text-align:left;border-bottom:1px solid #243850;white-space:nowrap}th{color:var(--muted);background:#0b1727}tr:last-child td{border-bottom:0}
+.win{color:var(--green);font-weight:900}.loss{color:var(--red);font-weight:900}.push{color:var(--gold);font-weight:900}
+.source{font-size:11px;color:var(--muted);margin-top:20px;line-height:1.6}
+@media(max-width:760px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.cards{grid-template-columns:1fr}.num{font-size:22px}}
+</style>
+</head>
+<body>
+<header>
+ <div class="head">
+  <div><h1><span class="brand">COLT'S</span> NBA EDGE</h1><p class="sub">NBA game model · point spreads and full-game totals only</p></div>
+  <span id="status" class="status">CONNECTING</span>
+ </div>
+ <div class="toolbar">
+  <button onclick="refreshBoard()">↻ Refresh board</button>
+  <span id="updated" class="muted">Waiting for today's slate…</span>
+  <span id="slateDate" class="muted"></span>
+ </div>
+</header>
+<main>
+ <div class="grid">
+  <div class="stat"><div class="statlabel">Official settled picks</div><div id="settled" class="num">—</div></div>
+  <div class="stat"><div class="statlabel">Wins – Losses</div><div id="record" class="num">—</div></div>
+  <div class="stat"><div class="statlabel">Win rate</div><div id="winrate" class="num">—</div></div>
+  <div class="stat"><div class="statlabel">Net units</div><div id="units" class="num">—</div></div>
+ </div>
 
-<div class="sectiontitle" id="pastPlays">Daily Top 5 Results</div>
-<div class="sectionhint">Only the five official picks from each category are tracked: Points, Rebounds, Assists, Steals and 3-Pointers Made. Each category is locked once per slate day.</div>
-<div class="history-actions">
-<label class="muted">Slate date <input class="pill" id="historyDate" type="date"></label>
-<select class="pill" id="historyMarket" onchange="renderPastPlays()"><option value="all">All five categories</option><option value="points">Points</option><option value="rebounds">Rebounds</option><option value="assists">Assists</option><option value="steals">Steals</option><option value="threes">3-pointers made</option></select>
-<button onclick="loadPastPlays()">↻ Refresh results</button>
-</div>
-<div class="history-summary">
-<div class="stat"><div class="statlabel">Top 5 picks</div><div id="histCount" class="num">—</div></div>
-<div class="stat"><div class="statlabel">Wins / losses</div><div id="histRecord" class="num">—</div></div>
-<div class="stat"><div class="statlabel">Win rate</div><div id="histWinRate" class="num">—</div></div>
-<div class="stat"><div class="statlabel">Net units</div><div id="histProfit" class="num">—</div></div>
-</div>
-<div class="sectionhint">All-time record from these saved Top 5 selections</div>
-<div class="history-summary">
-<div class="stat"><div class="statlabel">Settled picks</div><div id="allHistCount" class="num">—</div></div>
-<div class="stat"><div class="statlabel">Wins / losses</div><div id="allHistRecord" class="num">—</div></div>
-<div class="stat"><div class="statlabel">Win rate</div><div id="allHistWinRate" class="num">—</div></div>
-<div class="stat"><div class="statlabel">Net units</div><div id="allHistProfit" class="num">—</div></div>
-</div>
-<div id="historyStatusText" class="muted">Loading Top 5 results…</div>
-<div class="history-table-wrap"><table class="history-table"><thead><tr><th>Market</th><th>Player</th><th>Team</th><th>Matchup</th><th>Pick</th><th>Line</th><th>Odds</th><th>Projection</th><th>Actual</th><th>Result</th><th>Net units</th></tr></thead><tbody id="historyRows"><tr><td colspan="11">Loading Top 5 results…</td></tr></tbody></table></div>
-<div class="sectiontitle">Today's scoreboard</div><div id="games" class="games"><span class="muted">Loading games…</span></div>
-<div class="sectiontitle" id="topTitle">Top 5 EV Plays</div><div class="sectionhint" id="topHint">Top five post-review positive-EV plays ranked across all five markets.</div>
-<div class="tabs" id="tabs"><button class="active" data-market="ev" onclick="setMarket('ev')">Top 5 EV</button><button data-market="points" onclick="setMarket('points')">Top 5 Points</button><button data-market="rebounds" onclick="setMarket('rebounds')">Top 5 Rebounds</button><button data-market="steals" onclick="setMarket('steals')">Top 5 Steals</button><button data-market="assists" onclick="setMarket('assists')">Top 5 Assists</button><button data-market="threes" onclick="setMarket('threes')">Top 5 3-Pointers Made</button></div>
-<div class="controls"><input class="pill" id="search" placeholder="Search player or matchup" oninput="render()"><span id="count" class="muted"></span></div><div id="cards" class="cards"><div class="empty">Calculating today's best plays…</div></div>
-<div class="sectiontitle">Full player prop board</div><div class="sectionhint" id="fullHint">All positive-EV candidates across points, rebounds, assists, steals and three-pointers made.</div><div class="controls"><select class="pill" id="filter" onchange="renderFull()"><option value="all">All picks</option><option value="value">Value candidates</option><option value="lean">Leans / verify</option><option value="pass">Pass</option></select><input class="pill" id="searchFull" placeholder="Search full board" oninput="renderFull()"><span id="countFull" class="muted"></span></div><div id="fullCards" class="cards"></div>
-<div class="footer">Live scores are supplied by ESPN public endpoints. DraftKings NBA player-prop lines and odds are supplied by PropLine. EV plays are shown only when the API response includes the required projection and expected-value fields; lines alone are not treated as picks. BALLDONTLIE provides a secondary game schedule/status cross-check and does not alter player projections or probabilities. Live data refreshes every 15 seconds while this page is open.</div></main>
+ <div class="section">Today's official opportunities</div>
+ <div class="hint">Only positive expected-value picks that clear the model's minimum edge are shown. The board does not force five bets.</div>
+ <div class="tabs">
+  <button id="tab-sides" class="active" onclick="setMarket('sides')">Point spreads</button>
+  <button id="tab-totals" onclick="setMarket('totals')">Game totals</button>
+ </div>
+ <div id="board" class="cards"><div class="empty">Loading team ratings and DraftKings lines…</div></div>
+
+ <div class="section">Daily results</div>
+ <div class="hint">The official record below belongs only to this sides-and-totals model. The former player-prop ledger is preserved separately and is not included.</div>
+ <div class="filters">
+  <label class="muted">Slate date <input id="historyDate" type="date"></label>
+  <button onclick="loadHistory()">↻ Refresh results</button>
+  <span id="historyStatus" class="muted">Loading…</span>
+ </div>
+ <div class="tablewrap">
+  <table><thead><tr><th>Market</th><th>Matchup</th><th>Selection</th><th>Line</th><th>Odds</th><th>Model %</th><th>Market %</th><th>Projected score</th><th>Actual</th><th>Result</th><th>Units</th></tr></thead>
+  <tbody id="historyRows"><tr><td colspan="11">Loading…</td></tr></tbody></table>
+ </div>
+
+ <div class="section">Model data and methodology</div>
+ <div id="sources" class="panel muted">Checking data sources…</div>
+ <div class="source">Team strength uses adjusted offensive rating, defensive rating, net rating, pace and four-factor metrics. Situational features include rest, back-to-backs, travel, time-zone changes and elevation. Official injury reports are checked against player on/off data when available. DraftKings lines are used to calculate market-relative edge and expected value; they are not used to create the model's projected score or probability. Historical player-prop results remain archived and are never blended into this record.</div>
+</main>
 <script>
-let data=[],liveData={games:[],players_by_id:{},players_by_name:{}},market='ev',bpCache={},bpLoading={};
-let customOverrides={};
+let boardData=null,market='sides',historyRows=[];
 const el=id=>document.getElementById(id);
+const fmt=(n,d=1)=>n==null||!Number.isFinite(Number(n))?'—':Number(n).toFixed(d);
+const signed=n=>n==null?'—':(Number(n)>0?'+':'')+fmt(n,1);
+const odds=n=>n==null?'—':(Number(n)>0?'+':'')+n;
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const num=(n,d=1)=>n==null||!Number.isFinite(Number(n))?'—':Number(n).toFixed(d);
-const norm=s=>String(s||'').toLowerCase().replace(/[^a-z0-9]/g,'');
-const bpMarkets=['points','rebounds','assists','steals','threes'];
-function bpMarketLabel(m){return ({points:'Points',rebounds:'Rebounds',assists:'Assists',steals:'Steals',threes:'3-Pointers Made'})[m]||m}
-function normalizeLiveTeam(value){
-  const raw=String(value||'').trim().toUpperCase().replace(/\\./g,'');
-  const aliases={
-    GS:'GSW',NY:'NYK',NO:'NOP',SA:'SAS',UTAH:'UTA',WSH:'WAS',
-    'GOLDEN STATE WARRIORS':'GSW',
-    'NEW YORK KNICKS':'NYK',
-    'NEW YORK NETS':'BKN',
-    'BROOKLYN NETS':'BKN',
-    'NEW ORLEANS PELICANS':'NOP',
-    'SAN ANTONIO SPURS':'SAS',
-    'UTAH JAZZ':'UTA',
-    'WASHINGTON WIZARDS':'WAS',
-    'ATLANTA HAWKS':'ATL',
-    'BOSTON CELTICS':'BOS',
-    'CHARLOTTE HORNETS':'CHA',
-    'CHICAGO BULLS':'CHI',
-    'CLEVELAND CAVALIERS':'CLE',
-    'DALLAS MAVERICKS':'DAL',
-    'DENVER NUGGETS':'DEN',
-    'DETROIT PISTONS':'DET',
-    'HOUSTON ROCKETS':'HOU',
-    'INDIANA PACERS':'IND',
-    'LOS ANGELES CLIPPERS':'LAC',
-    'LA CLIPPERS':'LAC',
-    'LOS ANGELES LAKERS':'LAL',
-    'LA LAKERS':'LAL',
-    'MEMPHIS GRIZZLIES':'MEM',
-    'MIAMI HEAT':'MIA',
-    'MILWAUKEE BUCKS':'MIL',
-    'MINNESOTA TIMBERWOLVES':'MIN',
-    'OKLAHOMA CITY THUNDER':'OKC',
-    'ORLANDO MAGIC':'ORL',
-    'PHILADELPHIA 76ERS':'PHI',
-    'PHOENIX SUNS':'PHX',
-    'PORTLAND TRAIL BLAZERS':'POR',
-    'SACRAMENTO KINGS':'SAC',
-    'TORONTO RAPTORS':'TOR'
-  };
-  return aliases[raw]||raw;
+function setMarket(m){market=m;el('tab-sides').classList.toggle('active',m==='sides');el('tab-totals').classList.toggle('active',m==='totals');renderBoard()}
+function renderMetrics(m){
+ const a=m?.all_time||{};el('settled').textContent=a.settled??0;
+ el('record').textContent=(a.wins??0)+' – '+(a.losses??0)+(a.pushes?' / '+a.pushes+'P':'');
+ el('winrate').textContent=a.win_rate_pct==null?'—':fmt(a.win_rate_pct,1)+'%';
+ el('units').textContent=(Number(a.net_units)>0?'+':'')+fmt(a.net_units??0,2)+'u';
+ el('units').className='num '+(Number(a.net_units)>=0?'positive':'negative');
 }
-function gameFor(p){
-  const games=liveData.games||[];
-  // ESPN's box score already links each live player to the exact event.
-  const st=playerLive(p)||{};
-  const gameId=String(st.game_id||p.game_id||p.event_id||'');
-  if(gameId){
-    const byId=games.find(g=>String(g.id||g.event_id||'')===gameId);
-    if(byId)return byId;
-  }
-  // PropLine/model matchups commonly use full team names, while ESPN's
-  // scoreboard uses abbreviations. Normalize both to the same NBA codes.
-  const raw=String(p.game||'').trim();
-  const parts=raw.split(/\\s+(?:@|VS?\\.?|AT)\\s+/i).map(normalizeLiveTeam);
-  if(parts.length!==2||!parts[0]||!parts[1])return null;
-  const wanted=parts.slice().sort().join('|');
-  return games.find(g=>{
-    const teams=(g.teams||[g.away,g.home]).map(normalizeLiveTeam).sort().join('|');
-    return teams===wanted;
-  })||null;
-}
-function playerLive(p){
-  const id=p.athlete_id==null?'':String(p.athlete_id);
-  return (id&&liveData.players_by_id?.[id])||liveData.players_by_name?.[norm(p.player)]||null;
-}
-function liveStatValue(p){
-  const st=playerLive(p)||{},market=String(p.market||"points").toLowerCase();
-  const fields={
-    points:["points","pts"],rebounds:["rebounds","rebound","reb"],
-    assists:["assists","assist","ast"],steals:["steals","steal","stl"],
-    threes:["three_points_made","threePointsMade","three_pointers_made","threePointersMade","threes","3pm","3PTM"]
-  };
-  for(const key of (fields[market]||fields.points)){
-    if(st[key]!=null&&Number.isFinite(Number(st[key])))return Number(st[key]);
-  }
-  return null;
-}
-function grade(p){
-  const g=gameFor(p),value=liveStatValue(p);
-  if(!g||value==null||p.line==null||!p.best_side)return null;
-  const side=String(p.best_side).toUpperCase(),line=Number(p.line);
-  if(!Number.isFinite(line))return null;
-
-  // An OVER is mathematically secured as soon as the live stat exceeds
-  // the line. Show HIT immediately; do not wait for the final buzzer.
-  // (A later official stat correction could still change the box score.)
-  if(side==='OVER'&&g.state==='in'&&value>line)return 'HIT';
-
-  // Unders and unresolved overs remain pending until the game is final.
-  if(g.state!=='post')return null;
-  if(value===line)return 'PUSH';
-  return (side==='OVER'?value>line:value<line)?'HIT':'MISS';
-}
-function isFallback(p){
-  const label=String(p.sample_label||p.reason||'').toLowerCase();
-  const reviewedUnder=p.workload_adjusted===true && p.negative_review && p.negative_review.status==='under_value';
-  return !reviewedUnder && (label.includes('previous-season')||label.includes('previous season')||label.includes('fallback'));
-}
-function customLineKey(p,m){
-  return [m||p.market||"points",String(p.player||"").trim().toLowerCase(),String(p.game||"").trim().toLowerCase()].join("|");
-}
-async function loadCustomLines(){
-  try{
-    const r=await fetch('/api/custom-lines?ts='+Date.now(),{cache:'no-store'});
-    if(!r.ok)throw Error('Saved lines unavailable');
-    const d=await r.json();customOverrides={};
-    for(const p of (d.props||[]))customOverrides[customLineKey(p,p.market)]=p;
-  }catch(e){console.warn('Could not load saved custom lines:',e.message||e)}
-}
-async function applySavedOverrides(rows,m){
-  const output=await Promise.all((rows||[]).map(async p=>{
-    const saved=customOverrides[customLineKey(p,m)];
-    if(!saved)return p;
-    // Persist only the user's line and prices. Never reuse an old projection
-    // or probability snapshot: recalculate it from the current shared model.
-    const payload={
-      player:p.player,team:p.team||saved.team||'',game:p.game||saved.game||'',
-      athlete_id:p.athlete_id||saved.athlete_id,market:m,
-      line:saved.line,over_odds:saved.over_odds,under_odds:saved.under_odds
-    };
-    try{
-      const r=await fetch('/api/model/recalculate',{
-        method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify(payload),cache:'no-store'
-      });
-      const d=await r.json();
-      if(!r.ok||!d.prop)throw Error(d.detail||'Saved line recalculation failed');
-      return {...p,...d.prop,market:m,custom_line:true,
-        overOdds:d.prop.over_odds,underOdds:d.prop.under_odds,
-        model_status:'projected'};
-    }catch(e){
-      console.warn('Could not refresh saved line for '+p.player+':',e.message||e);
-      return {...p,line:saved.line,over_odds:saved.over_odds,under_odds:saved.under_odds,
-        overOdds:saved.over_odds,underOdds:saved.under_odds,
-        projection:null,best_probability:null,best_side:null,
-        expected_value_pct:null,expected_profit_per_100:null,edge_pp:null,
-        recommendation:'PASS',model_status:'unprojected',
-        reason:'Saved sportsbook line retained; current model recalculation unavailable.'};
-    }
-  }));
-  return output;
-}
-function isEligibleEV(p){
-  // A passed post-selection review is the authoritative EV-board approval.
-  // Do not re-gate these picks on display-only fields (model_status or
-  // recommendation labels), which are not consistently present in frozen
-  // cross-market snapshots and were hiding valid reviewed plays.
-  const sample=Number(p.sample_size??p.games_used??0);
-  const reviewPassed=p.post_selection_reviewed===true&&p.negative_review
-    &&['clear','under_value'].includes(p.negative_review.status);
-  const ev=Number(p.expected_value_pct??p.expected_profit_per_100);
-  return reviewPassed&&sample>=8&&Number.isFinite(ev)&&ev>0
-    &&!p.injury_blocked&&!p.injury_flag
-    &&(p.best_side==='OVER'||p.best_side==='UNDER');
-}
-function evRankValue(p){
-  const raw=p.expected_value_pct??p.expected_profit_per_100;
-  const n=Number(raw);
-  return Number.isFinite(n)?n:null;
-}
-function sortByEV(rows){
-  return (rows||[]).slice().sort((a,b)=>{
-    const av=evRankValue(a),bv=evRankValue(b);
-    if(av===null&&bv===null)return String(a.player||'').localeCompare(String(b.player||''));
-    if(av===null)return 1;
-    if(bv===null)return -1;
-    return bv-av
-      ||Number(b.edge_pp??-999)-Number(a.edge_pp??-999)
-      ||String(a.player||'').localeCompare(String(b.player||''))
-      ||String(a.game||'').localeCompare(String(b.game||''));
-  });
-}
-function rankEV(a){
-  return sortByEV((a||[]).filter(p=>isEligibleEV(p)&&evRankValue(p)!==null&&evRankValue(p)>0));
-}
-function setMarket(m){
-  market=m;
-  document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('active',b.dataset.market===m));
-  const labels={ev:'Top 5 EV Plays',points:'Top 5 Points',rebounds:'Top 5 Rebounds',assists:'Top 5 Assists',steals:'Top 5 Steals',threes:'Top 5 3-Pointers Made'};
-  el('topTitle').textContent=labels[m]||'Top 5 Plays';
-  el('topHint').textContent=m==='points'?'Top five proprietary points projections.':m==='ev'?'Top five positive-EV plays ranked across points, rebounds, assists, steals and three-pointers made.':'Proprietary '+bpMarketLabel(m)+' projections, probabilities and EV. DraftKings lines via PropLine; projections remain model-generated.';
-  el('fullHint').textContent=m==='ev'?'All positive-EV candidates across all five markets.':m==='points'?'All proprietary points props.':'All proprietary '+bpMarketLabel(m)+' projections using DraftKings lines via PropLine.';
-  render();renderFull();
-  if(m==='ev')['rebounds','assists','steals','threes'].forEach(loadBP);
-  else if(['rebounds','assists','steals','threes'].includes(m))loadBP(m);
-}
-async function load(refresh=false){
-  el('status').textContent='CALCULATING';
-  try{
-    const [scheduleResult,boardResult]=await Promise.all([
-      fetch('/api/auto-board'+(refresh?'?refresh=true':''),{cache:'no-store'})
-        .then(async r=>({ok:r.ok,data:await r.json()}))
-        .catch(()=>({ok:false,data:{}})),
-      fetch('/api/proprietary-market-board?market=points&ts='+Date.now(),{cache:'no-store'})
-        .then(async r=>({ok:r.ok,data:await r.json()}))
-        .catch(e=>({ok:false,data:{detail:String(e.message||e)}}))
-    ]);
-    const schedule=scheduleResult.data||{},board=boardResult.data||{};
-    if(!boardResult.ok)throw Error(board.detail||board.error||'DraftKings points board unavailable');
-    data=(board.props||[]).map(p=>({...p,
-      overOdds:p.over_odds,underOdds:p.under_odds,
-      ev:p.expected_value_pct==null?null:Number(p.expected_value_pct)/100,
-      expected_value_pct:p.expected_value_pct??p.expected_profit_per_100??null,expected_profit_per_100:p.expected_profit_per_100??p.expected_value_pct??null,
-      model_status:'projected',best_side:String(p.best_side||'').toUpperCase(),
-      best_probability:p.best_probability,market:'points',
-      simulations:p.simulations
-    })).filter(p=>p.player&&p.line!=null);
-    await loadCustomLines();data=board.daily_frozen?data:await applySavedOverrides(data,'points');
-    if(board.daily_frozen)await recordDailyTopFive('points',rankEV(data).slice(0,5));
-    ['rebounds','assists','steals','threes'].forEach(loadBP);
-    el('ng').textContent=schedule.schedule_game_count??'—';
-    el('nl').textContent=board.line_count??data.length;
-    el('np').textContent=board.projected_count??data.length;
-    el('nv').textContent=data.filter(x=>x.recommendation==='VALUE CANDIDATE'&&!isFallback(x)&&Number(x.expected_profit_per_100)>0).length;
-    el('updated').textContent='Board updated '+new Date(board.calculated_at||Date.now()).toLocaleTimeString();
-    el('status').textContent=board.projected_count>0?'BOARD READY':'DATA LIMITED';
-    await updateLive();render();renderFull();
-  }catch(e){
-    el('status').textContent='BOARD UNAVAILABLE';
-    el('cards').innerHTML='<div class="empty">'+esc(e.message)+'</div>';
-  }
-}
-function renderGames(){
-  const a=liveData.games||[];
-  if(!a.length){el('games').innerHTML='<span class="muted">No games found for today.</span>';return}
-  el('games').innerHTML=a.map(g=>{
-    const s=g.state==='in'?'live':g.state==='post'?'final':'';
-    const score=g.away_score!=null&&g.home_score!=null?g.away+' '+g.away_score+' – '+g.home_score+' '+g.home:g.away+' @ '+g.home;
-    return '<div class="game '+s+'"><b>'+esc(score)+'</b><span> · '+esc(g.status||'Scheduled')+'</span></div>';
-  }).join('');
-}
-async function updateLive(){
-  try{
-    const r=await fetch('/api/live-stats?ts='+Date.now(),{cache:'no-store'});
-    if(!r.ok)throw Error('live endpoint');
-    liveData=await r.json();renderGames();
-    const liveGames=(liveData.games||[]).filter(g=>g.state==='in').length;
-    const playerCount=Object.keys(liveData.players_by_id||{}).length;
-    const enriched=liveData.live_feed_status?.boxscore_enrichment?.athletes_enriched??playerCount;
-    el('liveUpdated').textContent='Live feed '+new Date(liveData.updated_at||Date.now()).toLocaleTimeString()+' · '+liveGames+' live games · '+enriched+' players';
-  }catch(_){el('liveUpdated').textContent='Live feed temporarily unavailable'}
-}
-function positionDisplayName(position){
-  const p=String(position||'').trim().toUpperCase();
-  const names={PG:'Point Guard',SG:'Shooting Guard',SF:'Small Forward',PF:'Power Forward',C:'Center'};
-  return names[p]||String(position||'').trim()||'this position';
-}
-function reasoning(p){
-  const gap=Number(p.projection)-Number(p.line),rows=[];
-  rows.push('<div><b>Projection vs line:</b> '+(Number.isFinite(gap)?(gap>=0?'+':'')+num(gap,2)+' points '+(gap>=0?'above':'below')+' the line':'Unavailable')+'.</div>');
-  rows.push('<div><b>Recent scoring:</b> '+(p.recent5_avg==null?'Not supplied':num(p.recent5_avg,1)+' PPG')+'.</div>');
-  const dvp=p.defense_vs_position;
-  if(String(p.market||'points').toLowerCase()==='points'&&dvp&&dvp.allowed_per_game!=null){
-    const playerPosition=dvp.position_name||positionDisplayName(dvp.position);
-    const adjustment=Number(dvp.adjustment_pct||0);
-    const impact=adjustment>0?'boosts':adjustment<0?'reduces':'does not change';
-    const adjustmentText=(adjustment>0?'+':'')+num(adjustment,2)+'%';
-    const leagueText=dvp.league_position_average==null?'':' (position league average '+num(dvp.league_position_average,1)+' PPG)';
-    const seasonText=dvp.source_season?' DVP baseline: '+esc(dvp.source_season)+'.':'';
-    rows.push('<div><b>Positional defense:</b> '+esc(dvp.opponent_name||dvp.opponent||"Opponent")+' allows '+num(dvp.allowed_per_game,1)+' PPG to '+esc(playerPosition)+leagueText+'. This '+impact+' the points projection by '+adjustmentText+'.'+seasonText+'</div>');
-  }
-  rows.push('<div><b>Sample:</b> '+(p.games_used??'—')+' games used ('+esc(p.sample_label||'sample period unavailable')+').</div>');
-  rows.push('<div><b>Reliability:</b> '+esc(p.confidence||'not supplied')+' confidence. Probabilities are not calibrated until outcomes are tested.</div>');
-  if(isFallback(p))rows.push('<div class="reason-warning"><b>Fallback safeguard:</b> This projection uses previous-season data. It is shown for context only and is excluded from Top 5 EV.</div>');
-  if(p.reason)rows.push('<div><b>Model note:</b> '+esc(p.reason)+'.</div>');
-  return '<details class="reasoning"><summary>Why this projection? Data &amp; confidence</summary><div class="reasoning-body">'+rows.join('')+'</div></details>';
-}
-function livePace(p){
-  const st=playerLive(p)||{},g=gameFor(p)||{};
-  const market=String(p.market||"points").toLowerCase();
-  const fields={
-    points:["points","pts"],rebounds:["rebounds","rebound","reb"],
-    assists:["assists","assist","ast"],steals:["steals","steal","stl"],
-    threes:["three_points_made","threePointsMade","three_pointers_made","threePointersMade","threes","3pm","3PTM"]
-  };
-  let raw=null;
-  for(const key of (fields[market]||fields.points)){if(st[key]!=null){raw=st[key];break;}}
-  const current=Number(raw),line=Number(p.line);
-  const minutesRaw=st.minutes_played??st.minutesPlayed??st.minutes??st.min??st.minutes_used;
-  const parseMinutes=v=>{
-    if(typeof v==="number"&&Number.isFinite(v))return v;
-    const s=String(v??"").trim(),m=s.match(/^(\d+):(\d{2})$/);
-    if(m)return Number(m[1])+Number(m[2])/60;
-    const n=Number(s);return Number.isFinite(n)?n:null;
-  };
-  const minutes=parseMinutes(minutesRaw);
-  const period=Number(g.period||g.period_number||0);
-  const clock=String(g.clock||g.display_clock||"").trim();
-  const mmss=clock.match(/^(\d{1,2}):(\d{2}(?:\.\d+)?)$/);
-  const secondsOnly=clock.match(/^(\d{1,2})\.(\d+)$/);
-  let secondsLeft=null;
-  if(mmss)secondsLeft=Number(mmss[1])*60+Number(mmss[2]);
-  else if(secondsOnly)secondsLeft=Number(secondsOnly[1])+Number("0."+secondsOnly[2]);
-  if(g.state!=="in"||!Number.isFinite(current)||minutes==null||minutes<=0||
-     !Number.isFinite(line)||secondsLeft==null||period<1)return null;
-  const gameMinutesLeft=period<=4
-    ?Math.max(0,(4-period)*12+secondsLeft/60)
-    :Math.max(0,(Math.max(0,period-5)*5)+secondsLeft/60);
-  const modelMinutes=Number(p.projected_minutes??p.projectedMinutes??p.expected_minutes??
-    p.expectedMinutes??p.minutes_projection??p.minutesProjection??
-    st.projected_minutes??st.expected_minutes);
-  const expectedTotalMinutes=Number.isFinite(modelMinutes)&&modelMinutes>minutes
-    ?modelMinutes:Math.max(minutes,Math.min(36,minutes+gameMinutesLeft));
-  const remainingPlayerMinutes=Math.max(0,Math.min(gameMinutesLeft,expectedTotalMinutes-minutes));
-  const projected=current+(current/minutes)*remainingPlayerMinutes;
-  const margin=projected-line;
-  const verdict=margin>=0.5?"ON PACE TO HIT":margin<=-0.5?"ON PACE TO MISS":"TOO CLOSE TO CALL";
-  const label=({points:"pts",rebounds:"reb",assists:"ast",steals:"stl",threes:"3PM"})[market]||"stat";
-  return {current,minutes,gameMinutesLeft,remainingPlayerMinutes,projected,margin,verdict,label};
-}
-function liveTickerHtml(p){
-  const g=gameFor(p)||{},value=liveStatValue(p),pace=livePace(p);
-  const market=String(p.market||"points").toLowerCase();
-  const label=({points:"PTS",rebounds:"REB",assists:"AST",steals:"STL",threes:"3PM"})[market]||"STAT";
-  const line=Number(p.line),validLine=Number.isFinite(line);
-  const progress=value==null||!validLine||line<=0?0:Math.max(0,Math.min(100,value/line*100));
-  const score=g.away_score!=null&&g.home_score!=null?g.away+" "+g.away_score+" – "+g.home_score+" "+g.home:(g.away&&g.home?g.away+" @ "+g.home:"Score unavailable");
-  const status=g.state==="in"?"LIVE · "+(g.period?"Q"+g.period:"")+(g.clock&&g.clock!=="0:00"?" · "+g.clock+" left":""):g.status||"Waiting for game";
-  const liveValue=value==null?"—":num(value,0);
-  const settledGrade=grade(p);
-  const outlookClass=pace?(pace.verdict==="ON PACE TO HIT"?"hit":pace.verdict==="ON PACE TO MISS"?"miss":"push"):"";
-  const resultHtml=settledGrade
-    ?'<div class="mini-label" style="margin-top:6px">Final result: <span class="grade '+(settledGrade==="HIT"?"hit":settledGrade==="MISS"?"miss":"push")+'">'+(settledGrade==="HIT"?"✓ HIT":settledGrade==="MISS"?"✕ MISS":"PUSH")+'</span></div>'
-    :pace
-      ?'<div class="mini-label" style="margin-top:6px">Live outlook: <span class="grade '+outlookClass+'">'+(pace.verdict==="ON PACE TO HIT"?"ON PACE TO HIT":pace.verdict==="ON PACE TO MISS"?"ON PACE TO MISS":"TOO CLOSE")+'</span></div>'
-      :'';
-  const paceHtml=pace
-    ?'<div class="mini-value">'+num(pace.projected,1)+' '+label+' projected</div><div class="mini-label">'+num(pace.current,0)+' '+label+' in '+num(pace.minutes,1)+' min · '+num(pace.gameMinutesLeft,1)+' game min left · '+num(pace.remainingPlayerMinutes,1)+' expected player min left</div>'
-    :'<div class="mini-value">'+(g.state==="in"?"Calculating live pace":"Waiting for live game")+'</div><div class="mini-label">Pace estimate appears when the matching stat, player minutes and game clock are available.</div>';
-  return '<div class="scorebox"><div><div class="score-label">Live game score</div><div class="score">'+esc(score)+'</div></div><div class="game-status">'+(g.state==="in"?'<span class="live-dot"></span>':'')+esc(status)+'</div></div>'+
-    '<div class="statline" style="margin-top:10px"><div class="mini"><div class="mini-label">Live '+esc(bpMarketLabel(market))+' / prop line</div><div class="mini-value">'+liveValue+' <span>/ '+(validLine?num(line):"—")+' '+label+'</span></div><div class="progress"><span style="width:'+progress+'%"></span></div>'+resultHtml+'</div><div class="mini"><div class="mini-label">Live pace / outlook</div>'+paceHtml+'</div></div>';
-}
-function dvpSummary(p){
-  const d=p.defense_vs_position;
-  if(!d||d.available===false){
-    const reason=d&&d.reason?d.reason:'No positional-defense diagnostic was returned by the model.';
-    return '<div class="card-bottom"><span>Positional defense: not applied · '+esc(reason)+'</span></div>';
-  }
-  const sign=Number(d.adjustment_pct)>0?'+':'';
-  const unit=d.stat_unit||({points:'PPG',rebounds:'RPG',assists:'APG',steals:'SPG',threes:'3PM'}[p.market]||'per game');
-  const label=d.stat_label||({points:'points',rebounds:'rebounds',assists:'assists',steals:'steals',threes:'3-pointers made'}[p.market]||p.market||'stat');
-  const weights=d.blend_weights&&typeof d.blend_weights==='object'?Object.entries(d.blend_weights).map(([k,v])=>k+' '+Math.round(Number(v)*100)+'%').join(' / '):'';
-  const positionMeta=[d.position_source||'Position source unavailable',d.position_confidence?d.position_confidence+' confidence':'',weights?'Blend: '+weights:''].filter(Boolean).join(' · ');
-  return '<div class="card-bottom"><span>Defense vs '+esc(d.position_name||positionDisplayName(d.position))+': '+esc(d.opponent_name||d.opponent)+' allows '+num(d.allowed_per_game,2)+' '+esc(unit)+' ('+esc(label)+') vs '+num(d.league_position_average,2)+' positional league avg</span><span>Projection adjustment: '+sign+num(d.adjustment_pct,1)+'%</span></div><div class="card-bottom"><span>'+esc(positionMeta)+'</span></div>';
-}
-function injurySummary(p){
-  if(!p||!p.injury_status)return '';
-  const status=String(p.injury_status).toUpperCase();
-  const reason=p.injury_reason?' · '+esc(p.injury_reason):'';
-  const report=p.injury_report_time?'Report '+esc(p.injury_report_time)+' ET':'Official report';
-  const blocked=!!(p.injury_blocked||p.injury_flag);
-  return '<div class="card-bottom"><span>NBA injury report: <b>'+esc(status)+'</b>'+reason+'</span><span>'+(blocked?'BET BLOCKED · ':'')+report+'</span></div>';
-}
-function balldontlieSummary(p){
-  const g=p&&p.balldontlie_game;
-  if(!g)return '';
-  const status=String(g.status||'Scheduled');
-  const score=g.home_score!=null&&g.visitor_score!=null
-    ?String(g.visitor_team)+' '+g.visitor_score+' – '+g.home_score+' '+String(g.home_team)
-    :'';
-  const phase=g.period?('Period '+g.period+(g.clock?' · '+g.clock:'')):'';
-  const detail=[status,phase,score].filter(Boolean).join(' · ');
-  return '<div class="card-bottom"><span>Schedule cross-check: <b>BALLDONTLIE</b></span><span>'+esc(detail)+'</span></div>';
+function adjustmentText(x){
+ if(!x)return 'No situational data';
+ const inj=(x.injuries||[]).map(p=>p.player+' · '+p.status+' · on/off '+(p.on_off_net_rating==null?'unavailable':fmt(p.on_off_net_rating,1))).join('; ');
+ return 'Rest '+x.rest_days+' day(s) · travel '+x.travel_miles+' miles · time-zone change '+fmt(x.timezone_change_hours,1)+'h · altitude change '+fmt(x.altitude_change_feet,0)+' ft · rest adj '+signed(x.rest_adjustment)+' · travel adj '+signed(x.travel_adjustment)+' · injury adj '+signed(x.injury_adjustment)+(inj?' · '+inj:'');
 }
 function card(p,i){
-  const g=gameFor(p),gr=grade(p),pts=liveStatValue(p);
-  const line=Number(p.line),progress=pts==null||!Number.isFinite(line)||line<=0?0:Math.max(0,Math.min(100,pts/line*100));
-  const fallback=isFallback(p);
-  const shownRecommendation=fallback?'PASS · FALLBACK':(p.recommendation||p.model_status||'—');
-  const d=fallback?'pass':p.recommendation==='VALUE CANDIDATE'?'value':p.recommendation==='LEAN / VERIFY'?'lean':'pass';
-  const score=g?(g.away_score!=null&&g.home_score!=null?g.away+' '+g.away_score+' – '+g.home_score+' '+g.home:g.away+' @ '+g.home):'Score unavailable';
-  const liveText=g&&g.state==='in'?'<span class="live-dot"></span>'+esc((g.period?'Q'+g.period:'LIVE')+(g.clock&&g.clock!=='0:00'?' · '+g.clock+' left':'')):esc(g?g.status:'Game status unavailable');
-  const pace=livePace(p);
-  const paceHtml=pace?'<div class="statline" style="margin-top:10px"><div class="mini"><div class="mini-label">Live '+esc(pace.label)+' pace</div><div class="mini-value">'+num(pace.projected,1)+' '+esc(pace.label)+' projected</div><div class="mini-label">'+num(pace.current,0)+' '+esc(pace.label)+' in '+num(pace.minutes,1)+' min · '+num(pace.gameMinutesLeft,1)+' game min left · '+num(pace.remainingPlayerMinutes,1)+' expected player min left</div></div><div class="mini"><div class="mini-label">Live bet outlook</div><div class="mini-value">'+esc(pace.verdict)+'</div><div class="mini-label">'+(pace.margin>=0?'+':'')+num(pace.margin,1)+' vs '+num(p.line,1)+' line</div></div></div>':'<div class="mini" style="margin-top:10px"><div class="mini-label">Live pace</div><div class="mini-value">Waiting for live minutes and game clock</div><div class="mini-label">Pace estimate appears when the matching live stat, player minutes and game clock are available.</div></div>';
-  const gradeHtml=gr?'<span class="grade '+(gr==='HIT'?'hit':gr==='MISS'?'miss':'push')+'">'+(gr==='HIT'?'✓ HIT':gr==='MISS'?'✕ MISS':'PUSH')+'</span>':'<span>Pending</span>';
-  const side=String(p.best_side||'').toUpperCase();
-  const ev=Number(p.expected_value_pct??p.expected_profit_per_100);
-  const approved=p.post_selection_reviewed===true&&['OVER','UNDER'].includes(side)&&Number.isFinite(ev)&&ev>0&&p.negative_review&&['clear','under_value'].includes(p.negative_review.status)&&!p.injury_blocked&&!p.injury_flag;
-  const marketLabel=bpMarketLabel(p.market||'points').toUpperCase();
-  const action=approved?'PLAY '+side+' '+p.line+' '+marketLabel:side+' '+p.line+' '+marketLabel+' · NO BET — NOT APPROVED';
-  return '<article class="player-card '+d+'"><div class="player-top"><div><div class="player-name">'+esc((i+1)+'. '+p.player+(p.roster_team?' ('+p.roster_team+')':''))+'</div><div class="matchup">'+esc(p.game||'Matchup unavailable')+' · '+esc(p.sample_label||'Projection unavailable')+'</div></div><span class="decision '+d+'">'+esc(shownRecommendation)+'</span></div>'+
-  '<div class="card-bottom" style="font-size:1.08em;padding:12px;border:2px solid currentColor;border-radius:10px;margin:10px 0"><b>'+esc(action)+'</b></div>'+
-  '<div class="scorebox"><div><div class="score-label">Live game score</div><div class="score">'+esc(score)+'</div></div><div class="game-status">'+liveText+'</div></div>'+
-  '<div class="statline"><div class="mini"><div class="mini-label">Live '+esc(({points:'points',rebounds:'rebounds',assists:'assists',steals:'steals',threes:'3-pointers made'})[p.market]||'stat')+' / prop line</div><div class="mini-value">'+(pts==null?'—':pts)+' <span>/ '+num(p.line)+' '+esc(({points:'pts',rebounds:'reb',assists:'ast',steals:'stl',threes:'3PM'})[p.market]||'stat')+'</span></div><div class="progress"><span style="width:'+progress+'%"></span></div></div><div class="mini"><div class="mini-label">Pre-game model projection</div><div class="mini-value">'+num(p.projection)+' <span>'+esc(({points:'pts',rebounds:'reb',assists:'ast',steals:'stl',threes:'3PM'})[p.market]||'stat')+'</span></div><div class="mini-label">'+num(p.best_probability)+'% best-side probability</div></div></div>'+sideValueHtml(p)+paceHtml+
-  '<div class="card-bottom"><span>Pick: <b>'+esc(p.best_side||'—')+'</b> · '+num(p.edge_pp)+' pp edge</span><span class="ev">'+(p.expected_profit_per_100==null?'—':'$'+num(p.expected_profit_per_100,2)+' EV')+'</span></div>'+
-  '<div class="card-bottom"><span>Odds O '+esc(p.over_odds??'—')+' / U '+esc(p.under_odds??'—')+'</span><span>'+gradeHtml+'</span></div>'+injurySummary(p)+balldontlieSummary(p)+dvpSummary(p)+lineEditor(p)+reasoning(p)+'</article>';
+ const side=market==='sides';
+ const isOver=p.selection==='OVER';
+ const label=side?'POINT SPREAD':'GAME TOTAL';
+ const pick=side?(p.selection+' '+(p.line>0?'+':'')+p.line):(p.selection+' '+p.line);
+ const edge=Number(p.edge_pp);
+ const score=p.projected_away+' @ '+p.projected_home;
+ const home= p.home_adjustments||{},away=p.away_adjustments||{};
+ return '<article class="card"><div class="top"><div><div class="name">'+(i+1)+'. '+esc(p.selection)+'</div><div class="match">'+esc(p.matchup)+' · DraftKings</div></div><span class="decision">QUALIFIED VALUE</span></div>'+
+ '<div class="linebox"><div><div class="line-label">'+label+'</div><div class="line">'+esc(pick)+'</div></div><div style="text-align:right"><div class="line-label">Sportsbook price</div><div class="line">'+odds(p.odds)+'</div></div></div>'+
+ '<div class="metrics"><div class="mini"><div class="mini-label">Our probability</div><div class="mini-value">'+fmt(p.model_probability*100,1)+'%</div></div>'+
+ '<div class="mini"><div class="mini-label">No-vig market</div><div class="mini-value">'+fmt(p.market_probability*100,1)+'%</div></div>'+
+ '<div class="mini"><div class="mini-label">Model edge</div><div class="mini-value positive">+'+fmt(p.edge_pp,1)+' pp</div></div></div>'+
+ '<div class="bottom"><span>Expected value: <b class="positive">+'+fmt(p.ev_pct,2)+'%</b></span><span>Projected score: '+fmt(p.projected_away,1)+' – '+fmt(p.projected_home,1)+'</span>'+
+ '<span>'+ (side?'Projected cover margin: '+signed(p.expected_margin_after_spread):'Projected total: '+fmt(p.projected_total,1)+' · Line edge: '+signed(p.projected_total_edge))+'</span></div>'+
+ '<details><summary>Model factors and injury review</summary><p>Home: '+esc(adjustmentText(home))+'</p><p>Away: '+esc(adjustmentText(away))+'</p><p>Projected pace: '+fmt(p.projected_pace,1)+' · Model: '+esc(p.model_version)+'</p></details></article>';
 }
-function bpNorm(p,m){
-  const pr=p.projection||{},participant=p.participant||{},playerObj=participant.player||{},event=p.event||{},over=p.over||{},under=p.under||{};
-  const evFrom=(prob,price)=>{
-    const q=Number(prob),o=Number(price);
-    if(prob==null||price==null||!Number.isFinite(q)||!Number.isFinite(o)||q<0||q>1||o===0)return null;
-    const payout=o<0?100/Math.abs(o):o/100;
-    return q*payout-(1-q);
-  };
-  let side=String(pr.recommended_side||'').toLowerCase();
-  if(side!=='over'&&side!=='under'){
-    const oe=over.expected_value!=null?Number(over.expected_value):evFrom(over.probability,over.odds);
-    const ue=under.expected_value!=null?Number(under.expected_value):evFrom(under.probability,under.odds);
-    if(oe!=null||ue!=null)side=ue==null||(oe!=null&&oe>=ue)?'over':'under';
-  }
-  const selected=side==='under'?under:over;
-  const probability=pr.probability!=null?Number(pr.probability):(selected.probability!=null?Number(selected.probability):null);
-  const ev=pr.expected_value!=null?Number(pr.expected_value):(selected.expected_value!=null?Number(selected.expected_value):evFrom(probability,selected.odds));
-  let player=participant.name||p.player_name||(typeof p.player==='string'?p.player:null)||playerObj.name||'Unknown player';
-  if(typeof playerObj==='string')player=participant.name||p.player_name||playerObj;
-  const line=over.line!=null?over.line:(under.line!=null?under.line:(p.line??p.line_value??null));
-  return {raw:p,market:m,player,team:playerObj.team||participant.team_abbreviation||participant.team||p.team_abbreviation||'',game:event.name||p.event_name||p.matchup||'',line,overOdds:over.odds??p.over_odds??null,underOdds:under.odds??p.under_odds??null,projection:pr.value??p.projection_value??null,side:side||null,probability,ev:ev==null?null:ev,rating:pr.bet_rating??selected.bet_rating??null};
+function renderBoard(){
+ if(!boardData)return;
+ const list=market==='sides'?(boardData.sides||[]):(boardData.totals||[]);
+ el('board').innerHTML=list.length?list.map(card).join(''):'<div class="empty">No '+(market==='sides'?'spread':'total')+' bets currently clear the model’s value requirements. No bet is better than forcing a pick.</div>';
 }
-async function loadBP(m){
-  if(bpCache[m]||bpLoading[m])return;
-  bpLoading[m]=true;
-  if(market===m)el('cards').innerHTML='<div class="empty">Calculating proprietary '+esc(bpMarketLabel(m))+' model…</div>';
-  try{
-    const r=await fetch('/api/proprietary-market-board?market='+encodeURIComponent(m)+'&ts='+Date.now(),{cache:'no-store'});
-    const d=await r.json();
-    if(!r.ok)throw Error(d.detail||d.error||'Proprietary model request failed');
-    const normalizedRows=(d.props||[]).map(p=>({...p,overOdds:p.over_odds,underOdds:p.under_odds,ev:p.expected_value_pct==null?null:Number(p.expected_value_pct)/100,expected_value_pct:p.expected_value_pct??p.expected_profit_per_100??null,expected_profit_per_100:p.expected_profit_per_100??p.expected_value_pct??null,model_status:'projected',best_side:String(p.best_side||'').toUpperCase(),best_probability:p.best_probability,market:m,simulations:p.simulations})).filter(p=>p.player&&p.line!=null);
-    bpCache[m]=d.daily_frozen?normalizedRows:await applySavedOverrides(normalizedRows,m);
-    const dailyPicks=rankEV(bpCache[m]).slice(0,5);
-    if(d.daily_frozen)await recordDailyTopFive(m,dailyPicks);
-    bpLoading[m]=false;render();renderFull();
-  }catch(e){bpLoading[m]=false;bpCache[m]={error:e.message};render();renderFull()}
+function renderSources(s){
+ if(!s){el('sources').textContent='Source diagnostics unavailable.';return}
+ const lines=[
+ 'Odds: '+(s.odds||'unavailable'),
+ 'Team ratings: '+(s.team_ratings||'unavailable'),
+ 'Season: '+(s.season||'—'),
+ 'Official injury report: '+(s.injuries||'unavailable'),
+ 'Player on/off: '+(s.on_off||'not available'),
+ 'DraftKings quota remaining: '+(s.prop_line_quota?.daily_remaining??'not supplied'),
+ 'Saved official picks: '+(s.saved_sides??'—')+' sides · '+(s.saved_totals??'—')+' totals'
+ ];
+ el('sources').innerHTML=lines.map(x=>'<div>• '+esc(x)+'</div>').join('');
 }
-function lineEditor(p){
-  const m=p.market||"points",team=p.team||p.roster_team||"";
-  const athlete=p.athlete_id||"";
-  return '<div class="custom-line-editor" style="margin-top:14px;padding:12px;border:1px solid var(--border,#777);border-radius:10px;background:var(--panel,rgba(127,127,127,.08))"><div style="font-weight:700;margin-bottom:8px">Enter your sportsbook line and odds</div><div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px"><label class="mini-label">Prop line<input type="number" step="0.5" class="custom-line" value="'+esc(p.line??"")+'" placeholder="e.g. 24.5" style="display:block;width:100%;box-sizing:border-box;padding:9px;margin-top:4px"></label><label class="mini-label">Over odds<input type="number" step="1" class="custom-over" value="'+esc(p.over_odds??p.overOdds??-110)+'" placeholder="-110" style="display:block;width:100%;box-sizing:border-box;padding:9px;margin-top:4px"></label><label class="mini-label">Under odds<input type="number" step="1" class="custom-under" value="'+esc(p.under_odds??p.underOdds??-110)+'" placeholder="-110" style="display:block;width:100%;box-sizing:border-box;padding:9px;margin-top:4px"></label></div><button style="margin-top:10px" onclick="saveCustomLine(this)" data-market="'+esc(m)+'" data-player="'+esc(p.player||"")+'" data-team="'+esc(team)+'" data-game="'+esc(p.game||"")+'" data-athlete="'+esc(athlete)+'">Save line &amp; recalculate EV</button><span class="mini-label custom-save-status" style="display:block;margin-top:7px"></span></div>';
+async function loadBoard(refresh=false){
+ el('status').textContent='UPDATING';
+ try{
+  const r=await fetch('/api/game-board'+(refresh?'?refresh=true':''),{cache:'no-store'});
+  const d=await r.json();if(!r.ok)throw Error(d.detail||d.error||'Game board unavailable');
+  boardData=d;el('status').textContent=d.frozen?'SLATE LOCKED':'LIVE DATA';
+  el('updated').textContent='Updated '+new Date().toLocaleTimeString();
+  el('slateDate').textContent='Slate: '+d.slate_date;
+  el('historyDate').value=d.slate_date;
+  renderMetrics(d.metrics);renderBoard();renderSources(d.source_status);
+  if(d.settlement?.settled)el('updated').textContent+=' · '+d.settlement.settled+' results settled';
+  await loadHistory();
+ }catch(e){
+  el('status').textContent='DATA UNAVAILABLE';
+  el('board').innerHTML='<div class="empty">The model did not generate picks because required data could not be verified.<br><br>'+esc(e.message||e)+'</div>';
+  el('sources').textContent='No official picks were created. The model will not substitute guessed team ratings or sportsbook-implied probabilities.';
+ }
 }
-function sharedPropKey(p){return [p.market||"points",String(p.player||"").toLowerCase(),String(p.game||"").toLowerCase()].join("|");}
-function updateSharedProp(updated){
-  const key=sharedPropKey(updated);
-  for(const p of data)if(sharedPropKey({...p,market:"points"})===key)Object.assign(p,updated);
-  for(const m of ["rebounds","assists","steals","threes"])if(Array.isArray(bpCache[m]))for(const p of bpCache[m])if(sharedPropKey(p)===key)Object.assign(p,updated);
-  render();renderFull();
+async function refreshBoard(){await loadBoard(true)}
+async function loadHistory(){
+ const day=el('historyDate').value;if(!day)return;
+ el('historyStatus').textContent='Loading saved results…';
+ try{
+  const r=await fetch('/api/game-history?slate_date='+encodeURIComponent(day)+'&t='+Date.now(),{cache:'no-store'});
+  const d=await r.json();if(!r.ok)throw Error(d.detail||'History unavailable');
+  historyRows=d.predictions||[];renderMetrics(d.metrics);
+  const wins=historyRows.filter(x=>x.outcome==='WIN').length,losses=historyRows.filter(x=>x.outcome==='LOSS').length;
+  const pending=historyRows.filter(x=>!x.outcome).length;
+  el('historyStatus').textContent=historyRows.length+' official picks · '+wins+' wins · '+losses+' losses · '+pending+' pending';
+  el('historyRows').innerHTML=historyRows.length?historyRows.map(p=>{
+   const result=p.outcome||'PENDING',cls=result==='WIN'?'win':result==='LOSS'?'loss':result==='PUSH'?'push':'';
+   return '<tr><td>'+esc(p.market)+'</td><td>'+esc(p.matchup)+'</td><td>'+esc(p.selection)+'</td><td>'+esc(p.line)+'</td><td>'+odds(p.odds)+'</td><td>'+fmt(p.model_probability_pct,1)+'%</td><td>'+fmt(p.market_probability_pct,1)+'%</td><td>'+fmt(p.projected_away,1)+' – '+fmt(p.projected_home,1)+'</td><td>'+fmt(p.actual_value,1)+'</td><td class="'+cls+'">'+result+'</td><td>'+(p.profit_units==null?'—':(p.profit_units>0?'+':'')+fmt(p.profit_units,2)+'u')+'</td></tr>';
+  }).join(''):'<tr><td colspan="11">No official sides or totals picks saved for this date.</td></tr>';
+ }catch(e){el('historyStatus').textContent='History unavailable: '+(e.message||e);el('historyRows').innerHTML='<tr><td colspan="11">Could not load game-model results.</td></tr>'}
 }
-async function saveCustomLine(button){
-  const editor=button.closest(".custom-line-editor"),status=editor.querySelector(".custom-save-status");
-  const line=editor.querySelector(".custom-line").value,over=editor.querySelector(".custom-over").value,under=editor.querySelector(".custom-under").value;
-  if(line===""||over===""||under===""){status.textContent="Enter line and both odds.";return;}
-  button.disabled=true;status.textContent="Recalculating…";
-  try{
-    const body={market:button.dataset.market,player:button.dataset.player,team:button.dataset.team,game:button.dataset.game,athlete_id:button.dataset.athlete,line:Number(line),over_odds:Number(over),under_odds:Number(under)};
-    const response=await fetch("/api/model/recalculate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
-    const result=await response.json();if(!response.ok)throw Error(result.detail||"Recalculation failed");
-    const statusText="Saved permanently · EV "+Number(result.prop.expected_value_pct).toFixed(2)+"%";customOverrides[customLineKey(result.prop,result.prop.market)]=result.prop;updateSharedProp(result.prop);const matching=[...document.querySelectorAll(".custom-line-editor")].find(x=>x.querySelector("button")?.dataset.player===result.prop.player);if(matching)matching.querySelector(".custom-save-status").textContent=statusText;
-  }catch(error){status.textContent=error.message;}finally{button.disabled=false;}
-}
-function sideValueHtml(p){
-  const odds=x=>x==null?'—':(Number(x)>0?'+':'')+x;
-  const ev=x=>x==null||!Number.isFinite(Number(x))?'—':(Number(x)>0?'+':'')+num(x,2)+'%';
-  const side=String(p.best_side||'').toUpperCase();
-  const projection=Number(p.projection),line=Number(p.line);
-  const relation=Number.isFinite(projection)&&Number.isFinite(line)?(projection>line?'The average projection is above the line.':projection<line?'The average projection is below the line.':'The average projection equals the line.'):'';
-  return '<div class="reasoning" style="margin-top:10px"><div style="font-weight:850;color:var(--text);margin-bottom:8px">WHICH SIDE HAS THE VALUE?</div>'+
-    '<div class="statline"><div class="mini"><div class="mini-label">OVER · '+esc(odds(p.over_odds??p.overOdds))+'</div><div class="mini-value">'+num(p.over_probability,1)+'%</div><div class="mini-label">Expected value: <b>'+ev(p.over_ev_pct)+'</b> · Edge '+num(p.over_edge_pp,1)+' pp</div></div>'+
-    '<div class="mini"><div class="mini-label">UNDER · '+esc(odds(p.under_odds??p.underOdds))+'</div><div class="mini-value">'+num(p.under_probability,1)+'%</div><div class="mini-label">Expected value: <b>'+ev(p.under_ev_pct)+'</b> · Edge '+num(p.under_edge_pp,1)+' pp</div></div></div>'+
-    '<div class="reasoning-body"><div><b>Why this side:</b> '+esc(p.selection_reason||('The model selects '+(side||'no side')+' by comparing both sides’ expected value at the available odds.'))+'</div>'+
-    '<div><b>Projection vs line:</b> '+esc(relation)+' This is an average, not a bet recommendation by itself.</div></div></div>';
-}
-function bpLineCard(p,i){
-  const odds=x=>x==null?'—':(Number(x)>0?'+':'')+x;
-  const bankroll=Number(el('bankroll')?.value||0);
-  const qualifies=p.recommendation==='VALUE CANDIDATE'&&Number(p.expected_value_pct)>5;
-  const stake=bankroll>0&&qualifies?bankroll*0.05:null;
-  const cls=p.recommendation==='VALUE CANDIDATE'?'value':p.recommendation==='LEAN / VERIFY'?'lean':'pass';
-  const label=bpMarketLabel(p.market);
-  const side=String(p.best_side||'').toUpperCase();
-  const ev=Number(p.expected_value_pct??p.expected_profit_per_100);
-  const approved=p.post_selection_reviewed===true&&['OVER','UNDER'].includes(side)&&Number.isFinite(ev)&&ev>0&&p.negative_review&&['clear','under_value'].includes(p.negative_review.status)&&!p.injury_blocked&&!p.injury_flag;
-  const action=approved?'PLAY '+side+' '+p.line+' '+label.toUpperCase():((['OVER','UNDER'].includes(side)?side+' '+p.line+' '+label.toUpperCase():'NO SIDE SELECTED')+' · NO BET — NOT APPROVED');
-  return '<article class="player-card '+cls+'"><div class="player-top"><div><div class="player-name">'+esc((i+1)+'. '+p.player+(p.team?' ('+p.team+')':''))+'</div><div class="matchup">'+esc(p.game||'NBA player prop')+' · Proprietary ESPN game-log model · DraftKings odds</div></div><span class="decision '+cls+'">'+esc(p.recommendation||'PASS')+'</span></div>'+
-    '<div class="scorebox"><div><div class="score-label">'+esc(label)+' line</div><div class="score">'+esc(p.line)+'</div></div><div class="game-status">Over '+esc(odds(p.overOdds??p.over_odds))+'<br>Under '+esc(odds(p.underOdds??p.under_odds))+'</div></div>'+
-    '<div class="statline"><div class="mini"><div class="mini-label">Our projection</div><div class="mini-value">'+num(p.projection,2)+'</div><div class="mini-label">'+esc(p.sample_label||'Game-log sample')+'</div></div><div class="mini"><div class="mini-label">Over / Under / Push</div><div class="mini-value">'+num(p.over_probability,1)+'% / '+num(p.under_probability,1)+'%</div><div class="mini-label">Push '+num(p.push_probability,1)+'%</div></div></div>'+sideValueHtml(p)+liveTickerHtml(p)+
-    '<div class="card-bottom" style="font-size:1.08em;padding:12px;border:2px solid currentColor;border-radius:10px;margin:10px 0"><b>'+esc(action)+'</b></div>'+
-    '<div class="card-bottom"><span>Model edge: '+num(p.edge_pp)+' pp</span><span class="ev">'+(p.expected_value_pct==null?'—':(Number(p.expected_value_pct)>0?'+':'')+num(p.expected_value_pct,2)+'% EV')+'</span></div>'+
-    '<div class="card-bottom"><span>Simulations: '+esc(p.simulations||50000).toLocaleString()+'</span><span>Odds O '+esc(odds(p.overOdds??p.over_odds))+' / U '+esc(odds(p.underOdds??p.under_odds))+'</span></div>'+
-    '<div class="card-bottom"><span>Sportsbook: '+esc((p.market_books||[]).join(', ')||'DraftKings')+'</span><span>Stake: '+(stake==null?'Enter bankroll / no qualifying bet':'$'+num(stake,2)+' (5%)')+'</span></div>'+
-    '<div class="card-bottom"><span>Kelly diagnostic: '+(p.kelly_fraction_pct==null?'—':num(p.kelly_fraction_pct,2)+'%')+'</span><span>Independent model probability vs sportsbook implied probability</span></div>'+
-    '<div class="card-bottom"><span>Calibration: '+esc(p.calibration_status||'collecting data')+'</span><span>Settled samples: '+esc(p.calibration_sample_size??0)+'</span></div>'+injurySummary(p)+balldontlieSummary(p)+dvpSummary(p)+lineEditor(p)+'</article>';
-}
-function allModelEV(){
-  const pools=[['points',data],...['rebounds','assists','steals','threes'].map(m=>[m,bpCache[m]])];
-  const all=[];
-  for(const [m,rows] of pools){
-    if(!Array.isArray(rows))continue;
-    // Use exactly the same approval, sample-size, injury and positive-EV
-    // checks as each individual market board. A second hand-written filter
-    // here previously discarded valid reviewed candidates.
-    const marketRows=rows.map(p=>({...p,market:m,
-      best_side:String(p.best_side||'').toUpperCase(),
-      expected_value_pct:p.expected_value_pct??p.expected_profit_per_100??null,
-      expected_profit_per_100:p.expected_profit_per_100??p.expected_value_pct??null
-    }));
-    all.push(...rankEV(marketRows));
-  }
-  const unique=new Map();
-  for(const p of sortByEV(all)){
-    // A player can legitimately qualify in more than one distinct market.
-    // Deduplicate only repeated rows for the same player, game, AND market.
-    const k=String(p.market||'').toLowerCase()+'|'+norm(p.player)+'|'+String(p.game||'').toLowerCase();
-    if(!unique.has(k))unique.set(k,p);
-  }
-  return sortByEV([...unique.values()]);
-}
-function bpCard(p,i){
-  const hasProjection=p.projection!=null&&Number.isFinite(Number(p.projection));
-  const hasEV=p.ev!=null&&Number.isFinite(Number(p.ev));
-  const positive=hasEV&&Number(p.ev)>0&&p.side;
-  const decision=positive?'POSITIVE EV':hasProjection?'PROJECTION ONLY':'LINE ONLY';
-  const cls=positive?'value':hasProjection?'lean':'pass';
-  const odds=x=>x==null?'—':(Number(x)>0?'+':'')+x;
-  const evText=hasEV?((Number(p.ev)>0?'+':'')+num(Number(p.ev)*100,1)+'%'):'—';
-  return '<article class="player-card '+cls+'"><div class="player-top"><div><div class="player-name">'+esc((i+1)+'. '+p.player+(p.team?' ('+p.team+')':''))+'</div><div class="matchup">'+esc(p.game||'NBA player prop')+' · DraftKings via PropLine</div></div><span class="decision '+cls+'">'+decision+'</span></div>'+
-    '<div class="scorebox"><div><div class="score-label">'+esc(bpMarketLabel(p.market))+' line</div><div class="score">'+esc(p.line)+'</div></div><div class="game-status">Over '+esc(odds(p.overOdds))+'<br>Under '+esc(odds(p.underOdds))+'</div></div>'+
-    '<div class="card-bottom" style="font-size:1.08em;padding:12px;border:2px solid currentColor;border-radius:10px;margin:10px 0"><b>'+(positive?'PLAY '+esc(String(p.side).toUpperCase())+' '+esc(p.line)+' '+esc(bpMarketLabel(p.market).toUpperCase()):'NO BET — NOT APPROVED')+'</b></div>'+
-    '<div class="statline"><div class="mini"><div class="mini-label">Model projection</div><div class="mini-value">'+(hasProjection?num(p.projection,2):'—')+'</div><div class="mini-label">'+(p.side?'Model side: '+esc(String(p.side).toUpperCase()):'No verified side supplied')+'</div></div><div class="mini"><div class="mini-label">Expected value</div><div class="mini-value">'+evText+'</div><div class="mini-label">'+(p.probability!=null&&Number.isFinite(Number(p.probability))?'Projection probability '+num(Number(p.probability)>1?Number(p.probability):Number(p.probability)*100,1)+'%':(p.rating!=null?'Bet rating '+esc(p.rating):'Not supplied by API response'))+'</div></div></div>'+
-    '<div class="card-bottom"><span>Market: <b>'+esc(bpMarketLabel(p.market))+'</b></span><span>Source: DraftKings via PropLine</span></div></article>';
-}
-function render(){
-  const q=el('search').value.toLowerCase();let list=[];
-  if(market==='ev'){
-    const pending=['rebounds','assists','steals','threes'].filter(m=>bpLoading[m]||!bpCache[m]);
-    if(pending.length){el('count').textContent='Loading all five markets…';el('cards').innerHTML='<div class="empty">Building the cross-market Top 5 EV board. Checking all five markets before ranking.</div>';return;}
-    list=allModelEV();
-    if(q)list=list.filter(p=>(p.player+' '+(p.team||p.roster_team||'')+' '+(p.game||'')).toLowerCase().includes(q));
-    list=list.slice(0,5);
-    el('count').textContent=list.length+' positive-EV plays across all five markets';
-    if(!list.length){el('cards').innerHTML='<div class="empty">No verified positive-EV plays across the five model markets right now.</div>';return}
-    el('cards').innerHTML=list.map((p,i)=>p.market==='points'?card(p,i):bpLineCard(p,i)).join('');
-    return;
-  }
-  if(market==='points'){
-    list=rankEV(data).slice(0,5);
-    if(q)list=list.filter(p=>(p.player+' '+p.game).toLowerCase().includes(q));
-    el('count').textContent=list.length+' model plays';
-    el('cards').innerHTML=list.map((p,i)=>card(p,i)).join('')||'<div class="empty">No verified points projections available.</div>';
-    return;
-  }
-  const a=bpCache[market];
-  if(a&&a.error){el('count').textContent='Model unavailable';el('cards').innerHTML='<div class="empty">'+esc(a.error)+'</div>';return}
-  if(!Array.isArray(a)){el('count').textContent='Loading';el('cards').innerHTML='<div class="empty">Loading proprietary '+esc(bpMarketLabel(market))+' model…</div>';return}
-  list=a.slice().sort((x,y)=>Number(y.expected_profit_per_100??-999)-Number(x.expected_profit_per_100??-999));
-  if(q)list=list.filter(p=>(p.player+' '+p.team+' '+p.game).toLowerCase().includes(q));
-  list=list.slice(0,5);
-  el('count').textContent=list.length+' model projections';
-  el('cards').innerHTML=list.map((p,i)=>bpLineCard(p,i)).join('')||'<div class="empty">No eligible '+esc(bpMarketLabel(market))+' projections. Players without sufficient verified game logs are excluded.</div>';
-}
-function renderFull(){
-  const z=el('filter').value,q=el('searchFull').value.toLowerCase();
-  if(market==='points'){
-    const rows=data.filter(p=>(z==='all'||z==='value'&&p.recommendation==='VALUE CANDIDATE'||z==='lean'&&p.recommendation==='LEAN / VERIFY'||z==='pass'&&p.recommendation==='PASS')&&(p.player+' '+p.game).toLowerCase().includes(q));
-    el('countFull').textContent=rows.length+' / '+data.length+' points props';
-    el('fullCards').innerHTML=rows.map((p,i)=>card(p,i)).join('')||'<div class="empty">No points props match this filter.</div>';
-    return;
-  }
-  if(market==='ev'){
-    const pending=['rebounds','assists','steals','threes'].filter(m=>bpLoading[m]||!bpCache[m]);
-    if(pending.length){el('countFull').textContent='Loading all five markets…';el('fullCards').innerHTML='<div class="empty">Waiting for all five market boards before listing cross-market candidates.</div>';return;}
-    const rows=sortByEV(allModelEV().filter(p=>(p.player+' '+(p.team||'')+' '+(p.game||'')).toLowerCase().includes(q)));
-    el('countFull').textContent=rows.length+' cross-market EV candidates';
-    el('fullCards').innerHTML=rows.map((p,i)=>p.market==='points'?card(p,i):bpLineCard(p,i)).join('')||'<div class="empty">No positive-EV plays available.</div>';
-    return;
-  }
-  const a=bpCache[market];
-  if(a&&a.error){el('countFull').textContent='Model unavailable';el('fullCards').innerHTML='<div class="empty">'+esc(a.error)+'</div>';return}
-  if(!Array.isArray(a)){el('countFull').textContent='Loading';el('fullCards').innerHTML='<div class="empty">Loading proprietary '+esc(bpMarketLabel(market))+' model…</div>';return}
-  const rows=a.filter(p=>(p.player+' '+p.team+' '+p.game).toLowerCase().includes(q));
-  el('countFull').textContent=rows.length+' / '+a.length+' model projections';
-  el('fullCards').innerHTML=rows.map((p,i)=>bpLineCard(p,i)).join('')||'<div class="empty">No verified '+esc(bpMarketLabel(market))+' projections available.</div>';
-}
-let pastPlayRows=[],dailyTop5Metrics={};
-function localDateKey(date){
-  const y=date.getFullYear(),m=String(date.getMonth()+1).padStart(2,'0'),d=String(date.getDate()).padStart(2,'0');
-  return y+'-'+m+'-'+d;
-}
-function historyMarketName(m){return ({points:'Points',rebounds:'Rebounds',assists:'Assists',steals:'Steals',threes:'3-pointers made'})[m]||m||'—'}
-async function recordDailyTopFive(m,rows){
-  const picks=(rows||[]).slice(0,5);if(!picks.length)return;
-  try{
-    await fetch('/api/model/daily-top5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({market:m,slate_date:localDateKey(new Date()),props:picks}),cache:'no-store'});
-  }catch(e){console.warn('Daily Top 5 snapshot could not be saved:',e)}
-}
-function renderAllTimeTopFive(){
-  const a=dailyTop5Metrics||{},wins=Number(a.wins||0),losses=Number(a.losses||0),settled=Number(a.settled||0);
-  const record=wins+' – '+losses+(a.pushes?' / '+a.pushes+'P':'');
-  const rate=a.win_rate_pct==null?'0.0%':num(a.win_rate_pct,1)+'%';
-  const profit=(Number(a.net_units)>0?'+':'')+num(a.net_units||0,2)+'u';
-  ['allHistCount','allTopCount'].forEach(id=>{if(el(id))el(id).textContent=settled;});
-  ['allHistRecord','allTopRecord'].forEach(id=>{if(el(id))el(id).textContent=record;});
-  ['allHistWinRate','allTopWinRate'].forEach(id=>{if(el(id))el(id).textContent=rate;});
-  ['allHistProfit','allTopProfit'].forEach(id=>{if(el(id))el(id).textContent=profit;});
-}
-function renderPastPlays(){
-  const day=el('historyDate').value,marketFilter=el('historyMarket').value;
-  let rows=pastPlayRows.filter(p=>p.slate_date===day);
-  if(marketFilter!=='all')rows=rows.filter(p=>p.market===marketFilter);
-  const wins=rows.filter(p=>p.outcome==='WIN').length,losses=rows.filter(p=>p.outcome==='LOSS').length,pushes=rows.filter(p=>p.outcome==='PUSH').length;
-  const decided=wins+losses,profit=rows.reduce((sum,p)=>sum+Number(p.profit_units||0),0);
-  el('histCount').textContent=rows.length;
-  el('histRecord').textContent=wins+' / '+losses+(pushes?' / '+pushes+'P':'');
-  el('histWinRate').textContent=decided?num(wins/decided*100,1)+'%':'—';
-  el('histProfit').textContent=(profit>0?'+':'')+num(profit,2)+'u';
-  el('historyRows').innerHTML=rows.length?rows.map(p=>{
-    const result=p.outcome||'PENDING',cls=result==='WIN'?'win':result==='LOSS'?'loss':result==='PUSH'?'push':'';
-    return '<tr><td>'+esc(historyMarketName(p.market))+'</td><td><b>'+esc(p.player)+'</b></td><td>'+esc(p.team||'—')+'</td><td>'+esc(p.game||'—')+'</td><td>'+esc(p.side||'—')+'</td><td>'+num(p.line,1)+'</td><td>'+(p.odds>0?'+':'')+esc(p.odds??'—')+'</td><td>'+num(p.projection,1)+'</td><td>'+num(p.actual_value,1)+'</td><td class="history-status '+cls+'">'+result+'</td><td>'+(p.profit_units==null?'—':(p.profit_units>0?'+':'')+num(p.profit_units,2)+'u')+'</td></tr>';
-  }).join(''):'<tr><td colspan="11">No Top 5 picks saved for this slate date yet.</td></tr>';
-  const pending=rows.filter(p=>!p.outcome).length;
-  el('historyStatusText').textContent=rows.length+' official Top 5 picks · '+(rows.length-pending)+' settled · '+pending+' pending. Maximum 25 picks per slate.';
-}
-function showYesterdayPlays(){
-  const date=new Date();date.setDate(date.getDate()-1);
-  el('historyDate').value=localDateKey(date);
-  el('pastPlays').scrollIntoView({behavior:'smooth',block:'start'});
-  loadPastPlays();
-}
-async function loadPastPlays(){
-  el('historyStatusText').textContent='Loading Top 5 results…';
-  try{
-    const date=el('historyDate').value||localDateKey(new Date());
-    const r=await fetch('/api/model/daily-top5?slate_date='+encodeURIComponent(date)+'&market=all&ts='+Date.now(),{cache:'no-store'});
-    const d=await r.json();if(!r.ok)throw Error(d.detail||'Top 5 results unavailable');
-    pastPlayRows=Array.isArray(d.predictions)?d.predictions:[];
-    dailyTop5Metrics=d.all_time||{};
-    renderPastPlays();renderAllTimeTopFive();
-  }catch(e){
-    el('historyStatusText').textContent='Could not load Top 5 results: '+String(e.message||e);
-    el('historyRows').innerHTML='<tr><td colspan="11">Top 5 results are temporarily unavailable.</td></tr>';
-  }
-}
-async function recordResult(btn){
-  const actual=prompt('Enter FINAL POINTS for '+btn.dataset.player+' ('+btn.dataset.game+').');
-  if(actual===null||actual.trim()==='')return;
-  const pts=Number(actual);if(!Number.isFinite(pts)||pts<0){alert('Enter a valid non-negative points total.');return}
-  try{
-    const r=await fetch('/api/track-result',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({player:btn.dataset.player,game:btn.dataset.game,line:Number(btn.dataset.line),side:btn.dataset.side,odds:Number(btn.dataset.odds),model_probability_pct:Number(btn.dataset.prob),actual_points:pts})});
-    const d=await r.json();if(!r.ok)throw Error(d.detail?.message||d.detail||'Could not record result');
-    alert('Saved result: '+d.record.result+'. Net '+num(d.record.profit,2)+' per $100 risked.');await loadBacktest();
-  }catch(e){alert('Could not save result: '+String(e.message||e))}
-}
-const today=new Date();el('historyDate').value=localDateKey(today);el('historyDate').addEventListener('change',loadPastPlays);
-// Start the live scoreboard independently of the prop-board request. A slow or
-// unavailable odds/model request must never prevent live scores from rendering.
-updateLive();
-load();loadPastPlays();
-['rebounds','assists','steals','threes'].forEach(loadBP);
-setInterval(async()=>{await updateLive();render();renderFull()},15000);
-setInterval(()=>{['rebounds','assists','steals','threes'].forEach(m=>{delete bpCache[m];loadBP(m)});load(false)},300000);
-setInterval(()=>loadPastPlays(),60000);
-</script></body></html>
+el('historyDate').addEventListener('change',loadHistory);
+loadBoard();
+setInterval(()=>loadBoard(false),60000);
+</script>
+</body>
+</html>
