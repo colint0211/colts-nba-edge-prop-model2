@@ -26,7 +26,7 @@
     },
     {
       "path": "/api/cron/settle-pending",
-      "schedule": "0 3,6,9,12,15,18 * * *"
+      "schedule": "0 6 * * *"
     }
   ],
   "git": {
