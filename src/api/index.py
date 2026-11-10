@@ -1872,6 +1872,7 @@ def _propline_market_props(events, market):
                         "team": team,
                         "game": matchup,
                         "event_id": event_id,
+                        "game_start": event.get("commence_time") or event.get("start_time") or event.get("date"),
                         "line": point,
                         "over_odds": None,
                         "under_odds": None,
@@ -1935,6 +1936,26 @@ def _active_nba_slate_date(now_et=None):
     now_et = now_et or datetime.now(ZoneInfo("America/New_York"))
     active_date = now_et.date() - timedelta(days=1) if now_et.hour < 7 else now_et.date()
     return active_date.isoformat()
+
+
+def _candidate_is_pregame(prop, slate_date, now_et):
+    """Accept a candidate only when its timezone-aware tipoff is on this ET slate and still ahead."""
+    if not isinstance(prop, dict):
+        return False
+    raw_start = (
+        prop.get("game_start") or prop.get("commence_time")
+        or prop.get("start_time") or prop.get("game_time")
+    )
+    if not raw_start:
+        return False
+    try:
+        start = datetime.fromisoformat(str(raw_start).strip().replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return False
+    if start.tzinfo is None or start.utcoffset() is None:
+        return False
+    start_et = start.astimezone(ZoneInfo("America/New_York"))
+    return start_et.date().isoformat() == str(slate_date) and start_et > now_et
 
 
 def _post_selection_negative_review(prop, market, injury_feed):
@@ -2147,8 +2168,15 @@ def _snapshot_daily_market_top5(market, props):
             calibration_rows.append(item)
         if calibration_rows:
             prediction_ledger.save_predictions(calibration_rows, market)
+        # Never freeze a slate pick without a timezone-aware, future tipoff on
+        # the exact Eastern slate date. This prevents yesterday's games or
+        # post-tipoff refreshes from being mislabeled as today's pregame picks.
         ordered = sorted(
-            [dict(p, market=market) for p in (props or []) if isinstance(p, dict)],
+            [
+                dict(p, market=market)
+                for p in (props or [])
+                if isinstance(p, dict) and _candidate_is_pregame(p, slate_date, now_et)
+            ],
             key=lambda item: float(item.get("expected_value_pct") if item.get("expected_value_pct") is not None else -1e9),
             reverse=True,
         )
@@ -3317,14 +3345,14 @@ def _run_pending_settlements():
     scoreboard_cache = {}
     summary_cache = {}
 
-    def completed_boxscore_value(athlete_id, field, label, slate_date, expected_teams):
-        """Use completed ESPN scoreboard events when athlete gamelogs lack event IDs."""
+    def completed_boxscore_value(athlete_id, field, label, slate_date, expected_teams, player_name=None):
+        """Return a verified player stat or explicit DNP from one completed exact-match box score."""
         try:
             base_date = datetime.fromisoformat(str(slate_date)[:10]).date()
         except Exception:
             return None
         matches = []
-        for offset in (-1, 0, 1):
+        for offset in (-2, -1, 0, 1):
             date_key = (base_date + timedelta(days=offset)).strftime("%Y%m%d")
             if date_key not in scoreboard_cache:
                 try:
@@ -3363,11 +3391,12 @@ def _run_pending_settlements():
                     except Exception:
                         summary_cache[event_id] = {}
                 groups = ((summary_cache[event_id] or {}).get("boxscore") or {}).get("players") or []
-                found_values = []
+                event_results = []
+                wanted_name = _norm_player_name(player_name) if player_name else ""
                 for group in groups:
                     group_team = group.get("team") or {}
                     group_code = _canonical_team_code(group_team.get("abbreviation") or group_team.get("shortDisplayName"))
-                    if expected_teams and len(expected_teams) == 1 and group_code and group_code not in expected_teams:
+                    if expected_teams and group_code and group_code not in expected_teams:
                         continue
                     for stat_group in group.get("statistics") or []:
                         labels = stat_group.get("labels") or []
@@ -3376,30 +3405,61 @@ def _run_pending_settlements():
                         idx = labels.index(label) if label in labels else next(
                             (labels.index(a) for a in aliases.get(label, ()) if a in labels), -1
                         )
-                        if idx < 0:
-                            continue
                         for athlete in stat_group.get("athletes") or []:
                             athlete_info = athlete.get("athlete") or {}
-                            if str(athlete_info.get("id") or "") != str(athlete_id):
+                            athlete_id_match = str(athlete_info.get("id") or "") == str(athlete_id)
+                            athlete_name = _norm_player_name(
+                                athlete_info.get("displayName") or athlete_info.get("fullName") or athlete_info.get("name")
+                            )
+                            # Name fallback is permitted only inside the exact verified matchup
+                            # and the player's verified team block; never by name alone.
+                            athlete_name_match = bool(
+                                wanted_name and athlete_name == wanted_name
+                                and group_code and (not expected_teams or group_code in expected_teams)
+                            )
+                            if not athlete_id_match and not athlete_name_match:
                                 continue
+                            status_values = [
+                                athlete.get("didNotPlay"), athlete_info.get("didNotPlay"),
+                                athlete.get("status"), athlete.get("reason"),
+                                athlete_info.get("status"), athlete_info.get("reason"),
+                            ]
+                            status_text = " ".join(str(value or "") for value in status_values).lower()
+                            explicit_dnp = (
+                                any(value is True or str(value).strip().lower() == "true"
+                                    for value in status_values[:2])
+                                or any(token in status_text for token in ("dnp", "did not play", "inactive"))
+                            )
                             stats = athlete.get("stats") or []
-                            if idx >= len(stats):
-                                continue
-                            raw = str(stats[idx]).strip()
+                            raw = str(stats[idx]).strip() if idx >= 0 and idx < len(stats) else ""
                             if label == "3PT" and "-" in raw:
                                 raw = raw.split("-", 1)[0].strip()
                             try:
-                                value = float(raw)
+                                value = float(raw.replace(",", ""))
                             except (TypeError, ValueError):
-                                continue
-                            if math.isfinite(value) and value >= 0:
-                                found_values.append(value)
-                if found_values:
-                    matches.extend((event_id, value) for value in found_values)
-        unique = {event_id: value for event_id, value in matches}
-        return next(iter(unique.values())) if len(unique) == 1 else None
+                                value = None
+                            if value is not None and math.isfinite(value) and value >= 0:
+                                event_results.append({"status": "played", "value": value})
+                            elif explicit_dnp:
+                                event_results.append({"status": "dnp"})
+                if event_results:
+                    matches.append((event_id, event_results))
+        unique_events = {}
+        for event_id, event_results in matches:
+            unique_events.setdefault(event_id, []).extend(event_results)
+        if len(unique_events) != 1:
+            return None
+        event_id, event_results = next(iter(unique_events.items()))
+        played_values = {item["value"] for item in event_results if item.get("status") == "played"}
+        if len(played_values) == 1:
+            return {"status": "played", "value": next(iter(played_values)), "event_id": event_id}
+        if len(played_values) > 1:
+            return None
+        if any(item.get("status") == "dnp" for item in event_results):
+            return {"status": "dnp", "event_id": event_id}
+        return None
 
-    result = {"checked": 0, "settled": 0, "skipped": 0, "errors": 0,
+    result = {"checked": 0, "settled": 0, "voided": 0, "skipped": 0, "errors": 0,
               "skip_reasons": {"missing_identity": 0, "no_matching_completed_game": 0,
                                "ambiguous_game": 0, "settlement_conflict": 0},
               "settlements": []}
@@ -3527,11 +3587,24 @@ def _run_pending_settlements():
                         possible.append(row)
                 # Fallback to exact athlete-ID stats in completed ESPN box scores.
                 if len(possible) == 0:
-                    boxscore_actual = completed_boxscore_value(
-                        athlete_id, field, label, created_date, expected_teams
+                    boxscore_result = completed_boxscore_value(
+                        athlete_id, field, label, created_date, expected_teams,
+                        player_name=candidate.get("player"),
                     )
-                    if boxscore_actual is not None:
-                        possible = [{"value": boxscore_actual}]
+                    if boxscore_result and boxscore_result.get("status") == "dnp":
+                        voided = prediction_ledger.void_prediction(
+                            candidate["id"],
+                            "ESPN completed box score explicitly marked the player DNP/inactive.",
+                        )
+                        result["voided"] += 1
+                        result["settlements"].append({
+                            "id": candidate["id"], "player": candidate["player"],
+                            "market": market, "actual": None, "outcome": "VOID",
+                            "reason": "verified_dnp",
+                        })
+                        continue
+                    if boxscore_result and boxscore_result.get("status") == "played":
+                        possible = [{"value": boxscore_result["value"]}]
                 # More than one possible event is ambiguous; do not settle it.
                 if len(possible) != 1:
                     result["skipped"] += 1
