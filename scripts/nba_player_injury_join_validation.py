@@ -35,7 +35,7 @@ def download(url: str, path: Path) -> None:
 def main() -> None:
     con = duckdb.connect()
     report = {
-        "experiment": "historical_player_injury_join_validation_v2",
+        "experiment": "historical_player_injury_join_validation_v3",
         "purpose": "Validate game/player identifiers and pre-tip injury report timestamps before fitting an injury-aware ATS model.",
         "seasons": {},
         "integrity": {
@@ -104,6 +104,40 @@ def main() -> None:
             FROM i LEFT JOIN p USING (game_id, person_id)
         """, [str(injury_path), str(player_path)]).fetchone()
 
+        match_methods = con.execute("""
+            SELECT COALESCE(match_method, '<NULL>') AS method, COUNT(*) AS rows,
+                   COUNT(DISTINCT CAST(game_id AS VARCHAR) || ':' || CAST(person_id AS VARCHAR)) AS unique_keys
+            FROM read_parquet(?) GROUP BY 1 ORDER BY rows DESC
+        """, [str(injury_path)]).fetchall()
+        status_id_coverage = con.execute("""
+            WITH i AS (
+              SELECT DISTINCT CAST(game_id AS VARCHAR) game_id,
+                     CAST(person_id AS VARCHAR) person_id, current_status
+              FROM read_parquet(?) WHERE person_id IS NOT NULL
+            ), p AS (
+              SELECT DISTINCT CAST(game_id AS VARCHAR) game_id,
+                     CAST(person_id AS VARCHAR) person_id
+              FROM read_parquet(?) WHERE person_id IS NOT NULL
+            )
+            SELECT i.current_status, COUNT(*) AS keys,
+                   COUNT(*) FILTER (WHERE p.person_id IS NOT NULL) AS matched
+            FROM i LEFT JOIN p USING (game_id, person_id)
+            GROUP BY 1 ORDER BY keys DESC
+        """, [str(injury_path), str(player_path)]).fetchall()
+        name_join = con.execute("""
+            WITH i AS (
+              SELECT DISTINCT CAST(game_id AS VARCHAR) game_id,
+                     LOWER(REGEXP_REPLACE(TRIM(report_player_name), '[^a-zA-Z0-9]', '', 'g')) player_name
+              FROM read_parquet(?) WHERE report_player_name IS NOT NULL
+            ), p AS (
+              SELECT DISTINCT CAST(game_id AS VARCHAR) game_id,
+                     LOWER(REGEXP_REPLACE(TRIM(name_i), '[^a-zA-Z0-9]', '', 'g')) player_name
+              FROM read_parquet(?) WHERE name_i IS NOT NULL
+            )
+            SELECT COUNT(*) AS injury_game_name_keys,
+                   COUNT(*) FILTER (WHERE p.player_name IS NOT NULL) AS matched_name_keys
+            FROM i LEFT JOIN p USING (game_id, player_name)
+        """, [str(injury_path), str(player_path)]).fetchone()
         game_times = con.execute("""
             SELECT game_time, COUNT(*) AS rows
             FROM read_parquet(?)
@@ -140,6 +174,11 @@ def main() -> None:
                 "player_key_match_pct": round(100 * join_stats[1] / join_stats[0], 2) if join_stats[0] else None,
                 "injury_games": join_stats[2], "games_with_any_player_match": join_stats[3],
             },
+            "match_method_counts": [{"method": str(x[0]), "rows": x[1], "unique_keys": x[2]} for x in match_methods],
+            "status_id_join_coverage": [{"status": str(x[0]), "keys": x[1], "matched": x[2],
+                "match_pct": round(100*x[2]/x[1],2) if x[1] else None} for x in status_id_coverage],
+            "name_join": {"injury_game_name_keys": name_join[0], "matched_name_keys": name_join[1],
+                "match_pct": round(100*name_join[1]/name_join[0],2) if name_join[0] else None},
             "game_time_value_examples": [{"value": str(x[0]), "rows": x[1]} for x in game_times],
             "first_report_examples": [
                 {"report_datetime": str(x[0]), "game_date": str(x[1]), "game_time": str(x[2]),
