@@ -18,6 +18,7 @@ on:
       - "scripts/nba_game_by_game_forensic_audit_v2.py"
       - "scripts/nba_upset_blowout_collapse_factor_study.py"
       - "scripts/nba_injury_parquet_source_smoke_test.py"
+      - "scripts/nba_player_injury_join_validation.py"
       - "src/api/nba_historical_backtest.py"
       - "src/api/quant_game_engine.py"
   workflow_dispatch:
