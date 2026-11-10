@@ -4,6 +4,7 @@ import argparse,csv,hashlib,json,math,re,statistics,sys
 from collections import defaultdict
 from datetime import date,datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 ALIASES={"game_id":["game_id","gameid","event_id","match_id"],"player_id":["player_id","playerid","athlete_id","person_id"],"player_name":["player_name","player","athlete_name","name"],"game_date":["game_date","date","date_et","game_day","event_date"],"tipoff":["tipoff","tipoff_time","start_time","game_time","scheduled_start"]}
 STATS={"points":(["pts","points"],100),"rebounds":(["reb","rebounds","trb"],40),"assists":(["ast","assists"],35),"steals":(["stl","steals"],15),"blocks":(["blk","blocks"],15),"threes_made":(["fg3m","3pm","three_pointers_made","threes_made"],25),"minutes":(["min","minutes","minutes_played"],70)}
@@ -68,6 +69,9 @@ def audit(path,outdir,season_start=None,season_end=None):
   tip=pdt(row.get(tipcol,"")) if tipcol else None
   if tipcol and row.get(tipcol) and tip is None:add_issue(issues,rn,"warning","unparseable_tipoff",tipcol,row[tipcol],"Cannot complete temporal leakage checks.")
   if tip and tip.tzinfo is None:add_issue(issues,rn,"error","naive_tipoff_timestamp",tipcol,row[tipcol],"Tipoff timezone offset required.")
+  if tip and tip.tzinfo and datecol and row.get(datecol):
+   recorded=pdate(row[datecol]); tip_et=tip.astimezone(ZoneInfo("America/New_York")).date()
+   if recorded and recorded!=tip_et:add_issue(issues,rn,"error","date_vs_tipoff_mismatch",datecol,row[datecol],f"Recorded date {recorded} differs from tipoff Eastern date {tip_et}.")
   for h in headers:
    key=nk(h);val=str(row.get(h,"") or "").strip()
    if not val:continue
