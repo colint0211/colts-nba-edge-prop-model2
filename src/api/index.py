@@ -2324,8 +2324,13 @@ def proprietary_market_board(request: FastRequest, market: str = "rebounds", ref
         raise HTTPException(status_code=400, detail="Use points, rebounds, assists, steals, or threes.")
     now = time.time()
     cached_board = _BP_BOARD_CACHE.get(market)
-    injury_feed = _load_official_injury_feed()
-    bdl_games = _load_balldontlie_games(allow_fetch=(market == "points"))
+    if refresh:
+        injury_feed = _load_official_injury_feed()
+        bdl_games = _load_balldontlie_games(allow_fetch=(market == "points"))
+    else:
+        # Public dashboard requests consume cached source state only.
+        injury_feed = _INJURY_FEED_CACHE.get("data") or {"meta": {"status": "not_refreshed"}, "records": []}
+        bdl_games = _BDL_GAMES_CACHE.get("data") or {"status": "not_loaded", "games": [], "count": 0}
     try:
         today_et = _active_nba_slate_date()
         prediction_ledger.initialize()
@@ -2334,13 +2339,15 @@ def proprietary_market_board(request: FastRequest, market: str = "rebounds", ref
         frozen_slate = None
     if frozen_slate and frozen_slate.get("candidates"):
         frozen_props = [dict(p) for p in (frozen_slate.get("candidates") or []) if isinstance(p, dict)]
-        # Re-run today's targeted injury/workload gate even for an already-frozen
-        # snapshot. The original source lines remain intact; unsafe picks are
-        # removed from the actionable Top 5 and replaced from the same snapshot.
-        frozen_props = _revalidate_frozen_market_candidates(market, frozen_props, injury_feed)
-        for prop in frozen_props:
-            _apply_official_injury(prop, injury_feed)
-            _apply_balldontlie_game(prop, bdl_games)
+        # Public reads never rerun expensive player-history/workload lookups and
+        # never re-rank or rewrite the frozen picks. They may attach already-cached
+        # injury/schedule metadata, but preserve the original selection snapshot.
+        if injury_feed.get("records"):
+            for prop in frozen_props:
+                _apply_official_injury(prop, injury_feed)
+        if bdl_games.get("status") == "ok":
+            for prop in frozen_props:
+                _apply_balldontlie_game(prop, bdl_games)
         return JSONResponse({
             "market": market,
             "source": "Frozen Eastern-time daily slate · original PropLine/DraftKings snapshot",
@@ -2363,19 +2370,8 @@ def proprietary_market_board(request: FastRequest, market: str = "rebounds", ref
             _apply_balldontlie_game(cached_prop, bdl_games)
         cached_result["injury_feed"] = injury_feed.get("meta", {})
         cached_result["balldontlie"] = {key: value for key, value in bdl_games.items() if key != "games"}
-        cached_freshness = _market_line_freshness(cached_result.get("props") or [])
-        cached_result["line_freshness"] = cached_freshness
-        if cached_freshness.get("status") == "fresh":
-            for cached_prop in cached_result.get("props") or []:
-                if isinstance(cached_prop, dict):
-                    cached_prop["line_freshness_validated_at"] = cached_freshness["validated_at"]
-        frozen_candidates = (
-            _snapshot_daily_market_top5(market, cached_result.get("props") or [])
-            if cached_freshness.get("status") == "fresh" else None
-        )
-        if frozen_candidates is not None:
-            cached_result["props"] = frozen_candidates
-        cached_result["daily_frozen"] = frozen_candidates is not None
+        cached_result["daily_frozen"] = False
+        cached_result["line_freshness"] = cached_result.get("line_freshness") or {"status": "not_revalidated_on_public_read"}
         cached_result["daily_slate_date"] = _active_nba_slate_date()
         cached_result["daily_slate_rule"] = "Previous slate remains visible until 7:00 a.m. Eastern; then today’s picks are frozen."
         return JSONResponse(cached_result)
