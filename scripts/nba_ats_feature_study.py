@@ -37,12 +37,15 @@ def dt(value: str) -> datetime:
 
 def load(path: Path):
     rows = []
+    pushes_excluded = 0
     with path.open(newline="", encoding="utf-8-sig") as f:
         for raw in csv.DictReader(f):
             if not all(raw.get(k, "").strip() for k in REQUIRED):
                 continue
             prediction_at = dt(raw["prediction_timestamp_et"])
             available_at = dt(raw["feature_available_at_et"])
+            if prediction_at.tzinfo is None or available_at.tzinfo is None:
+                raise ValueError("Timezone offsets are required for prediction and feature timestamps")
             if available_at > prediction_at:
                 raise ValueError(
                     f"LEAKAGE: {raw['game_id']} feature timestamp "
@@ -59,6 +62,9 @@ def load(path: Path):
                 + float(raw["spread_home"]) == 0
             )
             row["odds"] = float(raw["away_odds_american"])
+            if row["push"]:
+                pushes_excluded += 1
+                continue
             for name in FEATURES:
                 row[name] = float(raw[name])
             rows.append(row)
@@ -67,7 +73,7 @@ def load(path: Path):
         raise ValueError(f"Only {len(rows)} usable rows; require at least 100.")
     if len({r["game_id"] for r in rows}) != len(rows):
         raise ValueError("Duplicate game_id rows detected.")
-    return rows
+    return rows, pushes_excluded
 
 
 def sigmoid(z):
@@ -149,7 +155,7 @@ def metrics(rows, probs):
     }
 
 
-def run(rows):
+def run(rows, pushes_excluded=0):
     n=len(rows)
     a=int(n*.70); b=int(n*.85)
     train,valid,test=rows[:a],rows[a:b],rows[b:]
@@ -175,7 +181,7 @@ def run(rows):
     return {
         "experiment":"nba_ats_ten_feature_study_v1",
         "status":"research_only_not_production",
-        "rows":n,
+        "rows":n,"pushes_excluded":pushes_excluded,
         "split":{"train":len(train),"validation":len(valid),"untouched_test":len(test),
                  "chronological":True},
         "metrics_note":"No tuning on untouched test. Compare Brier/log-loss to intercept-only; ROI is descriptive and assumes flat -110.",
@@ -188,7 +194,8 @@ def run(rows):
 if __name__ == "__main__":
     if len(sys.argv)!=2:
         raise SystemExit("Usage: python scripts/nba_ats_feature_study.py path/to/point_in_time_ats_features.csv")
-    result=run(load(Path(sys.argv[1])))
+    rows, pushes_excluded = load(Path(sys.argv[1]))
+    result=run(rows, pushes_excluded)
     out=Path("backtest-output/ats_feature_study")
     out.mkdir(parents=True,exist_ok=True)
     (out/"results.json").write_text(json.dumps(result,indent=2))
