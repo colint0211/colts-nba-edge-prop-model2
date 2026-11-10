@@ -25,15 +25,24 @@ jobs:
           test -n "$CRON_SECRET" || { echo "::error::GitHub secret CRON_SECRET is missing."; exit 1; }
           test -n "$VERCEL_AUTOMATION_BYPASS_SECRET" || { echo "::error::GitHub secret VERCEL_AUTOMATION_BYPASS_SECRET is missing."; exit 1; }
 
-      - name: Settle pending NBA predictions on research Preview
+      - name: Settle pending NBA predictions on the research Preview
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
           VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+          NBA_PREVIEW_URL: https://colts-nba-edge-prop-model2-git-research-ats-f-9dd05e-colin-82ad.vercel.app
         run: |
           set -euo pipefail
-          curl --fail-with-body --silent --show-error \
-            --retry 2 --retry-delay 5 --retry-all-errors \
+          response="$(curl --silent --show-error \
+            --retry 2 --retry-delay 5 --retry-connrefused \
             --connect-timeout 15 --max-time 90 \
+            --output /tmp/nba-settlement.json --write-out '%{http_code}' \
             -H "Authorization: Bearer $CRON_SECRET" \
             -H "x-vercel-protection-bypass: $VERCEL_AUTOMATION_BYPASS_SECRET" \
-            "https://colts-nba-edge-prop-model2-git-research-ats-f-9dd05e-colin-82ad.vercel.app/api/cron/settle-pending"
+            "$NBA_PREVIEW_URL/api/cron/settle-pending")"
+          cat /tmp/nba-settlement.json
+          if [ "$response" != "200" ]; then
+            echo "::error::Settlement endpoint returned HTTP $response. Check Preview CRON_SECRET and deployment protection settings."
+            exit 1
+          fi
+          jq -e '.errors == 0' /tmp/nba-settlement.json >/dev/null
+          jq -r '"Settlement complete: checked=" + (.checked|tostring) + ", settled=" + (.settled|tostring) + ", voided=" + ((.voided // 0)|tostring) + ", skipped=" + (.skipped|tostring)' /tmp/nba-settlement.json
