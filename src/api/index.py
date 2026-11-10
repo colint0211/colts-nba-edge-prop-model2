@@ -2278,7 +2278,13 @@ def _revalidate_frozen_market_candidates(market, candidates, injury_feed):
     return ordered
 
 @app.get("/api/proprietary-market-board")
-def proprietary_market_board(market: str = "rebounds"):
+def proprietary_market_board(request: FastRequest, market: str = "rebounds", refresh: bool = False):
+    """Public reads serve frozen/cached data; expensive refresh requires CRON_SECRET."""
+    if refresh:
+        secret = os.getenv("CRON_SECRET", "").strip()
+        supplied = request.headers.get("authorization", "")
+        if not secret or not secrets.compare_digest(supplied, "Bearer " + secret):
+            raise HTTPException(status_code=401, detail="Administrative refresh is unauthorized.")
     market = market.lower().strip()
     if market not in STAT_FIELDS:
         raise HTTPException(status_code=400, detail="Use points, rebounds, assists, steals, or threes.")
@@ -2317,7 +2323,7 @@ def proprietary_market_board(market: str = "rebounds"):
             "injury_feed": injury_feed.get("meta", {}),
             "balldontlie": {key: value for key, value in bdl_games.items() if key != "games"},
         })
-    if cached_board and now - cached_board[0] < _BP_BOARD_TTL_SECONDS:
+    if cached_board and now - cached_board[0] < _BP_BOARD_TTL_SECONDS and not refresh:
         cached_result = _json_safe(cached_board[1])
         for cached_prop in cached_result.get("props") or []:
             _apply_balldontlie_game(cached_prop, bdl_games)
@@ -2330,6 +2336,12 @@ def proprietary_market_board(market: str = "rebounds"):
         cached_result["daily_slate_date"] = _active_nba_slate_date()
         cached_result["daily_slate_rule"] = "Previous slate remains visible until 7:00 a.m. Eastern; then today’s picks are frozen."
         return JSONResponse(cached_result)
+
+    if not refresh:
+        raise HTTPException(
+            status_code=503,
+            detail="No fresh cached board is available. The protected administrative refresh must run first."
+        )
 
     events, props_source, quota = _propline_fetch_events()
     props = _propline_market_props(events, market)
@@ -2476,7 +2488,7 @@ def cron_freeze_daily(request: FastRequest):
     results = {}
     for market_name in ("points", "rebounds", "assists", "steals", "threes"):
         try:
-            response = proprietary_market_board(market_name)
+            response = proprietary_market_board(request, market_name, True)
             payload = json.loads(response.body.decode("utf-8"))
             results[market_name] = {"frozen": bool(payload.get("daily_frozen")), "candidate_count": len(payload.get("props") or []), "source": payload.get("prop_line_cache_source")}
         except Exception as exc:
