@@ -4,7 +4,7 @@ This is an experimental, expanding-window walk-forward protocol. It is separate 
 
 ## Protocol
 - Sort by Eastern game date and prediction timestamp.
-- For each consecutive test block (default 7 calendar days), train only on games dated strictly before that block.
+- For each consecutive test block (default 7 distinct NBA game dates), train only on games dated strictly before that block.
 - Refit the ten-feature logistic model on the expanding historical sample. Pushes are excluded from binary model fitting but remain in the full game ledger.
 - Predict every game in the test block once. Do not refit within a block.
 - The away-only rule is fixed before the run: bet AWAY only when predicted home-cover probability is at most 45%; otherwise pass. Do not select thresholds by inspecting test results.
@@ -24,7 +24,7 @@ The script stops on missing required values, duplicate game IDs, invalid odds, n
 - Every out-of-sample game is written to `selection_ledger.csv`, including passes and all wins/losses/pushes.
 - Model picks: wins, losses, pushes, win rate excluding pushes, flat-unit net profit, ROI on one unit risked per bet, and maximum peak-to-trough drawdown.
 - Probability metrics across all non-push test games: Brier score, log loss, and reliability bins.
-- Fold-level metrics plus an overall benchmark that always bets HOME ATS at the recorded contemporaneous price. This simple benchmark is deliberately transparent; add a closing-market benchmark only when a valid, time-stamped closing line is available.
+- Fold-level metrics plus an overall naive benchmark that always bets HOME ATS at the recorded contemporaneous price. This is a deliberately simple directional benchmark, not a claim that it is the strongest market baseline. This simple benchmark is deliberately transparent; add a closing-market benchmark only when a valid, time-stamped closing line is available.
 - No bets are silently removed. A push is recorded and returns zero net units. Voids are not inferred from scores; provide an explicit pre-set void policy and source fields before including voided events.
 
 ## Run
