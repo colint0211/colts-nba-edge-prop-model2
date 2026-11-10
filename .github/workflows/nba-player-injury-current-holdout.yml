@@ -1,0 +1,31 @@
+name: NBA player injury current-season holdout
+on:
+  push:
+    branches:
+      - sides-totals-rebuild
+    paths:
+      - "scripts/nba_player_injury_current_holdout.py"
+      - ".github/workflows/nba-player-injury-current-holdout.yml"
+  workflow_dispatch:
+jobs:
+  holdout:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Parquet reader
+        run: python -m pip install 'duckdb>=1.2,<2'
+      - name: Run current-season injury plus market holdout
+        env:
+          PYTHONPATH: .
+        run: python scripts/nba_player_injury_current_holdout.py
+      - name: Upload holdout report
+        uses: actions/upload-artifact@v4
+        with:
+          name: nba-player-injury-current-holdout
+          path: backtest-output/player_injury_current_holdout/
+          if-no-files-found: error
+          retention-days: 90
