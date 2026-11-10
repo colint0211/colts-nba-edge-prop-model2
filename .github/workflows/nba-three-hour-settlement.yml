@@ -1,0 +1,39 @@
+name: NBA three-hour settlement
+
+on:
+  schedule:
+    - cron: "0 */3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nba-pending-settlement
+  cancel-in-progress: false
+
+jobs:
+  settle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require deployment and cron credentials
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+        run: |
+          test -n "$CRON_SECRET" || { echo "::error::GitHub secret CRON_SECRET is missing."; exit 1; }
+          test -n "$VERCEL_AUTOMATION_BYPASS_SECRET" || { echo "::error::GitHub secret VERCEL_AUTOMATION_BYPASS_SECRET is missing."; exit 1; }
+
+      - name: Settle pending NBA predictions on research Preview
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error \
+            --retry 2 --retry-delay 5 --retry-all-errors \
+            --connect-timeout 15 --max-time 90 \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            -H "x-vercel-protection-bypass: $VERCEL_AUTOMATION_BYPASS_SECRET" \
+            "https://colts-nba-edge-prop-model2-git-research-ats-f-9dd05e-colin-82ad.vercel.app/api/cron/settle-pending"
