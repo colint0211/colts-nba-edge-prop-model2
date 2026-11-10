@@ -19,7 +19,7 @@ This workflow automates the existing NBA player-prop pipeline. It does not modif
 - Explicit refresh via `?refresh=true` requires `Authorization: Bearer $CRON_SECRET`.
 - `/api/cron/freeze-daily` is the scheduled administrative refresh and requires the same bearer secret. It only proceeds during 07:00–07:59 America/New_York.
 - `GET /api/automation/status` is read-only. It reports saved snapshot counts/timestamps, line freshness and injury-feed metadata; it does not refresh sportsbook/stat sources.
-- Dashboard requests must never be used as a refresh trigger.
+- Dashboard requests must never be used as a refresh trigger. Public reads do not rerun the expensive player-history/workload review; any cached injury annotation is informational and does not re-rank or rewrite the locked pick.
 
 ## Cron schedule
 
@@ -41,7 +41,8 @@ Vercel Cron schedules are UTC. Configure `CRON_SECRET` in the Vercel project so 
 | API-Sports player positions | 24-hour cache |
 | Official injury feed | 120-second cache |
 | BALLDONTLIE schedule/status | 10-minute cache; schedule fetch only on the first market |
-| ESPN player logs / IDs / rosters | existing per-process caches |
+| ESPN player logs | 30-minute per-player/market cache TTL; failed empty responses are also briefly cached |
+| ESPN IDs / rosters | existing per-process caches |
 | Negative injury/workload review | after provisional Top 5 only; replacements checked as needed |
 | Settlement | scheduled rather than triggered by every dashboard request |
 
