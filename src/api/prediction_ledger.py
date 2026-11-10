@@ -320,6 +320,37 @@ def settle_prediction(prediction_id, actual_value):
     }
 
 
+def void_prediction(prediction_id, reason="Verified did not play"):
+    """Void a pick only after an authoritative completed box score confirms DNP."""
+    try:
+        prediction_id = int(prediction_id)
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError("prediction_id must be an integer")
+    safe_reason = str(reason or "Verified did not play").strip()[:240]
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT id, settled_at FROM nba_predictions WHERE id=%s FOR UPDATE",
+            (prediction_id,),
+        ).fetchone()
+        if not row:
+            raise LookupError("Prediction not found")
+        if row[1] is not None:
+            raise ValueError("This prediction has already been settled")
+        cursor = conn.execute(
+            """
+            UPDATE nba_predictions
+            SET actual_value=NULL, outcome='VOID', profit_units=0, settled_at=NOW(),
+                snapshot=COALESCE(snapshot, '{}'::jsonb) ||
+                    jsonb_build_object('settlement_status', 'VOID', 'settlement_reason', %s)
+            WHERE id=%s AND settled_at IS NULL
+            """,
+            (safe_reason, prediction_id),
+        )
+        if not cursor.rowcount:
+            raise ValueError("This prediction has already been settled")
+    return {"id": prediction_id, "outcome": "VOID", "profit_units": 0.0}
+
+
 def _probability_metrics(rows, probability_index=3):
     decisions = [
         row for row in rows if row[4] in ("WIN", "LOSS")
@@ -369,6 +400,7 @@ def metrics(market=None):
                    COUNT(*) FILTER (WHERE outcome='WIN'),
                    COUNT(*) FILTER (WHERE outcome='LOSS'),
                    COUNT(*) FILTER (WHERE outcome='PUSH'),
+                   COUNT(*) FILTER (WHERE outcome='VOID'),
                    COALESCE(SUM(profit_units), 0)
             FROM nba_predictions
             {where}
@@ -376,7 +408,7 @@ def metrics(market=None):
             args,
         ).fetchone()
 
-    total, wins, losses, pushes, profit = counts
+    total, wins, losses, pushes, voids, profit = counts
     decisions = [row for row in rows if row[4] in ("WIN", "LOSS")]
     blended_metrics = _probability_metrics(rows, 3)
     model_metrics = _probability_metrics(rows, 2)
@@ -416,6 +448,7 @@ def metrics(market=None):
             "wins": subset_wins,
             "losses": subset_losses,
             "pushes": sum(row[4] == "PUSH" for row in subset),
+            "voids": sum(row[4] == "VOID" for row in subset),
             "win_rate": round(
                 subset_wins / (subset_wins + subset_losses) * 100, 2
             ) if subset_wins + subset_losses else None,
@@ -429,6 +462,7 @@ def metrics(market=None):
         "wins": wins,
         "losses": losses,
         "pushes": pushes,
+        "voids": voids,
         "win_rate": round(wins / decision_total * 100, 2)
         if decision_total else None,
         "profit_units": round(total_profit, 3),
@@ -581,6 +615,7 @@ def daily_top_five_metrics():
             SELECT COUNT(*), COUNT(*) FILTER (WHERE outcome='WIN'),
                    COUNT(*) FILTER (WHERE outcome='LOSS'),
                    COUNT(*) FILTER (WHERE outcome='PUSH'),
+                   COUNT(*) FILTER (WHERE outcome='VOID'),
                    COALESCE(SUM(profit_units), 0)
             FROM nba_predictions
             WHERE snapshot->>'daily_top5'='true' AND settled_at IS NOT NULL
@@ -591,25 +626,27 @@ def daily_top_five_metrics():
             SELECT market, COUNT(*) FILTER (WHERE outcome='WIN'),
                    COUNT(*) FILTER (WHERE outcome='LOSS'),
                    COUNT(*) FILTER (WHERE outcome='PUSH'),
+                   COUNT(*) FILTER (WHERE outcome='VOID'),
                    COALESCE(SUM(profit_units), 0)
             FROM nba_predictions
             WHERE snapshot->>'daily_top5'='true' AND settled_at IS NOT NULL
             GROUP BY market ORDER BY market
             """
         ).fetchall()
-    total, wins, losses, pushes, profit = totals
+    total, wins, losses, pushes, voids, profit = totals
     decisions = wins + losses
     return {
-        "settled": total, "wins": wins, "losses": losses, "pushes": pushes,
+        "settled": total, "wins": wins, "losses": losses, "pushes": pushes, "voids": voids,
         "win_rate_pct": round(wins / decisions * 100, 1) if decisions else None,
         "net_units": round(float(profit or 0), 2),
         "by_market": {
             name: {
-                "wins": mw, "losses": ml, "pushes": mp, "settled": mw + ml + mp,
+                "wins": mw, "losses": ml, "pushes": mp, "voids": mv,
+                "settled": mw + ml + mp + mv,
                 "win_rate_pct": round(mw / (mw + ml) * 100, 1) if mw + ml else None,
                 "net_units": round(float(mpft or 0), 2),
             }
-            for name, mw, ml, mp, mpft in markets
+            for name, mw, ml, mp, mv, mpft in markets
         },
     }
 
