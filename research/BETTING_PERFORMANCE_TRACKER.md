@@ -58,3 +58,19 @@ The event schema maps directly to a database table with a unique constraint on `
 ## Important interpretation
 
 A tracker cannot reconstruct picks that were never logged at qualification time. Before reporting historical performance, reconcile source exports against the original prediction ledger and sportsbook snapshots. Missing/unverifiable records remain visibly flagged; report coverage alongside performance.
+
+## Existing source compatibility
+
+The importer recognizes common fields from the existing Neon `nba_predictions` export:
+- `id` or `fingerprint` → `play_id`
+- `created_at` → `qualified_at`
+- `odds` → `odds_american`
+- `outcome` → `result`
+- `profit_units` → `net_units`
+- `side` → `selection`
+- `player` → `entity`
+- `model_version` → `qualification_rule_version`
+
+The player ledger's sportsbook and opponent are not guaranteed to be top-level columns; the importer checks a JSON `snapshot` for `sportsbook`/`book` and `opponent`. If they are absent, the record is retained and flagged. ATS records must be exported as one row per actual qualifying selection using the canonical headers above; a game-level forecast table alone is not evidence that a bet qualified.
+
+This is a CSV-export workflow, not a live Neon connection or an automatic Vercel production integration. The tracker is isolated on the research branch until the source exports and write path are verified.
