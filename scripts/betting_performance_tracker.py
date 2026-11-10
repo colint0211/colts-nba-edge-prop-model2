@@ -113,6 +113,28 @@ def ingest(source: Path, ledger: Path, model_override: str | None = None) -> dic
     with source.open(newline="", encoding="utf-8-sig") as f:
         for raw in csv.DictReader(f):
             row = {k: (raw.get(k) or "").strip() for k in raw}
+            # Normalize native Neon nba_predictions exports without inventing fields.
+            aliases = {
+                "play_id": ("fingerprint", "id"),
+                "qualified_at": ("created_at",),
+                "odds_american": ("odds",),
+                "result": ("outcome",),
+                "net_units": ("profit_units",),
+                "selection": ("side",),
+                "entity": ("player",),
+                "event": ("event_id",),
+                "qualification_rule_version": ("model_version",),
+            }
+            for target, candidates in aliases.items():
+                if not row.get(target):
+                    row[target] = next((row.get(k, "") for k in candidates if row.get(k)), "")
+            if row.get("snapshot"):
+                try:
+                    snap = json.loads(row["snapshot"])
+                    row["sportsbook"] = row.get("sportsbook") or snap.get("sportsbook") or snap.get("book") or ""
+                    row["opponent"] = row.get("opponent") or snap.get("opponent") or ""
+                except (TypeError, json.JSONDecodeError):
+                    row["verification_status"] = "UNVERIFIED"
             pid = row.get("play_id", "")
             if not pid:
                 # Keep the row auditable, but do not invent a stable identity.
@@ -148,12 +170,16 @@ def ingest(source: Path, ledger: Path, model_override: str | None = None) -> dic
                 "qualified_at": row.get("qualified_at", ""),
                 "sportsbook": row.get("sportsbook", ""),
                 "market": row.get("market", ""),
+                "entity": row.get("entity", ""),
+                "team": row.get("team", ""),
+                "opponent": row.get("opponent", ""),
+                "event": row.get("event", ""),
                 "selection": row.get("selection", ""),
                 "line": row.get("line", ""),
                 "odds_american": row.get("odds_american", ""),
                 "model_probability": row.get("model_probability", ""),
-                "result": result,
-                "net_units": f"{net:.6f}",
+                "result": "PENDING",
+                "net_units": "0.000000",
                 "risk_units": "1.0",
                 "source_record_id": row.get("source_record_id", ""),
                 "qualification_rule_version": row.get("qualification_rule_version", ""),
@@ -161,6 +187,17 @@ def ingest(source: Path, ledger: Path, model_override: str | None = None) -> dic
                 "audit_flags": "|".join(sorted(set(flags))),
             }
             events.append(event)
+            # If source already contains a verified historical settlement, preserve
+            # it as a separate immutable event instead of treating qualification as settlement.
+            if result in {"WIN", "LOSS", "PUSH"}:
+                settled_event = dict(event)
+                settled_event.update({
+                    "event_id": f"{pid}:SETTLED",
+                    "event_type": "SETTLED",
+                    "result": result,
+                    "net_units": f"{net:.6f}",
+                })
+                events.append(settled_event)
             qualified_ids.add(pid)
     write_events(ledger, events)
     return {"ingested": len(events), "duplicates_skipped": duplicates,
