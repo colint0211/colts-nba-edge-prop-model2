@@ -2557,6 +2557,45 @@ def cron_freeze_daily(request: FastRequest):
                 status = "partial_alert_delivery_failed"
     return JSONResponse({"status": status, "slate_date": now_et.date().isoformat(), "timezone": "America/New_York", "markets": results})
 
+@app.get("/api/automation/status")
+def nba_automation_status():
+    """Read-only automation health; never triggers an upstream data refresh."""
+    now_et = datetime.now(ZoneInfo("America/New_York"))
+    slate_date = _active_nba_slate_date(now_et)
+    markets = {}
+    try:
+        prediction_ledger.initialize()
+        for market_name in ("points", "rebounds", "assists", "steals", "threes"):
+            saved = prediction_ledger.get_daily_slate(market_name, slate_date)
+            candidates = (saved or {}).get("candidates") or []
+            freshness = _market_line_freshness(candidates) if candidates else {
+                "status": "not_frozen", "checked_lines": 0, "issues": []
+            }
+            markets[market_name] = {
+                "frozen": bool(candidates),
+                "candidate_count": len(candidates),
+                "created_at": (saved or {}).get("created_at"),
+                "line_freshness": freshness,
+            }
+        injury_meta = (_load_official_injury_feed().get("meta") or {})
+        return JSONResponse({
+            "status": "healthy" if all(item["frozen"] for item in markets.values()) else "incomplete",
+            "slate_date": slate_date,
+            "eastern_time": now_et.isoformat(),
+            "timezone": "America/New_York",
+            "markets": markets,
+            "injury_feed": {
+                "status": injury_meta.get("status"),
+                "report_timestamp_et": injury_meta.get("report_timestamp_et"),
+                "age_minutes": injury_meta.get("age_minutes"),
+                "record_count": injury_meta.get("record_count"),
+            },
+            "refresh_policy": "Protected scheduled/admin refresh only; public dashboard reads frozen snapshots or warm cache.",
+        })
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Automation status unavailable: " + type(exc).__name__)
+
+
 @app.get("/api/bettingpros-books")
 def bettingpros_books():
     """Return active BettingPros sportsbook IDs/names so book IDs are never guessed."""
