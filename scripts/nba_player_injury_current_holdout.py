@@ -20,6 +20,12 @@ PLAY=BASE+"/nba_stats_player_boxscores/player_boxscores_2026.parquet"
 ODDS="https://huggingface.co/datasets/minmaxxxer/nba-odds-2026-27/resolve/main/nba_2026_27_odds.csv"
 W={"Out":1.0,"Doubtful":.9,"Questionable":.5,"Probable":.1,"Available":0.0}
 
+def parse_tipoff(d,t):
+ try:
+  dd=date.fromisoformat(str(d)[:10]);hh,mm=str(t).replace("(ET)","").strip().split(":")[:2]
+  return datetime.combine(dd,time(int(hh),int(mm)))
+ except:return None
+
 def get(url):
  q=urllib.request.Request(url,headers={"User-Agent":"ColtsNBAResearch/1.0"})
  with urllib.request.urlopen(q,timeout=120) as r:return r.read()
@@ -33,7 +39,7 @@ def main():
  for dt,d,t,gid,h,a,tid,pid,status in ir:
   gid=str(gid)
   if gid not in meta:
-   tp=hist.parse_tipoff(d,t)
+   tp=parse_tipoff(d,t)
    if tp:meta[gid]=(str(d)[:10],str(h),str(a),hist.team_code(h),hist.team_code(a),tp)
   if pid is None or gid not in meta or dt is None or dt>meta[gid][5]:continue
   st=str(status or "")
