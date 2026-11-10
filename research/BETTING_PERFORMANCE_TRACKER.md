@@ -74,3 +74,10 @@ The importer recognizes common fields from the existing Neon `nba_predictions` e
 The player ledger's sportsbook and opponent are not guaranteed to be top-level columns; the importer checks a JSON `snapshot` for `sportsbook`/`book` and `opponent`. If they are absent, the record is retained and flagged. ATS records must be exported as one row per actual qualifying selection using the canonical headers above; a game-level forecast table alone is not evidence that a bet qualified.
 
 This is a CSV-export workflow, not a live Neon connection or an automatic Vercel production integration. The tracker is isolated on the research branch until the source exports and write path are verified.
+
+
+## Historical import behavior
+
+For source rows that already have a final `outcome`, ingestion writes two events: the original immutable `QUALIFIED` event (still marked pending) and a separate immutable `SETTLED` event. This preserves the distinction between when a play qualified and when it was graded. Re-importing the same play ID is skipped.
+
+Neon alias mapping is applied only when the canonical column is blank. The source `id`/ `fingerprint` can supply the stable play ID; source record IDs remain separately auditable when provided. A missing sportsbook or opponent is not guessed: it remains blank and is flagged.
