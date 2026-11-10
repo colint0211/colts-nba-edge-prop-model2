@@ -46,8 +46,11 @@ def audit(path,outdir,season_start=None,season_end=None):
  statcols={k:findcol(headers,v[0]) for k,v in STATS.items()}
  gamecol,playercol,namecol,datecol,tipcol=(cols[k] for k in ("game_id","player_id","player_name","game_date","tipoff"))
  games=defaultdict(list);pg=defaultdict(list);hashes=defaultdict(list);n2i=defaultdict(set);i2n=defaultdict(set);stats=defaultdict(list);clean=[]
+ missing_by_col={h:sum(1 for rr in rows if not str(rr.get(h,"") or "").strip()) for h in headers}
  for rn,src in enumerate(rows,2):
   row=dict(src)
+  for h in headers:
+   if not str(row.get(h,"") or "").strip(): add_issue(issues,rn,"warning","missing_value",h,"","Field is blank or null in this source row.")
   for key,val in list(row.items()):
    if isinstance(val,str) and val!=val.strip():
     row[key]=val.strip();corrections.append({"row_number":rn,"field":key,"before":val,"after":row[key],"reason":"trim_whitespace"})
@@ -123,7 +126,7 @@ def audit(path,outdir,season_start=None,season_end=None):
  for key,records,fields in (("issues_csv",issues,["row_number","severity","issue_code","field","observed_value","message","action"]),("corrections_csv",corrections,["row_number","field","before","after","reason"])):
   with paths[key].open("w",newline="",encoding="utf-8") as f:
    w=csv.DictWriter(f,fieldnames=fields);w.writeheader();w.writerows(records)
- summary={"input_file":str(path),"rows_read":len(rows),"rows_written":len(clean),"rows_deleted":0,"columns":headers,"detected_columns":cols,"detected_stat_columns":statcols,"correction_count":len(corrections),"issue_count":len(issues),"unresolved_issues":len(issues),"issue_counts_by_code":{k:sum(z["issue_code"]==k for z in issues) for k in sorted({z["issue_code"] for z in issues})},"player_name_to_multiple_ids":{k:sorted(v) for k,v in n2i.items() if len(v)>1},"player_id_to_multiple_names":{k:sorted(v) for k,v in i2n.items() if len(v)>1},"duplicate_game_ids":{k:v for k,v in games.items() if len(v)>1},"duplicate_player_game_keys":{f"{k[0]}::{k[1]}":v for k,v in pg.items() if len(v)>1},"outputs":{k:str(v) for k,v in paths.items()},"note":"No rows deleted. Only whitespace and parseable date formatting normalized. All anomalies remain for explicit review."}
+ summary={"input_file":str(path),"rows_read":len(rows),"rows_written":len(clean),"rows_deleted":0,"columns":headers,"missing_values_by_column":missing_by_col,"detected_columns":cols,"detected_stat_columns":statcols,"correction_count":len(corrections),"issue_count":len(issues),"unresolved_issues":len(issues),"issue_counts_by_code":{k:sum(z["issue_code"]==k for z in issues) for k in sorted({z["issue_code"] for z in issues})},"player_name_to_multiple_ids":{k:sorted(v) for k,v in n2i.items() if len(v)>1},"player_id_to_multiple_names":{k:sorted(v) for k,v in i2n.items() if len(v)>1},"duplicate_game_ids":{k:v for k,v in games.items() if len(v)>1},"duplicate_player_game_keys":{f"{k[0]}::{k[1]}":v for k,v in pg.items() if len(v)>1},"outputs":{k:str(v) for k,v in paths.items()},"note":"No rows deleted. Only whitespace and parseable date formatting normalized. All anomalies remain for explicit review."}
  paths["audit_json"].write_text(json.dumps(summary,indent=2),encoding="utf-8");return summary
 def main():
  ap=argparse.ArgumentParser(description="Audit NBA CSV/Parquet files without deleting records.")
