@@ -2589,7 +2589,8 @@ def nba_automation_status():
                 "created_at": (saved or {}).get("created_at"),
                 "line_freshness": freshness,
             }
-        injury_meta = (_load_official_injury_feed().get("meta") or {})
+        cached_injury = _INJURY_FEED_CACHE.get("data") or {}
+        injury_meta = (cached_injury.get("meta") or {})
         return JSONResponse({
             "status": "healthy" if all(item["frozen"] for item in markets.values()) else "incomplete",
             "slate_date": slate_date,
