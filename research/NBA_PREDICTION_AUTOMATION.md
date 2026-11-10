@@ -26,7 +26,7 @@ This workflow automates the existing NBA player-prop pipeline. It does not modif
 
 `vercel.json` preserves the existing ATS/metrics jobs and schedules the prop slate freeze at 11:00 and 12:00 UTC. The endpoint checks Eastern time, so one trigger matches 07:00 year-round across daylight-saving changes and the other exits harmlessly.
 
-Pending settlement is defined in `.github/workflows/nba-three-hour-settlement.yml` at minute 0 every three hours (`0 */3 * * *`, UTC), with a manual dispatch option. Important GitHub limitation: scheduled workflows execute only from the repository's default branch. Because this workflow is currently isolated on `research/ats-feature-study`, its three-hour schedule is **not active yet**; manual dispatch from the research branch is available after credentials are configured. Activating the schedule requires moving the scheduler workflow to the default branch or a separate scheduler repository. Do not merge it to the app's production branch as part of this research-only task, because that could trigger a production deployment. The workflow targets the stable Preview branch alias, never the production domain.
+Pending settlement is defined in `.github/workflows/nba-three-hour-settlement.yml` at minute 0 every three hours (`0 */3 * * *`, UTC), with a manual dispatch option. Important GitHub limitation: scheduled workflows execute only from the repository's default branch. Because this workflow is currently isolated on `research/ats-feature-study`, its three-hour schedule is **not active yet**; manual dispatch from the research branch is available after GitHub secrets are configured. Activating the schedule requires moving the scheduler workflow to the default branch or a separate scheduler repository. Do not merge it to the app's production branch as part of this research-only task, because that could trigger a production deployment. The workflow targets the stable Preview branch alias, never the production domain.
 
 ### Required one-time configuration for three-hour settlement
 
@@ -35,7 +35,7 @@ Pending settlement is defined in `.github/workflows/nba-three-hour-settlement.ym
 3. In GitHub repository Settings → Secrets and variables → Actions → New repository secret, add:
    - `CRON_SECRET` — same value as the Vercel Preview environment variable.
    - `VERCEL_AUTOMATION_BYPASS_SECRET` — the Vercel Automation Bypass Secret.
-4. Confirm the Preview deployment for the research branch has completed after the Preview `CRON_SECRET` was saved. Then use the workflow's **Run workflow** action once to verify the protected endpoint returns a successful settlement response.
+4. A new Preview deployment must be created after the branch-scoped `CRON_SECRET` was saved; the currently READY Preview predates this environment variable. Once the Vercel deployment limit cooldown has passed, confirm the new Preview is READY, then use the workflow's **Run workflow** action once to verify the protected endpoint returns a successful settlement response.
 
 If either GitHub secret is missing, the job intentionally fails before making a request. A schedule on this non-default research branch will not fire; only manual dispatch is available until the workflow is installed on a repository default branch. If the Vercel Preview secret is missing or different, the endpoint returns HTTP 401. If the Vercel bypass secret is missing or incorrect, Vercel Deployment Protection blocks the request. These checks prevent silently treating an unauthenticated request as a settlement.
 
