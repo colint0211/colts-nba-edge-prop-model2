@@ -332,6 +332,8 @@ STAT_FIELDS = {
 }
 _ESPN_ID_CACHE = {}
 _ESPN_LOG_CACHE = {}
+_ESPN_LOG_CACHE_AT = {}
+_ESPN_LOG_CACHE_TTL = 1800
 _ESPN_ROSTER_CACHE = {}
 
 _ESPN_POSITION_CACHE = {}
@@ -979,12 +981,16 @@ def _espn_player_id(name, timeout=12):
 def _gamelog_records(athlete_id, field, label, season):
     """Return stat values with their ESPN event identifiers so stats and minutes align."""
     cache_key = (str(athlete_id), field, season, "records")
-    if cache_key in _ESPN_LOG_CACHE:
+    if (
+        cache_key in _ESPN_LOG_CACHE
+        and time.time() - _ESPN_LOG_CACHE_AT.get(cache_key, 0.0) < _ESPN_LOG_CACHE_TTL
+    ):
         return _ESPN_LOG_CACHE[cache_key]
     url = ESPN_BASE + "/athletes/" + str(athlete_id) + "/gamelog?" + urlencode({"season": season})
     payload = _get_json(url)
     if not isinstance(payload, dict):
         _ESPN_LOG_CACHE[cache_key] = []
+        _ESPN_LOG_CACHE_AT[cache_key] = time.time()
         return []
     labels = payload.get("labels") or []
     names = payload.get("names") or payload.get("statNames") or []
@@ -1066,6 +1072,7 @@ def _gamelog_records(athlete_id, field, label, season):
         records.append({"event_id": str(event_id) if event_id is not None else None,
                         "date": str(date), "value": value})
     _ESPN_LOG_CACHE[cache_key] = records
+    _ESPN_LOG_CACHE_AT[cache_key] = time.time()
     return records
 
 
