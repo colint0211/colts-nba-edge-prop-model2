@@ -65,11 +65,16 @@ def predict(m,r):
  return m["ym"]+sum(x[i]*m["beta"][i] for i in range(len(x)))
 
 def eval_model(train,test,label):
- m=fit(train);res=[r["ats"]-predict(m,r) for r in train]
- sigma=math.sqrt(sum(e*e for e in res)/max(1,len(res)-1))
- scale=max(1,sigma*math.sqrt(3)/math.pi)
+ ordered=sorted(train,key=lambda r:r["date"])
+ cut=max(1,int(len(ordered)*0.70))
+ calibration_model=fit(ordered[:cut])
+ calibration_rows=ordered[cut:]
+ cal_errors=[r["ats"]-predict(calibration_model,r) for r in calibration_rows]
+ sigma=math.sqrt(sum(e*e for e in cal_errors)/max(1,len(cal_errors)-1))
+ m=fit(train);scale=max(1,sigma*math.sqrt(3)/math.pi)
  out={"train":label,"train_games":len(train),"test_games":len(test),
-      "train_residual_sd":round(sigma,3),
+      "calibration_games":len(calibration_rows),"calibration_residual_sd_oos":round(sigma,3),
+      "train_residual_sd_insample":round(math.sqrt(sum((r["ats"]-predict(m,r))**2 for r in train)/max(1,len(train)-1)),3),
       "coefficients_standardized":{f:round(m["beta"][i+1],4) for i,f in enumerate(FEATURES)},
       "thresholds":{}}
  for t in (.55,.60):
@@ -83,11 +88,15 @@ def eval_model(train,test,label):
    if abs(r["ats"])<1e-9:continue
    picks.append((side,win,edge,p,r))
   w=sum(x[1] for x in picks);l=len(picks)-w;n=len(picks);u=w*100/110-l
+  sides={}
+  for side in ("HOME","AWAY"):
+   sp=[x for x in picks if x[0]==side]
+   sw=sum(x[1] for x in sp);sides[side]={"bets":len(sp),"wins":sw,"losses":len(sp)-sw,
+       "win_pct":round(100*sw/len(sp),2) if sp else None}
   out["thresholds"][str(t)]={"bets":n,"wins":w,"losses":l,
     "win_pct":round(100*w/n,2) if n else None,
     "units_at_minus_110":round(u,2),"roi_pct":round(100*u/n,2) if n else None,
-    "sample_matchups":[{"side":x[0],"win":x[1],"edge":round(x[2],2),"p_home":round(x[3],3),
-       "date":x[4]["date"],"matchup":x[4]["matchup"]} for x in picks[:12]]}
+    "by_side":sides}
  return out
 
 def main():
@@ -100,10 +109,10 @@ def main():
   vals=[r[key] for r in rows if abs(r[key])>1e-9]
   w=sum(v>0 for v in vals);l=sum(v<0 for v in vals)
   return {"bets":len(vals),"wins":w,"losses":l,"win_pct":round(100*w/len(vals),2) if vals else None}
- result={"experiment":"frozen_market_movement_ats_v1",
+ result={"experiment":"frozen_market_movement_ats_v2_oos_calibration",
   "features":FEATURES,
   "rule":"Ridge predicts home ATS margin at closing line from opening-to-closing spread, moneyline-probability, and total movement. Home/away bets at calibrated 55% or 60% probability. No threshold tuning on test seasons.",
-  "calibration":"Residual standard deviation estimated on training data; flat -110 assumed.",
+  "calibration":"Residual standard deviation estimated on a chronological 30% validation tail of training data; flat -110 assumed.",
   "chronological_2024_25_to_2025_26":first,
   "untouched_2026_27_holdout":current,
   "2026_27_market_baselines":{"opening_line_home_cover":rec(c,"open_ats"),"closing_line_home_cover":rec(c,"ats")},
