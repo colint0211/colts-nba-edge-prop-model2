@@ -35,7 +35,7 @@ def download(url: str, path: Path) -> None:
 def main() -> None:
     con = duckdb.connect()
     report = {
-        "experiment": "historical_player_injury_join_validation_v3",
+        "experiment": "historical_player_injury_join_validation_v4",
         "purpose": "Validate game/player identifiers and pre-tip injury report timestamps before fitting an injury-aware ATS model.",
         "seasons": {},
         "integrity": {
@@ -104,6 +104,18 @@ def main() -> None:
             FROM i LEFT JOIN p USING (game_id, person_id)
         """, [str(injury_path), str(player_path)]).fetchone()
 
+        global_player_ids = con.execute("""
+            WITH i AS (
+              SELECT DISTINCT CAST(person_id AS VARCHAR) person_id
+              FROM read_parquet(?) WHERE person_id IS NOT NULL
+            ), p AS (
+              SELECT DISTINCT CAST(person_id AS VARCHAR) person_id
+              FROM read_parquet(?) WHERE person_id IS NOT NULL
+            )
+            SELECT COUNT(*) AS injury_players,
+                   COUNT(*) FILTER (WHERE p.person_id IS NOT NULL) AS matched_players
+            FROM i LEFT JOIN p USING (person_id)
+        """, [str(injury_path), str(player_path)]).fetchone()
         match_methods = con.execute("""
             SELECT COALESCE(match_method, '<NULL>') AS method, COUNT(*) AS rows,
                    COUNT(DISTINCT CAST(game_id AS VARCHAR) || ':' || CAST(person_id AS VARCHAR)) AS unique_keys
@@ -169,7 +181,12 @@ def main() -> None:
                 "distinct_players": player_stats[2],
                 "min_minutes": str(player_stats[3]), "max_minutes": str(player_stats[4]),
             },
-            "injury_to_boxscore_id_join": {
+            "global_player_id_coverage": {
+                "distinct_injury_player_ids": global_player_ids[0],
+                "matched_in_boxscores_any_game": global_player_ids[1],
+                "match_pct": round(100*global_player_ids[1]/global_player_ids[0],2) if global_player_ids[0] else None,
+            },
+            "same_game_player_id_presence_context_only": {
                 "injury_game_player_keys": join_stats[0], "matched_keys": join_stats[1],
                 "player_key_match_pct": round(100 * join_stats[1] / join_stats[0], 2) if join_stats[0] else None,
                 "injury_games": join_stats[2], "games_with_any_player_match": join_stats[3],
