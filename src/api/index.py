@@ -2362,7 +2362,12 @@ def proprietary_market_board(request: FastRequest, market: str = "rebounds", ref
             _apply_balldontlie_game(cached_prop, bdl_games)
         cached_result["injury_feed"] = injury_feed.get("meta", {})
         cached_result["balldontlie"] = {key: value for key, value in bdl_games.items() if key != "games"}
-        frozen_candidates = _snapshot_daily_market_top5(market, cached_result.get("props") or [])
+        cached_freshness = _market_line_freshness(cached_result.get("props") or [])
+        cached_result["line_freshness"] = cached_freshness
+        frozen_candidates = (
+            _snapshot_daily_market_top5(market, cached_result.get("props") or [])
+            if cached_freshness.get("status") == "fresh" else None
+        )
         if frozen_candidates is not None:
             cached_result["props"] = frozen_candidates
         cached_result["daily_frozen"] = frozen_candidates is not None
