@@ -3963,3 +3963,7 @@ async def api_proxy(path: str, request: FastRequest):
         return Response(content=e.read(), status_code=e.code, media_type=e.headers.get("content-type", "application/json"))
     except (URLError, TimeoutError) as e:
         raise HTTPException(status_code=502, detail="Upstream API unavailable") from e
+
+# Research-only prospective away ATS market capture; no production model changes.
+from .away_ats_tracker import router as away_ats_router
+app.include_router(away_ats_router)
