@@ -121,10 +121,21 @@ def main():
  train_a,_=hist.load(2025);train_b,_=hist.load(2026);train=train_a+train_b
  models={}
  for name,features in (("injury_only",hist.INJURY_FEATURES),("market_movement_only",hist.MARKET_FEATURES),("combined",hist.FEATURES)):
+  # Estimate probability scale on a chronological validation tail, not in-sample residuals.
+  season_a=sorted([r for r in train if r["season"]=="2024-25"],key=lambda r:r["date"])
+  season_b=sorted([r for r in train if r["season"]=="2025-26"],key=lambda r:r["date"])
+  cut=max(1,int(len(season_b)*0.70))
+  calibration_train=season_a+season_b[:cut]
+  calibration_test=season_b[cut:]
+  calibration_model=hist.fit(calibration_train,features)
+  cal_errors=[r["ats"]-hist.pred(calibration_model,r) for r in calibration_test]
+  sigma=math.sqrt(sum(e*e for e in cal_errors)/max(1,len(cal_errors)-1))
   model=hist.fit(train,features)
-  err=[r["ats"]-hist.pred(model,r) for r in train]
-  sigma=math.sqrt(sum(e*e for e in err)/max(1,len(err)-1));scale=max(1,sigma*math.sqrt(3)/math.pi)
-  out={"features":features,"train_residual_sd":round(sigma,3),"thresholds":{}}
+  scale=max(1,sigma*math.sqrt(3)/math.pi)
+  out={"features":features,"calibration_residual_sd_oos":round(sigma,3),
+       "calibration_games":len(calibration_test),"train_residual_sd_insample":round(
+       math.sqrt(sum((r["ats"]-hist.pred(model,r))**2 for r in train)/max(1,len(train)-1)),3),
+       "thresholds":{}}
   for t in (.55,.60):
    w=l=0;by={"HOME":[0,0],"AWAY":[0,0]}
    for r in test:
