@@ -7,7 +7,7 @@ silently discarded: invalid rows stop the run and must be resolved explicitly.
 from __future__ import annotations
 import argparse, csv, json, math
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from pathlib import Path
 
 FEATURES = [
@@ -55,7 +55,7 @@ def read_rows(path, cutoff_name):
                 if avail > pred: raise ValueError("feature data timestamp is after prediction cutoff")
                 if odds_at > pred: raise ValueError("sportsbook price timestamp is after prediction cutoff")
                 if pred >= tip: raise ValueError("prediction cutoff must be before scheduled tipoff")
-                row={"game_id":game,"date":parse_dt(raw["date_et"]).date(),
+                row={"game_id":game,"date":date.fromisoformat(raw["date_et"][:10]),
                      "prediction_at":pred,"tipoff":tip,
                      "home_margin":float(raw["home_score"])-float(raw["away_score"]),
                      "spread_home":float(raw["spread_home"]),
