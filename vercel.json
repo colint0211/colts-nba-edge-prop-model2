@@ -3,6 +3,10 @@
     {
       "path": "/api/game-board",
       "schedule": "0 12 * * *"
+    },
+    {
+      "path": "/api/away-ats/collect",
+      "schedule": "0 13 * * *"
     }
   ],
   "git": {
