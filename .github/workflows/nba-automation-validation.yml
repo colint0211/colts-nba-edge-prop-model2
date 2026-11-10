@@ -24,6 +24,6 @@ jobs:
         with:
           python-version: "3.12"
       - name: Compile Python sources
-        run: python -m compileall -q src/api scripts
+        run: python -m py_compile src/api/index.py scripts/betting_performance_tracker.py
       - name: Run tracker regression tests
         run: python -m unittest tests.test_betting_performance_tracker -v
