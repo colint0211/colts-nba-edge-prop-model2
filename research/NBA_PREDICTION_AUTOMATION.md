@@ -70,3 +70,8 @@ Vercel serverless instances are ephemeral: in-memory caches reduce duplicate cal
 ## Limitations
 
 This is code and cron configuration on the research branch. It does not set Vercel environment variables, provision an alert webhook, deploy the branch, or prove that production cron jobs are running. The public read path may return 503 if no snapshot/cache is available; this is intentional fail-closed behavior rather than silently spending API quota or inventing a board.
+
+
+## Repository validation
+
+A GitHub Actions workflow at `.github/workflows/nba-automation-validation.yml` runs Python syntax checks for the API and tracker modules and the tracker regression tests on pushes and pull requests to this research branch. This is code validation only; it does not deploy the app or contact production APIs.
