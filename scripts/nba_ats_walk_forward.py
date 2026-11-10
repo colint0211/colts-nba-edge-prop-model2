@@ -125,12 +125,17 @@ def profit(outcome, odds, side):
 
 def summarize(ledger, side_key="selected_side"):
     bets=[r for r in ledger if r[side_key] in ("home","away")]
-    wins=sum(r["result"]=="win" for r in bets); losses=sum(r["result"]=="loss" for r in bets)
+    def did_win(r):
+        return (r["result"]=="win") if r[side_key]=="home" else (r["result"]=="loss")
+    wins=sum(did_win(r) for r in bets)
     pushes=sum(r["result"]=="push" for r in bets)
-    units=sum(r["net_units"] for r in bets); risk=sum(1 for r in bets)
+    losses=len(bets)-wins-pushes
+    units=sum(r["net_units"] if side_key=="selected_side" else r["baseline_net_units"] for r in bets)
+    risk=len(bets)
     peak=0.0; equity=0.0; maxdd=0.0
     for r in bets:
-        equity+=r["net_units"]; peak=max(peak,equity); maxdd=max(maxdd,peak-equity)
+        equity += r["net_units"] if side_key=="selected_side" else r["baseline_net_units"]
+        peak=max(peak,equity); maxdd=max(maxdd,peak-equity)
     decided=wins+losses
     return {"bets":len(bets),"wins":wins,"losses":losses,"pushes":pushes,
             "win_pct_ex_pushes":round(100*wins/decided,2) if decided else None,
