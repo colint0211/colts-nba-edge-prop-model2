@@ -2545,6 +2545,7 @@ def cron_freeze_daily(request: FastRequest):
                 "frozen": bool(payload.get("daily_frozen")),
                 "candidate_count": len(payload.get("props") or []),
                 "source": payload.get("prop_line_cache_source"),
+                "prop_line_quota": payload.get("prop_line_quota"),
                 "line_freshness": payload.get("line_freshness"),
                 "unavailable_count": len(payload.get("unavailable") or []),
             }
