@@ -2277,6 +2277,39 @@ def _revalidate_frozen_market_candidates(market, candidates, injury_feed):
     ordered.sort(key=lambda p: (0 if (_norm_player_name(p.get("player")),str(p.get("game") or "").casefold()) in selected_keys else 1,-float(p.get("expected_value_pct") or -1e9)))
     return ordered
 
+def _market_line_freshness(props, max_age_minutes=60):
+    """Fail closed if sportsbook line timestamps are absent, malformed, or stale."""
+    now = datetime.now(timezone.utc)
+    checked = 0
+    issues = []
+    for prop in props or []:
+        if not isinstance(prop, dict):
+            continue
+        checked += 1
+        raw = prop.get("line_updated_at")
+        if not raw:
+            issues.append({"player": prop.get("player"), "reason": "missing_line_timestamp"})
+            continue
+        try:
+            stamp = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+            if stamp.tzinfo is None:
+                stamp = stamp.replace(tzinfo=timezone.utc)
+            age = (now - stamp.astimezone(timezone.utc)).total_seconds() / 60
+            if age < -5:
+                issues.append({"player": prop.get("player"), "reason": "future_line_timestamp"})
+            elif age > max_age_minutes:
+                issues.append({"player": prop.get("player"), "reason": "stale_line", "age_minutes": round(age, 1)})
+        except (TypeError, ValueError, OverflowError):
+            issues.append({"player": prop.get("player"), "reason": "invalid_line_timestamp"})
+    return {
+        "status": "fresh" if checked > 0 and not issues else "blocked",
+        "checked_lines": checked,
+        "max_age_minutes": max_age_minutes,
+        "issues": issues[:25],
+        "validated_at": now.isoformat(),
+    }
+
+
 @app.get("/api/proprietary-market-board")
 def proprietary_market_board(request: FastRequest, market: str = "rebounds", refresh: bool = False):
     """Public reads serve frozen/cached data; expensive refresh requires CRON_SECRET."""
@@ -2463,7 +2496,9 @@ def proprietary_market_board(request: FastRequest, market: str = "rebounds", ref
         "injury_feed": injury_feed.get("meta", {}),
         "balldontlie": {key: value for key, value in bdl_games.items() if key != "games"},
     }
-    frozen_candidates = _snapshot_daily_market_top5(market, output)
+    freshness = _market_line_freshness(output)
+    result["line_freshness"] = freshness
+    frozen_candidates = _snapshot_daily_market_top5(market, output) if freshness.get("status") == "fresh" else None
     if frozen_candidates is not None:
         result["props"] = frozen_candidates
         result["line_count"] = len(frozen_candidates)
@@ -2493,7 +2528,29 @@ def cron_freeze_daily(request: FastRequest):
             results[market_name] = {"frozen": bool(payload.get("daily_frozen")), "candidate_count": len(payload.get("props") or []), "source": payload.get("prop_line_cache_source")}
         except Exception as exc:
             results[market_name] = {"frozen": False, "error": type(exc).__name__ + ": " + str(exc)[:160]}
-    return JSONResponse({"status": "completed" if all(v.get("frozen") for v in results.values()) else "partial", "slate_date": now_et.date().isoformat(), "timezone": "America/New_York", "markets": results})
+    status = "completed" if all(v.get("frozen") for v in results.values()) else "partial"
+    alert_items = {
+        market: detail for market, detail in results.items()
+        if not detail.get("frozen")
+    }
+    if alert_items:
+        webhook = os.getenv("ALERT_WEBHOOK_URL", "").strip()
+        if webhook:
+            try:
+                payload = json.dumps({
+                    "text": "Colt's NBA automation warning: one or more markets were not frozen.",
+                    "status": status,
+                    "slate_date": now_et.date().isoformat(),
+                    "markets": alert_items,
+                }).encode("utf-8")
+                alert_request = Request(webhook, data=payload, headers={"Content-Type": "application/json"}, method="POST")
+                with urlopen(alert_request, timeout=8):
+                    pass
+            except Exception:
+                # Alert delivery failure is recorded in the response, never allowed
+                # to hide the underlying market-refresh result.
+                status = "partial_alert_delivery_failed"
+    return JSONResponse({"status": status, "slate_date": now_et.date().isoformat(), "timezone": "America/New_York", "markets": results})
 
 @app.get("/api/bettingpros-books")
 def bettingpros_books():
