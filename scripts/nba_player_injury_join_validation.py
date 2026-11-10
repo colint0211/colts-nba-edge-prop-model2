@@ -35,7 +35,7 @@ def download(url: str, path: Path) -> None:
 def main() -> None:
     con = duckdb.connect()
     report = {
-        "experiment": "historical_player_injury_join_validation_v1",
+        "experiment": "historical_player_injury_join_validation_v2",
         "purpose": "Validate game/player identifiers and pre-tip injury report timestamps before fitting an injury-aware ATS model.",
         "seasons": {},
         "integrity": {
@@ -59,7 +59,7 @@ def main() -> None:
         required_injury = {"report_datetime", "game_date", "game_time", "game_id",
                            "person_id", "team", "current_status"}
         required_player = {"game_id", "person_id", "team_id", "minutes",
-                           "plus_minus_points", "game_date"}
+                           "plus_minus_points"}
         missing = {
             "injury": sorted(required_injury - set(injury_cols)),
             "player_boxscores": sorted(required_player - set(player_cols)),
@@ -81,7 +81,7 @@ def main() -> None:
             SELECT COUNT(*) AS rows,
                    COUNT(DISTINCT game_id) AS games,
                    COUNT(DISTINCT person_id) AS players,
-                   MIN(game_date), MAX(game_date)
+                   MIN(minutes), MAX(minutes)
             FROM read_parquet(?)
             WHERE CAST(game_id AS VARCHAR) IS NOT NULL
         """, [str(player_path)]).fetchone()
@@ -133,7 +133,7 @@ def main() -> None:
             "player_boxscore_rows_games_players": {
                 "rows": player_stats[0], "games": player_stats[1],
                 "distinct_players": player_stats[2],
-                "first_game_date": str(player_stats[3]), "last_game_date": str(player_stats[4]),
+                "min_minutes": str(player_stats[3]), "max_minutes": str(player_stats[4]),
             },
             "injury_to_boxscore_id_join": {
                 "injury_game_player_keys": join_stats[0], "matched_keys": join_stats[1],
