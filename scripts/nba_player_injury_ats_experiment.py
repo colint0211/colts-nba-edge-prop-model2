@@ -13,7 +13,9 @@ BASE="https://github.com/sportsdataverse/sportsdataverse-data/releases/download"
 IW=BASE+"/nba_stats_injury_report/injury_report_{s}.parquet"
 PW=BASE+"/nba_stats_player_boxscores/player_boxscores_{s}.parquet"
 WEIGHT={"Out":1.0,"Doubtful":0.9,"Questionable":0.5,"Probable":0.1,"Available":0.0}
-FEATURES=["net_missing_value","net_missing_minutes","net_missing_count","net_questionable_weight"]
+INJURY_FEATURES=["net_missing_value","net_missing_minutes","net_missing_count","net_questionable_weight"]
+MARKET_FEATURES=["spread_move_toward_home","home_win_probability_move","total_move"]
+FEATURES=INJURY_FEATURES+MARKET_FEATURES
 
 def get(url):
     q=urllib.request.Request(url,headers={"User-Agent":"ColtsNBAResearch/1.0"})
@@ -51,7 +53,10 @@ def lines_for(s):
     for x in rows:
         if str(x.get("season_type","")).lower()!="regular":continue
         h,a=team_code(x.get("home_team")),team_code(x.get("away_team"));d=str(x.get("date_et",""))[:10]
-        if h and a and d:out[(d,h,a)]={"date":d,"home":h,"away":a,"hs":num(x,"home_score"),"as":num(x,"away_score"),"spread":num(x,"close_spread_home")}
+        if h and a and d:out[(d,h,a)]={"date":d,"home":h,"away":a,"hs":num(x,"home_score"),"as":num(x,"away_score"),
+                      "spread":num(x,"close_spread_home"),"open_spread":num(x,"open_spread_home"),
+                      "open_home_win_prob":num(x,"open_home_win_prob"),"close_home_win_prob":num(x,"close_home_win_prob"),
+                      "open_total":num(x,"open_total"),"close_total":num(x,"close_total")}
     return out
 
 def load(s):
@@ -117,7 +122,10 @@ def load(s):
         f={"net_missing_value":impact["away"]-impact["home"],
            "net_missing_minutes":missmin["away"]-missmin["home"],
            "net_missing_count":count["away"]-count["home"],
-           "net_questionable_weight":qcount["away"]-qcount["home"]}
+           "net_questionable_weight":qcount["away"]-qcount["home"],
+           "spread_move_toward_home":g["open_spread"]-g["spread"],
+           "home_win_probability_move":g["close_home_win_prob"]-g["open_home_win_prob"],
+           "total_move":g["close_total"]-g["open_total"]}
         margin=g["hs"]-g["as"]
         data.append({"season":f"{s-1}-{str(s)[-2:]}","game_id":gid,"date":g["date"],"matchup":g["away"]+" @ "+g["home"],
                      "ats":margin+g["spread"],"features":f,"reports":sum(1 for k in latest if k[0]==gid)})
@@ -147,19 +155,19 @@ def solve(a,b):
             for j in range(c,n+1):m[r][j]-=z*m[c][j]
     return [m[i][n] for i in range(n)]
 
-def fit(rows):
+def fit(rows,feature_names):
     means=[];scales=[]
     for f in FEATURES:
         v=[r["features"][f] for r in rows];mu=sum(v)/len(v);sd=math.sqrt(sum((x-mu)**2 for x in v)/max(1,len(v)-1)) or 1
         means.append(mu);scales.append(sd)
-    ym=sum(r["ats"] for r in rows)/len(rows);p=len(FEATURES);a=[[0.]*(p+1) for _ in range(p+1)];b=[0.]*(p+1)
+    ym=sum(r["ats"] for r in rows)/len(rows);p=len(feature_names);a=[[0.]*(p+1) for _ in range(p+1)];b=[0.]*(p+1)
     for r in rows:
-        x=[1.]+[(r["features"][f]-means[i])/scales[i] for i,f in enumerate(FEATURES)];y=r["ats"]-ym
+        x=[1.]+[(r["features"][f]-means[i])/scales[i] for i,f in enumerate(m["features"])];y=r["ats"]-ym
         for i in range(p+1):
             b[i]+=x[i]*y
             for j in range(p+1):a[i][j]+=x[i]*x[j]
     for i in range(1,p+1):a[i][i]+=10.
-    return {"means":means,"scales":scales,"ym":ym,"beta":solve(a,b)}
+    return {"means":means,"scales":scales,"ym":ym,"beta":solve(a,b),"features":feature_names}
 
 def pred(m,r):
     x=[1.]+[(r["features"][f]-m["means"][i])/m["scales"][i] for i,f in enumerate(FEATURES)]
@@ -168,7 +176,7 @@ def pred(m,r):
 def evaluate(train,test):
     m=fit(train);err=[r["ats"]-pred(m,r) for r in train]
     sig=math.sqrt(sum(x*x for x in err)/max(1,len(err)-1));scale=max(1,sig*math.sqrt(3)/math.pi)
-    out={"train":train[0]["season"],"test":test[0]["season"],"train_games":len(train),"test_games":len(test),"train_residual_sd":round(sig,3),"thresholds":{}}
+    out={"train":train[0]["season"],"test":test[0]["season"],"train_games":len(train),"test_games":len(test),"train_residual_sd":round(sig,3),"features":feature_names,"thresholds":{}}
     for t in (.55,.60):
         w=l=0
         for r in test:
@@ -186,12 +194,20 @@ def evaluate(train,test):
 
 def main():
     a,ca=load(2025);b,cb=load(2026)
-    result={"experiment":"player_injury_ats_residual_v1",
+    result={"experiment":"player_injury_ats_residual_v2",
       "timing":"Latest report at or before scheduled ET tipoff; player value from up to 10 prior appearances only.",
       "player_value":"Hollinger-style Game Score per 36 shrunk toward team historical rotation replacement.",
-      "model":"Ridge regression of home ATS margin on injury-value/minutes/count differences; train one season, test the other.",
+      "models":"Compare injury-only, opening-to-closing market-movement-only, and combined ridge models; train one season, test the other.",
       "caveat":"Closing spread already incorporates much injury information; this tests residual predictive value, not earlier-line timing.",
-      "coverage":[ca,cb],"cross_season":[evaluate(a,b),evaluate(b,a)],
+      "coverage":[ca,cb],"cross_season":[
+        {"direction":"2024-25_to_2025-26","models":{
+            "injury_only":evaluate(a,b,INJURY_FEATURES),
+            "market_movement_only":evaluate(a,b,MARKET_FEATURES),
+            "combined":evaluate(a,b,FEATURES)}},
+        {"direction":"2025-26_to_2024-25","models":{
+            "injury_only":evaluate(b,a,INJURY_FEATURES),
+            "market_movement_only":evaluate(b,a,MARKET_FEATURES),
+            "combined":evaluate(b,a,FEATURES)}}],
       "integrity":{"post_tipoff_reports_used":False,"current_game_boxscores_used_for_features":False,"live_model_modified":False,"production_deployed":False}}
     (OUT/"player_injury_ats_experiment.json").write_text(json.dumps(result,indent=2))
     print(json.dumps(result,indent=2))
