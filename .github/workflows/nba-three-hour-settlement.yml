@@ -1,6 +1,9 @@
 name: NBA three-hour settlement
 
 on:
+  push:
+    branches:
+      - research/ats-feature-study
   schedule:
     - cron: "0 */3 * * *"
   workflow_dispatch:
@@ -15,7 +18,7 @@ concurrency:
 jobs:
   settle:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     steps:
       - name: Require deployment and cron credentials
         env:
@@ -25,7 +28,32 @@ jobs:
           test -n "$CRON_SECRET" || { echo "::error::GitHub secret CRON_SECRET is missing."; exit 1; }
           test -n "$VERCEL_AUTOMATION_BYPASS_SECRET" || { echo "::error::GitHub secret VERCEL_AUTOMATION_BYPASS_SECRET is missing."; exit 1; }
 
-      - name: Settle pending NBA predictions on the research Preview
+      - name: Wait for the research Preview deployment
+        env:
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+          NBA_PREVIEW_URL: https://colts-nba-edge-prop-model2-git-research-ats-f-9dd05e-colin-82ad.vercel.app
+        run: |
+          set -euo pipefail
+          ready=false
+          for attempt in $(seq 1 18); do
+            code="$(curl --silent --show-error --max-time 20 --output /tmp/nba-status.json --write-out '%{http_code}' \
+              -H "x-vercel-protection-bypass: $VERCEL_AUTOMATION_BYPASS_SECRET" \
+              "$NBA_PREVIEW_URL/api/automation/status" || true)"
+            if [ "$code" = "200" ]; then
+              cat /tmp/nba-status.json
+              ready=true
+              break
+            fi
+            if [ "$code" = "401" ]; then
+              echo "::error::Vercel deployment protection bypass was rejected."
+              exit 1
+            fi
+            echo "Preview not ready yet (HTTP ${code:-connection error}); attempt $attempt/18."
+            sleep 10
+          done
+          test "$ready" = true || { echo "::error::Preview deployment did not become ready in time."; exit 1; }
+
+      - name: Settle pending NBA predictions
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
           VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
