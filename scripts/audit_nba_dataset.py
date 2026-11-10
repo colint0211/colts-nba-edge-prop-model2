@@ -7,7 +7,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 ALIASES={"game_id":["game_id","gameid","event_id","match_id"],"player_id":["player_id","playerid","athlete_id","person_id"],"player_name":["player_name","player","athlete_name","name"],"game_date":["game_date","date","date_et","game_day","event_date"],"tipoff":["tipoff","tipoff_time","start_time","game_time","scheduled_start"]}
-STATS={"points":(["pts","points"],100),"rebounds":(["reb","rebounds","trb"],40),"assists":(["ast","assists"],35),"steals":(["stl","steals"],15),"blocks":(["blk","blocks"],15),"threes_made":(["fg3m","3pm","three_pointers_made","threes_made"],25),"minutes":(["min","minutes","minutes_played"],70)}
+STATS={"points":(["pts","points"],100),"rebounds":(["reb","rebounds","trb"],40),"assists":(["ast","assists"],35),"steals":(["stl","steals"],15),"blocks":(["blk","blocks"],15),"threes_made":(["fg3m","3pm","three_pointers_made","threes_made"],25),"minutes":(["min","minutes","minutes_played"],70),"home_score":(["home_score","home_pts"],200),"away_score":(["away_score","away_pts"],200),"total_points":(["total_points","combined_score"],350)}
 DATE_FORMATS=("%Y-%m-%d","%m/%d/%Y","%Y%m%d","%d-%b-%Y","%Y/%m/%d")
 TIME_TOKENS=("prediction_timestamp","feature_available_at","source_timestamp","published_at","reported_at","captured_at","updated_at")
 POST_TOKENS=("final","actual","boxscore","box_score","postgame","post_game","in_game","live_stat","minutes_played")
