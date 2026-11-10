@@ -80,3 +80,8 @@ Output: `backtest-output/ats_feature_study/results.json`.
 ## Frozen-model boundary
 
 The frozen candidate remains the three-feature ridge market-movement model and its existing away-only selection rule. This feature study is a separate experimental branch and must not feed production picks or overwrite the prospective ledger.
+
+
+## Mandatory historical-data quality gate
+
+Before preparing the point-in-time feature CSV or fitting any experiment, run `scripts/audit_nba_dataset.py` against every historical source file. Preserve the original inputs. Review the aggregate JSON, per-file issue logs, and correction logs. Do not train on unresolved duplicate player/game keys, ambiguous player identity mappings, malformed dates, or unverified post-tipoff features. Do not automatically drop outliers or duplicate rows; document an explicit adjudication decision and keep a reproducible exclusion list if a row must be excluded. The audit tool retains all records and writes a normalized copy plus complete issue/correction reports. A completed audit is a prerequisite for any claim that the feature-study dataset is clean.
