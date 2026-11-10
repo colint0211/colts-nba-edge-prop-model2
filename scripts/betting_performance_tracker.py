@@ -24,7 +24,7 @@ from pathlib import Path
 
 FIELDS = [
     "event_id", "event_type", "play_id", "model", "qualified_at", "sportsbook",
-    "market", "selection", "line", "odds_american", "model_probability",
+    "market", "entity", "team", "opponent", "event", "selection", "line", "odds_american", "model_probability",
     "result", "net_units", "risk_units", "source_record_id",
     "qualification_rule_version", "verification_status", "audit_flags",
 ]
