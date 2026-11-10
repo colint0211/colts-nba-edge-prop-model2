@@ -144,7 +144,8 @@ def main():
             "margin_error": "projected home margin minus actual home margin; positive means model overrated home side",
             "ats_error": "actual home margin plus closing home spread; positive means home beat the spread",
             "edge": "projected home margin plus closing home spread; positive means model prefers home ATS",
-            "no thresholds are tuned and no new formula is fitted"
+            "ats_edge": "projected home margin plus closing home spread; positive means model prefers home ATS",
+        "no_thresholds_tuned": "No thresholds are tuned and no new formula is fitted"
         },
         "overall": summarize(rows),
         "groups": groups,
