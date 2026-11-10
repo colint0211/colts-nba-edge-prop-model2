@@ -2,7 +2,7 @@ import unittest
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from src.api.index import _candidate_is_pregame
+from src.api.slate_validation import candidate_is_pregame as _candidate_is_pregame
 
 
 class PregameSlateValidationTests(unittest.TestCase):
