@@ -114,6 +114,7 @@ def main():
   "rule":"Ridge predicts home ATS margin at closing line from opening-to-closing spread, moneyline-probability, and total movement. Home/away bets at calibrated 55% or 60% probability. No threshold tuning on test seasons.",
   "calibration":"Residual standard deviation estimated on a chronological 30% validation tail of training data; flat -110 assumed.",
   "chronological_2024_25_to_2025_26":first,
+  "reverse_cross_season_diagnostic_2025_26_to_2024_25":eval_model(b,a,"reverse diagnostic; not chronological"),
   "untouched_2026_27_holdout":current,
   "2026_27_market_baselines":{"opening_line_home_cover":rec(c,"open_ats"),"closing_line_home_cover":rec(c,"ats")},
   "coverage":{"2024-25":len(a),"2025-26":len(b),"2026-27":len(c)},
