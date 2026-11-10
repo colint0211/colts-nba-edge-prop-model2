@@ -2293,7 +2293,8 @@ def _market_line_freshness(props, max_age_minutes=60):
         try:
             stamp = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
             if stamp.tzinfo is None:
-                stamp = stamp.replace(tzinfo=timezone.utc)
+                issues.append({"player": prop.get("player"), "reason": "timezone_missing_on_line_timestamp"})
+                continue
             age = (now - stamp.astimezone(timezone.utc)).total_seconds() / 60
             if age < -5:
                 issues.append({"player": prop.get("player"), "reason": "future_line_timestamp"})
@@ -2364,6 +2365,10 @@ def proprietary_market_board(request: FastRequest, market: str = "rebounds", ref
         cached_result["balldontlie"] = {key: value for key, value in bdl_games.items() if key != "games"}
         cached_freshness = _market_line_freshness(cached_result.get("props") or [])
         cached_result["line_freshness"] = cached_freshness
+        if cached_freshness.get("status") == "fresh":
+            for cached_prop in cached_result.get("props") or []:
+                if isinstance(cached_prop, dict):
+                    cached_prop["line_freshness_validated_at"] = cached_freshness["validated_at"]
         frozen_candidates = (
             _snapshot_daily_market_top5(market, cached_result.get("props") or [])
             if cached_freshness.get("status") == "fresh" else None
@@ -2503,6 +2508,9 @@ def proprietary_market_board(request: FastRequest, market: str = "rebounds", ref
     }
     freshness = _market_line_freshness(output)
     result["line_freshness"] = freshness
+    if freshness.get("status") == "fresh":
+        for fresh_prop in output:
+            fresh_prop["line_freshness_validated_at"] = freshness["validated_at"]
     frozen_candidates = _snapshot_daily_market_top5(market, output) if freshness.get("status") == "fresh" else None
     if frozen_candidates is not None:
         result["props"] = frozen_candidates
@@ -2568,8 +2576,16 @@ def nba_automation_status():
         for market_name in ("points", "rebounds", "assists", "steals", "threes"):
             saved = prediction_ledger.get_daily_slate(market_name, slate_date)
             candidates = (saved or {}).get("candidates") or []
-            freshness = _market_line_freshness(candidates) if candidates else {
-                "status": "not_frozen", "checked_lines": 0, "issues": []
+            validation_times = sorted({
+                str(item.get("line_freshness_validated_at"))
+                for item in candidates
+                if isinstance(item, dict) and item.get("line_freshness_validated_at")
+            })
+            freshness = {
+                "status": "validated_at_freeze" if validation_times else ("legacy_snapshot_unverified" if candidates else "not_frozen"),
+                "checked_lines": len(candidates),
+                "validated_at": validation_times[-1] if validation_times else None,
+                "issues": [],
             }
             markets[market_name] = {
                 "frozen": bool(candidates),
