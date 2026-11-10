@@ -23,10 +23,6 @@
     {
       "path": "/api/cron/freeze-daily",
       "schedule": "0 12 * * *"
-    },
-    {
-      "path": "/api/cron/settle-pending",
-      "schedule": "0 6 * * *"
     }
   ],
   "git": {
