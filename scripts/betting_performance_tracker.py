@@ -128,6 +128,8 @@ def ingest(source: Path, ledger: Path, model_override: str | None = None) -> dic
             for target, candidates in aliases.items():
                 if not row.get(target):
                     row[target] = next((row.get(k, "") for k in candidates if row.get(k)), "")
+            if not row.get("source_record_id") and row.get("id"):
+                row["source_record_id"] = row["id"]
             if row.get("snapshot"):
                 try:
                     snap = json.loads(row["snapshot"])
