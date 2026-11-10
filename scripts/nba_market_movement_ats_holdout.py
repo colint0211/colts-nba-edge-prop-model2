@@ -109,6 +109,9 @@ def main():
   vals=[r[key] for r in rows if abs(r[key])>1e-9]
   w=sum(v>0 for v in vals);l=sum(v<0 for v in vals)
   return {"bets":len(vals),"wins":w,"losses":l,"win_pct":round(100*w/len(vals),2) if vals else None}
+ def away_summary(block):
+  x=block["thresholds"]["0.55"]["by_side"]["AWAY"]
+  return {"bets":x["bets"],"wins":x["wins"],"losses":x["losses"]}
  result={"experiment":"frozen_market_movement_ats_v2_oos_calibration",
   "features":FEATURES,
   "rule":"Ridge predicts home ATS margin at closing line from opening-to-closing spread, moneyline-probability, and total movement. Home/away bets at calibrated 55% or 60% probability. No threshold tuning on test seasons.",
@@ -116,6 +119,17 @@ def main():
   "chronological_2024_25_to_2025_26":first,
   "reverse_cross_season_diagnostic_2025_26_to_2024_25":eval_model(b,a,"reverse diagnostic; not chronological"),
   "untouched_2026_27_holdout":current,
+  "exploratory_away_only_candidate":{
+    "rule":"At calibrated 55% threshold, take AWAY only when model p(home cover)<=45%; pass on all HOME selections.",
+    "status":"Exploratory post-hoc diagnostic; not pre-registered and not approved for live betting.",
+    "2025_26_forward_holdout":away_summary(first),
+    "2026_27_untouched_holdout":away_summary(current),
+    "combined_chronological_holdouts":{
+      "bets":away_summary(first)["bets"]+away_summary(current)["bets"],
+      "wins":away_summary(first)["wins"]+away_summary(current)["wins"],
+      "losses":away_summary(first)["losses"]+away_summary(current)["losses"]
+    }
+  },
   "2026_27_market_baselines":{"opening_line_home_cover":rec(c,"open_ats"),"closing_line_home_cover":rec(c,"ats")},
   "coverage":{"2024-25":len(a),"2025-26":len(b),"2026-27":len(c)},
   "integrity":{"test_2026_27_used_in_training":False,"post_tipoff_data_used_as_features":False,
