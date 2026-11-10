@@ -29,6 +29,7 @@ class JSONResponse(StarletteJSONResponse):
     def render(self, content):
         return super().render(_json_safe(content))
 from . import prediction_ledger, game_model, advanced_metrics
+from .slate_validation import candidate_is_pregame as _candidate_is_pregame
 from pathlib import Path
 from html.parser import HTMLParser
 from zoneinfo import ZoneInfo
@@ -1938,24 +1939,6 @@ def _active_nba_slate_date(now_et=None):
     return active_date.isoformat()
 
 
-def _candidate_is_pregame(prop, slate_date, now_et):
-    """Accept a candidate only when its timezone-aware tipoff is on this ET slate and still ahead."""
-    if not isinstance(prop, dict):
-        return False
-    raw_start = (
-        prop.get("game_start") or prop.get("commence_time")
-        or prop.get("start_time") or prop.get("game_time")
-    )
-    if not raw_start:
-        return False
-    try:
-        start = datetime.fromisoformat(str(raw_start).strip().replace("Z", "+00:00"))
-    except (TypeError, ValueError):
-        return False
-    if start.tzinfo is None or start.utcoffset() is None:
-        return False
-    start_et = start.astimezone(ZoneInfo("America/New_York"))
-    return start_et.date().isoformat() == str(slate_date) and start_et > now_et
 
 
 def _post_selection_negative_review(prop, market, injury_feed):
