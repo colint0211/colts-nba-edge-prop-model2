@@ -157,39 +157,49 @@ def solve(a,b):
 
 def fit(rows,feature_names):
     means=[];scales=[]
-    for f in FEATURES:
-        v=[r["features"][f] for r in rows];mu=sum(v)/len(v);sd=math.sqrt(sum((x-mu)**2 for x in v)/max(1,len(v)-1)) or 1
+    for f in feature_names:
+        v=[r["features"][f] for r in rows]
+        mu=sum(v)/len(v)
+        sd=math.sqrt(sum((x-mu)**2 for x in v)/max(1,len(v)-1)) or 1.0
         means.append(mu);scales.append(sd)
-    ym=sum(r["ats"] for r in rows)/len(rows);p=len(feature_names);a=[[0.]*(p+1) for _ in range(p+1)];b=[0.]*(p+1)
+    ym=sum(r["ats"] for r in rows)/len(rows)
+    p=len(feature_names);a=[[0.0]*(p+1) for _ in range(p+1)];b=[0.0]*(p+1)
     for r in rows:
-        x=[1.]+[(r["features"][f]-means[i])/scales[i] for i,f in enumerate(m["features"])];y=r["ats"]-ym
+        x=[1.0]+[(r["features"][f]-means[i])/scales[i] for i,f in enumerate(feature_names)]
+        y=r["ats"]-ym
         for i in range(p+1):
             b[i]+=x[i]*y
             for j in range(p+1):a[i][j]+=x[i]*x[j]
-    for i in range(1,p+1):a[i][i]+=10.
+    for i in range(1,p+1):a[i][i]+=10.0
     return {"means":means,"scales":scales,"ym":ym,"beta":solve(a,b),"features":feature_names}
 
 def pred(m,r):
-    x=[1.]+[(r["features"][f]-m["means"][i])/m["scales"][i] for i,f in enumerate(FEATURES)]
+    x=[1.0]+[(r["features"][f]-m["means"][i])/m["scales"][i] for i,f in enumerate(m["features"])]
     return m["ym"]+sum(x[i]*m["beta"][i] for i in range(len(x)))
 
-def evaluate(train,test):
-    m=fit(train);err=[r["ats"]-pred(m,r) for r in train]
-    sig=math.sqrt(sum(x*x for x in err)/max(1,len(err)-1));scale=max(1,sig*math.sqrt(3)/math.pi)
-    out={"train":train[0]["season"],"test":test[0]["season"],"train_games":len(train),"test_games":len(test),"train_residual_sd":round(sig,3),"features":feature_names,"thresholds":{}}
+def evaluate(train,test,feature_names):
+    m=fit(train,feature_names)
+    err=[r["ats"]-pred(m,r) for r in train]
+    sig=math.sqrt(sum(x*x for x in err)/max(1,len(err)-1))
+    scale=max(1.0,sig*math.sqrt(3.0)/math.pi)
+    out={"train":train[0]["season"],"test":test[0]["season"],"train_games":len(train),
+         "test_games":len(test),"train_residual_sd":round(sig,3),
+         "features":feature_names,"thresholds":{}}
     for t in (.55,.60):
         w=l=0
         for r in test:
-            p=1/(1+math.exp(-max(-30,min(30,pred(m,r)/scale))))
+            p=1.0/(1.0+math.exp(-max(-30,min(30,pred(m,r)/scale))))
             if p>=t:
                 if r["ats"]>0:w+=1
                 elif r["ats"]<0:l+=1
             elif p<=1-t:
                 if r["ats"]<0:w+=1
                 elif r["ats"]>0:l+=1
-        n=w+l;u=w*100/110-l
-        out["thresholds"][str(t)]={"bets":n,"wins":w,"losses":l,"win_pct":round(100*w/n,2) if n else None,
-                                   "units_at_minus_110":round(u,2),"roi_pct":round(100*u/n,2) if n else None}
+        n=w+l;u=w*(100.0/110.0)-l
+        out["thresholds"][str(t)]={"bets":n,"wins":w,"losses":l,
+            "win_pct":round(100*w/n,2) if n else None,
+            "units_at_minus_110":round(u,2),
+            "roi_pct":round(100*u/n,2) if n else None}
     return out
 
 def main():
