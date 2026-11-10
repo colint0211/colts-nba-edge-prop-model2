@@ -2534,7 +2534,13 @@ def cron_freeze_daily(request: FastRequest):
         try:
             response = proprietary_market_board(request, market_name, True)
             payload = json.loads(response.body.decode("utf-8"))
-            results[market_name] = {"frozen": bool(payload.get("daily_frozen")), "candidate_count": len(payload.get("props") or []), "source": payload.get("prop_line_cache_source")}
+            results[market_name] = {
+                "frozen": bool(payload.get("daily_frozen")),
+                "candidate_count": len(payload.get("props") or []),
+                "source": payload.get("prop_line_cache_source"),
+                "line_freshness": payload.get("line_freshness"),
+                "unavailable_count": len(payload.get("unavailable") or []),
+            }
         except Exception as exc:
             results[market_name] = {"frozen": False, "error": type(exc).__name__ + ": " + str(exc)[:160]}
     status = "completed" if all(v.get("frozen") for v in results.values()) else "partial"
