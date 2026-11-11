@@ -1,90 +1,138 @@
 #!/usr/bin/env python3
-"""Fetch and validate the official NBA Stats Advanced team table."""
+"""Refresh 30-team ratings from Basketball-Reference's public team tables.
+
+NBA Stats is timing out from both Vercel and GitHub-hosted runners. This
+collector uses Basketball-Reference's season ratings and advanced team tables.
+It fails closed: no partial, stale, or invented rows are published.
+"""
 import json
-import os
+import re
+import time
 from datetime import datetime, timezone
+from io import StringIO
 from pathlib import Path
 
-from nba_api.stats.endpoints import leaguedashteamstats
-from nba_api.stats.library.http import NBAStatsHTTP
-from curl_cffi import requests as curl_requests
+import pandas as pd
+import requests
 
 TEAM_CODES = {
-    "ATL","BOS","BKN","CHA","CHI","CLE","DAL","DEN","DET","GSW",
-    "HOU","IND","LAC","LAL","MEM","MIA","MIL","MIN","NOP","NYK",
-    "OKC","ORL","PHI","PHX","POR","SAC","SAS","TOR","UTA","WAS",
+    "Atlanta Hawks":"ATL","Boston Celtics":"BOS","Brooklyn Nets":"BKN",
+    "Charlotte Hornets":"CHA","Chicago Bulls":"CHI","Cleveland Cavaliers":"CLE",
+    "Dallas Mavericks":"DAL","Denver Nuggets":"DEN","Detroit Pistons":"DET",
+    "Golden State Warriors":"GSW","Houston Rockets":"HOU","Indiana Pacers":"IND",
+    "Los Angeles Clippers":"LAC","Los Angeles Lakers":"LAL","Memphis Grizzlies":"MEM",
+    "Miami Heat":"MIA","Milwaukee Bucks":"MIL","Minnesota Timberwolves":"MIN",
+    "New Orleans Pelicans":"NOP","New York Knicks":"NYK","Oklahoma City Thunder":"OKC",
+    "Orlando Magic":"ORL","Philadelphia 76ers":"PHI","Phoenix Suns":"PHX",
+    "Portland Trail Blazers":"POR","Sacramento Kings":"SAC","San Antonio Spurs":"SAS",
+    "Toronto Raptors":"TOR","Utah Jazz":"UTA","Washington Wizards":"WAS",
+}
+BASE = "https://www.basketball-reference.com/leagues"
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Referer": "https://www.basketball-reference.com/",
 }
 
-def main():
-    now = datetime.now(timezone.utc)
-    season_start = now.year if now.month >= 7 else now.year - 1
-    season = f"{season_start}-{str(season_start + 1)[-2:]}"
-    headers = {
-        "Host": "stats.nba.com",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-        "Accept": "application/json, text/plain, */*",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Referer": "https://www.nba.com/",
-        "Origin": "https://www.nba.com",
-        "Connection": "keep-alive",
-        "x-nba-stats-origin": "stats",
-        "x-nba-stats-token": "true",
-    }
-    session = curl_requests.Session(impersonate="chrome120", http_version="v1")
-    NBAStatsHTTP.get_session = lambda self: session
-    endpoint = leaguedashteamstats.LeagueDashTeamStats(
-        season=season,
-        season_type_all_star="Regular Season",
-        measure_type_detailed_defense="Advanced",
-        per_mode_detailed="PerGame",
-        league_id_nullable="00",
-        last_n_games=0,
-        month=0,
-        opponent_team_id=0,
-        pace_adjust="N",
-        plus_minus="N",
-        rank="N",
-        timeout=60,
-        headers=headers,
-    )
-    frames = endpoint.get_data_frames()
-    if not frames:
-        raise RuntimeError("NBA Stats returned no data frame.")
-    teams = {}
-    for item in frames[0].to_dict(orient="records"):
-        code = str(item.get("TEAM_ABBREVIATION") or "").upper()
-        if code not in TEAM_CODES:
-            continue
-        try:
-            row = {
-                "team": code,
-                "games": int(item.get("GP") or 0),
-                "ortg": float(item["OFF_RATING"]),
-                "drtg": float(item["DEF_RATING"]),
-                "net": float(item["NET_RATING"]),
-                "pace": float(item["PACE"]),
-                "efg": float(item.get("EFG_PCT") or 0),
-                "tov": float(item.get("TM_TOV_PCT") or 0),
-                "oreb": float(item.get("OREB_PCT") or 0),
-                "ts": float(item.get("TS_PCT") or 0),
-            }
-        except (KeyError, TypeError, ValueError):
-            continue
-        teams[code] = row
-    missing = sorted(TEAM_CODES - set(teams))
-    if len(teams) != 30 or missing:
-        raise RuntimeError(f"Refusing to publish incomplete NBA Stats table: {len(teams)}/30; missing={missing}")
-    payload = {
-        "source": "NBA Stats leaguedashteamstats Advanced",
-        "season": season,
-        "fetched_at": now.isoformat(),
-        "team_count": len(teams),
-        "teams": teams,
-    }
-    output = Path("data/nba_team_advanced.json")
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(payload, separators=(",", ":"), allow_nan=False) + "\n", encoding="utf-8")
-    print(f"Validated and wrote {len(teams)} official NBA Stats teams for {season} to {output}")
+def season_code(now):
+    start = now.year if now.month >= 7 else now.year - 1
+    return start + 1, f"{start}-{str(start + 1)[-2:]}"
 
-if __name__ == "__main__":
+def fetch_tables(url):
+    last = None
+    for attempt in range(3):
+        try:
+            response = requests.get(url, headers=HEADERS, timeout=25)
+            response.raise_for_status()
+            html = response.text
+            if "Team Ratings Table" not in html and "Advanced Stats Table" not in html:
+                # HTML comments occasionally contain the table markup on B-Ref.
+                pass
+            tables = pd.read_html(StringIO(html))
+            if tables:
+                return tables
+            raise RuntimeError("No HTML tables found at " + url)
+        except Exception as exc:
+            last = exc
+            if attempt < 2:
+                time.sleep(2 ** attempt)
+    raise RuntimeError(f"Basketball-Reference fetch failed for {url}: {last}")
+
+def flat_columns(frame):
+    cols=[]
+    for col in frame.columns:
+        if isinstance(col, tuple):
+            vals=[str(v).strip() for v in col if str(v).strip() and not str(v).startswith("Unnamed")]
+            cols.append(vals[-1] if vals else "")
+        else:
+            cols.append(str(col).strip())
+    frame=frame.copy()
+    frame.columns=cols
+    return frame
+
+def find_table(tables, required):
+    for raw in tables:
+        frame=flat_columns(raw)
+        cols=set(frame.columns)
+        if required.issubset(cols):
+            return frame
+    raise RuntimeError("Could not find table with columns: " + ", ".join(sorted(required)))
+
+def num(value):
+    if pd.isna(value): return None
+    text=str(value).strip().replace(",","")
+    if text in ("","—","-"): return None
+    return float(text)
+
+def main():
+    now=datetime.now(timezone.utc)
+    year, season=season_code(now)
+    ratings_url=f"{BASE}/NBA_{year}_ratings.html"
+    summary_url=f"{BASE}/NBA_{year}.html"
+    ratings=find_table(fetch_tables(ratings_url), {"Team","ORtg","DRtg"})
+    advanced=find_table(fetch_tables(summary_url), {"Team","Pace","TS%"})
+    adv_by_name={}
+    for _, item in advanced.iterrows():
+        name=re.sub(r"[*]+$","",str(item["Team"])).strip()
+        if name in TEAM_CODES:
+            adv_by_name[TEAM_CODES[name]]=item
+    teams={}
+    for _, item in ratings.iterrows():
+        name=re.sub(r"[*]+$","",str(item["Team"])).strip()
+        code=TEAM_CODES.get(name)
+        if not code or code not in adv_by_name:
+            continue
+        adv=adv_by_name[code]
+        try:
+            ortg=num(item["ORtg"]); drtg=num(item["DRtg"])
+            pace=num(adv["Pace"]); ts=num(adv["TS%"])
+            efg=num(adv["eFG%"]); tov=num(adv["TOV%"]); oreb=num(adv["ORB%"])
+            wins=num(item.get("W")); losses=num(item.get("L"))
+            games=int((wins or 0)+(losses or 0))
+        except (TypeError,ValueError,KeyError):
+            continue
+        values=[ortg,drtg,pace,ts,efg,tov,oreb]
+        if any(v is None for v in values) or not (70 < pace < 115 and 80 < ortg < 140 and 80 < drtg < 140):
+            continue
+        teams[code]={
+            "team":code,"games":games,"ortg":ortg,"drtg":drtg,
+            "net":ortg-drtg,"pace":pace,"efg":efg/100 if efg>1 else efg,
+            "tov":tov/100 if tov>1 else tov,"oreb":oreb/100 if oreb>1 else oreb,
+            "ts":ts/100 if ts>1 else ts,
+        }
+    missing=sorted(set(TEAM_CODES.values())-set(teams))
+    if len(teams)!=30:
+        raise RuntimeError(f"Refusing to publish incomplete Basketball-Reference data: {len(teams)}/30; missing={missing}")
+    payload={
+        "source":"Basketball-Reference NBA team ratings and advanced stats",
+        "season":season,"fetched_at":now.isoformat(),"team_count":30,"teams":teams,
+        "source_urls":[ratings_url,summary_url],
+    }
+    output=Path("data/nba_team_advanced.json")
+    output.parent.mkdir(parents=True,exist_ok=True)
+    output.write_text(json.dumps(payload,separators=(",",":"),allow_nan=False)+"\n",encoding="utf-8")
+    print(f"Validated 30 Basketball-Reference team rows for {season}; ORtg/DRtg, pace and four factors saved to {output}")
+
+if __name__=="__main__":
     main()
