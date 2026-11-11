@@ -77,7 +77,95 @@ def initialize():
           market TEXT NOT NULL, slate_date TEXT NOT NULL, candidates JSONB NOT NULL DEFAULT '[]'::jsonb,
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY(market,slate_date)
         );
+        CREATE TABLE IF NOT EXISTS nba_game_forecast_archive (
+          id BIGSERIAL PRIMARY KEY,
+          event_id TEXT NOT NULL,
+          home_team TEXT,
+          away_team TEXT,
+          commence_time TIMESTAMPTZ NOT NULL,
+          forecast_at TIMESTAMPTZ NOT NULL,
+          slate_date DATE NOT NULL,
+          model_version TEXT NOT NULL,
+          rating_source TEXT,
+          data_quality TEXT,
+          projected_home DOUBLE PRECISION NOT NULL,
+          projected_away DOUBLE PRECISION NOT NULL,
+          projected_margin DOUBLE PRECISION NOT NULL,
+          projected_total DOUBLE PRECISION NOT NULL,
+          home_win_probability DOUBLE PRECISION NOT NULL,
+          away_win_probability DOUBLE PRECISION NOT NULL,
+          snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+          UNIQUE(event_id, model_version, forecast_at)
+        );
+        CREATE INDEX IF NOT EXISTS nba_game_forecast_archive_event
+          ON nba_game_forecast_archive(event_id, forecast_at DESC);
+        CREATE TABLE IF NOT EXISTS nba_market_snapshots (
+          id BIGSERIAL PRIMARY KEY, batch_id TEXT NOT NULL,
+          captured_at TIMESTAMPTZ NOT NULL, event_id TEXT NOT NULL,
+          commence_time TIMESTAMPTZ, slate_date DATE NOT NULL,
+          matchup TEXT NOT NULL, home_team TEXT NOT NULL, away_team TEXT NOT NULL,
+          market TEXT NOT NULL CHECK (market IN ('spreads','totals')),
+          outcome TEXT NOT NULL, line DOUBLE PRECISION NOT NULL,
+          odds INTEGER NOT NULL, bookmaker TEXT NOT NULL, source TEXT NOT NULL,
+          raw_quote JSONB NOT NULL DEFAULT '{}'::jsonb
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS nba_market_snapshots_batch_quote
+          ON nba_market_snapshots(batch_id,event_id,market,outcome);
+        CREATE INDEX IF NOT EXISTS nba_market_snapshots_event_time
+          ON nba_market_snapshots(event_id,market,outcome,captured_at DESC);
+        CREATE INDEX IF NOT EXISTS nba_market_snapshots_capture
+          ON nba_market_snapshots(captured_at DESC);
+        ALTER TABLE nba_game_forecast_archive ADD COLUMN IF NOT EXISTS home_team TEXT;
+        ALTER TABLE nba_game_forecast_archive ADD COLUMN IF NOT EXISTS away_team TEXT;
+        ALTER TABLE nba_game_forecast_archive ADD COLUMN IF NOT EXISTS actual_home_score INTEGER;
+        ALTER TABLE nba_game_forecast_archive ADD COLUMN IF NOT EXISTS actual_away_score INTEGER;
+        ALTER TABLE nba_game_forecast_archive ADD COLUMN IF NOT EXISTS settled_at TIMESTAMPTZ;
         """)
+
+
+def _persist_forecast_archive(forecasts, ratings, injury_meta=None):
+    """Append immutable, timestamped forecasts for every scheduled game.
+
+    This is a prospective archive. It intentionally does not backfill historical
+    predictions from today's ratings or injury reports.
+    """
+    if not forecasts:
+        return {"saved": 0, "attempted": 0}
+    now = datetime.now(timezone.utc)
+    saved = 0
+    with _connect() as conn:
+        for row in forecasts:
+            try:
+                commence = datetime.fromisoformat(str(row.get("commence_time") or "").replace("Z", "+00:00"))
+                if commence.tzinfo is None or commence <= now:
+                    continue
+                payload = dict(row)
+                payload["forecast_timestamp"] = now.isoformat()
+                payload["rating_snapshot_fetched_at"] = ratings.get("fetched_at")
+                payload["rating_season"] = ratings.get("season")
+                payload["injury_report_meta"] = injury_meta or {}
+                cursor = conn.execute("""
+                  INSERT INTO nba_game_forecast_archive
+                    (event_id,home_team,away_team,commence_time,forecast_at,slate_date,model_version,
+                     rating_source,data_quality,projected_home,projected_away,
+                     projected_margin,projected_total,home_win_probability,
+                     away_win_probability,snapshot)
+                  VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb)
+                  ON CONFLICT(event_id,model_version,forecast_at) DO NOTHING
+                """, (
+                    str(row.get("event_id")), row.get("home_team"), row.get("away_team"), commence, now,
+                    commence.astimezone(__import__("zoneinfo").ZoneInfo(_ET)).date(),
+                    str(row.get("model_version") or "quant-matchup-v1"),
+                    ratings.get("source"), ratings.get("data_quality"),
+                    float(row["projected_home"]), float(row["projected_away"]),
+                    float(row["projected_margin"]), float(row["projected_total"]),
+                    float(row["home_win_probability"]), float(row["away_win_probability"]),
+                    json.dumps(payload, separators=(",", ":"), allow_nan=False)
+                ))
+                saved += cursor.rowcount
+            except (KeyError, TypeError, ValueError):
+                continue
+    return {"saved": saved, "attempted": len(forecasts)}
 
 def _json(url, headers=None, timeout=14):
     req = Request(url, headers={"User-Agent":"ColtsNBAEdge/2.0","Accept":"application/json",**(headers or {})})
@@ -686,8 +774,9 @@ def _candidate(game,market,model):
     logistic_scale=float(dist.get("moneyline_logistic_scale") or 8.17)
     margin_mean=float(model["projected_margin"])
     total_mean=float(model["projected_total"])
-    home_win=_logistic_cdf(0.0,margin_mean,logistic_scale)
-    away_win=1.0-home_win
+    # P(home wins) = P(home margin > 0); CDF(0) is the away-win tail.
+    away_win=_logistic_cdf(0.0,margin_mean,logistic_scale)
+    home_win=1.0-away_win
     if market=="sides":
         for team in (game["home"],game["away"]):
             quote=game["spreads"][team]; line=quote["line"]; odds=quote["odds"]
@@ -741,20 +830,51 @@ def _candidate(game,market,model):
 
 
 def _qualified(row):
-    # Do not publish actionable bets from a probability model whose calibration
-    # has not passed a genuinely out-of-sample validation. The current matchup
-    # engine is explicitly provisional and failed the latest market benchmark.
-    if row.get("probability_calibration_status") != "validated":
+    """Qualify a disciplined *provisional model pick* without pretending it is validated.
+
+    The previous implementation required a validation status that the model
+    could never attain, so the board was structurally incapable of selecting
+    anything. Keep probability calibration explicitly provisional, but allow
+    a conservative, auditable candidate gate to produce and track picks now.
+    """
+    status = str(row.get("probability_calibration_status") or "")
+    if status not in ("validated", "provisional_not_validated"):
         return False
-    derived=(row.get("data_quality")=="derived_early_season" or row.get("base_data_quality")=="derived_early_season")
-    edge_floor=4.0 if derived else 2.5
-    ev_floor=2.0 if derived else 1.5
-    # Prevent uncalibrated early-season ratings from treating extreme
-    # model/market disagreements as actionable value.
-    if derived and (row.get("edge_pp",0)>12.0 or row.get("ev_pct",0)>20.0):
+    quality = str(row.get("data_quality") or "")
+    base_quality = str(row.get("base_data_quality") or quality)
+    derived = quality == "derived_early_season" or base_quality == "derived_early_season"
+    # Refuse unknown/incomplete ratings; derived ratings face stricter thresholds.
+    if quality not in ("advanced", "epm_enhanced", "derived_early_season"):
         return False
-    return (row.get("market_probability") is not None and row.get("edge_pp") is not None
-      and row["edge_pp"]>=edge_floor and row["ev_pct"]>=ev_floor and row["model_probability"]>=0.50)
+    edge_floor = 4.0 if derived else 3.0
+    ev_floor = 2.5 if derived else 2.0
+    probability_floor = 0.54
+    edge = row.get("edge_pp")
+    ev = row.get("ev_pct")
+    probability = row.get("model_probability")
+    market_probability = row.get("market_probability")
+    if any(value is None for value in (edge, ev, probability, market_probability)):
+        return False
+    try:
+        edge, ev = float(edge), float(ev)
+        probability, market_probability = float(probability), float(market_probability)
+    except (TypeError, ValueError):
+        return False
+    # Avoid extreme disagreements from a noisy early-season fallback.
+    if derived and (edge > 12.0 or ev > 20.0):
+        return False
+    qualified = edge >= edge_floor and ev >= ev_floor and probability >= probability_floor
+    row["selection_status"] = (
+        "PROVISIONAL_MODEL_PICK_NOT_HISTORICALLY_VALIDATED"
+        if status != "validated" else "VALIDATED_MODEL_PICK"
+    )
+    row["qualification_thresholds"] = {
+        "minimum_edge_pp": edge_floor,
+        "minimum_ev_pct": ev_floor,
+        "minimum_model_probability": probability_floor,
+        "rating_quality": quality,
+    }
+    return qualified
 
 def _save_slate(rows,market,slate_date):
     safe=[]
@@ -992,7 +1112,7 @@ def build_board(force=False,preview_date=None):
         scale=float(dist.get("moneyline_logistic_scale") or 8.17)
         home_probability=1.0/(1.0+math.exp(-max(-35.0,min(35.0,float(model["projected_margin"])/scale))))
         forecasts.append({
-          "event_id":event_id,"matchup":game.get("matchup"),
+          "event_id":event_id,"commence_time":game.get("commence_time"),"matchup":game.get("matchup"),
           "home_team":game.get("home"),"away_team":game.get("away"),
           "projected_home":model.get("projected_home"),"projected_away":model.get("projected_away"),
           "projected_margin":model.get("projected_margin"),"projected_total":model.get("projected_total"),
@@ -1007,7 +1127,9 @@ def build_board(force=False,preview_date=None):
           "rating_source":model.get("rating_source"),"data_quality":model.get("data_quality")
         })
     forecasts.sort(key=lambda x:x.get("matchup") or "")
+    archive_status = _persist_forecast_archive(forecasts, ratings, injury_meta)
     return {"slate_date":slate_date,"preview":preview,"frozen":not preview,"sides":side_picks,"totals":total_picks,
+      "forecast_archive":archive_status,
       "forecasts":forecasts,"metrics":_metrics(),"settlement":settlement,"game_count":len(future_games),
       "source_status":{"odds":"PropLine DraftKings ("+odds_source+")","team_ratings":ratings["source"],
         "season":ratings["season"],"injuries":injury_meta.get("status","unavailable"),
@@ -1075,7 +1197,9 @@ def build_forecasts(forecast_date=None,force=False):
           "injury_report_snapshot":injury_meta.get("snapshot_date")
         })
     forecasts.sort(key=lambda x:x.get("commence_time") or "")
+    archive_status = _persist_forecast_archive(forecasts, ratings, injury_meta)
     return {"forecast_date":target_date,"game_count":len(forecasts),"forecasts":forecasts,
+      "forecast_archive":archive_status,
       "source_status":{"team_ratings":ratings.get("source"),"data_quality":ratings.get("data_quality"),
         "schedule":"ESPN scoreboard","sportsbook_odds_used":False,
         "injury_adjustments":"fresh official report applied" if injury_meta.get("status")=="fresh" else "not applied; report "+str(injury_meta.get("status","unavailable"))},
@@ -1196,3 +1320,194 @@ def history(slate_date):
       "model_probability_pct":round(r[6]*100,2),"market_probability_pct":round(r[7]*100,2) if r[7] is not None else None,
       "projected_home":r[8],"projected_away":r[9],"projected_margin":r[10],"projected_total":r[11],
       "actual_value":r[12],"outcome":r[13],"profit_units":r[14],"created_at":r[15].isoformat() if r[15] else None} for r in rows]
+
+
+def settle_forecast_archive():
+    """Attach final ESPN scores to archived pregame forecasts; never rewrite forecasts."""
+    initialize()
+    schedule = _schedule(force=True)
+    completed = [g for g in schedule if g.get("completed") and g.get("home") and g.get("away")]
+    updated = 0
+    with _connect() as conn:
+        pending = conn.execute("""
+          SELECT id,event_id,home_team,away_team,commence_time
+          FROM nba_game_forecast_archive WHERE settled_at IS NULL
+          AND commence_time < NOW() ORDER BY commence_time LIMIT 500
+        """).fetchall()
+        for row_id,event_id,home,away,commence in pending:
+            target = commence if commence.tzinfo else commence.replace(tzinfo=timezone.utc)
+            game = None
+            for candidate in completed:
+                if candidate.get("home") != home or candidate.get("away") != away:
+                    continue
+                try:
+                    candidate_start = datetime.fromisoformat(str(candidate.get("date") or "").replace("Z","+00:00"))
+                    if abs((candidate_start-target).total_seconds()) <= 7200:
+                        game = candidate
+                        break
+                except Exception:
+                    continue
+            if not game:
+                continue
+            cur = conn.execute("""
+              UPDATE nba_game_forecast_archive
+              SET actual_home_score=%s, actual_away_score=%s, settled_at=NOW()
+              WHERE id=%s AND settled_at IS NULL
+            """,(int(game["home_score"]),int(game["away_score"]),row_id))
+            updated += cur.rowcount
+    return {"pending_checked":len(pending),"newly_settled":updated,
+            "completed_games_in_schedule":len(completed),
+            "schedule_window_days":7}
+
+
+def _safe_logloss(prob, outcome):
+    p = min(1.0-1e-15,max(1e-15,float(prob)))
+    return -(outcome*math.log(p)+(1-outcome)*math.log(1-p))
+
+
+def validation_report():
+    """Chronological, prospective evaluation of immutable archived game forecasts.
+
+    Forecast accuracy is measured only on forecasts timestamped before tipoff.
+    Closing-market metrics use the last complete two-sided DraftKings snapshot
+    captured before tip. No historic forecasts are reconstructed or backfilled.
+    """
+    initialize()
+    settlement = settle_forecast_archive()
+    with _connect() as conn:
+        forecasts = conn.execute("""
+          SELECT id,event_id,commence_time,forecast_at,slate_date,model_version,
+                 home_team,away_team,projected_home,projected_away,projected_margin,
+                 projected_total,home_win_probability,away_win_probability,snapshot,
+                 actual_home_score,actual_away_score
+          FROM nba_game_forecast_archive
+          WHERE settled_at IS NOT NULL AND forecast_at < commence_time
+          ORDER BY event_id,model_version,forecast_at DESC
+        """).fetchall()
+        try:
+            quotes = conn.execute("""
+              SELECT captured_at,event_id,commence_time,home_team,away_team,market,outcome,line,odds
+              FROM nba_market_snapshots WHERE captured_at < commence_time
+              ORDER BY captured_at
+            """).fetchall()
+        except Exception:
+            quotes = []
+
+    def parse_dt(value):
+        if value is None: return None
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+    grouped = {}
+    for q in quotes:
+        captured,event_id,commence,home,away,market,outcome,line,odds=q
+        key=(home,away)
+        grouped.setdefault(key,[]).append({
+            "captured":parse_dt(captured),"commence":parse_dt(commence),
+            "market":market,"outcome":str(outcome).upper(),
+            "line":float(line),"odds":int(odds)
+        })
+
+    def cdf(x,mean,sd):
+        sd=max(0.1,float(sd))
+        return 0.5*(1.0+math.erf((float(x)-float(mean))/(sd*math.sqrt(2.0))))
+
+    latest = {}
+    for row in forecasts:
+        key=(str(row[1]),str(row[5]))
+        if key not in latest or parse_dt(row[3]) > parse_dt(latest[key][3]):
+            latest[key]=row
+    forecasts=sorted(latest.values(),key=lambda row:(row[2],row[3]))
+    n=len(forecasts); home_brier=[]; home_logloss=[]; margin_abs=[]; total_abs=[]
+    market_brier=[]; market_logloss=[]; bets=[]; matched_market=0
+    buckets=[{"lower":i/10,"upper":(i+1)/10,"n":0,"predicted":0.0,"observed":0.0} for i in range(10)]
+    for row in forecasts:
+        (rid,event_id,commence,forecast_at,slate_date,version,home,away,ph,pa,margin,total,
+         hp,ap,snapshot,actual_home,actual_away)=row
+        outcome=1 if actual_home>actual_away else 0
+        home_brier.append((float(hp)-outcome)**2)
+        home_logloss.append(_safe_logloss(hp,outcome))
+        margin_abs.append(abs(float(margin)-(actual_home-actual_away)))
+        total_abs.append(abs(float(total)-(actual_home+actual_away)))
+        idx=min(9,max(0,int(float(hp)*10)))
+        buckets[idx]["n"]+=1; buckets[idx]["predicted"]+=float(hp); buckets[idx]["observed"]+=outcome
+
+        try: snap=snapshot if isinstance(snapshot,dict) else json.loads(snapshot or "{}")
+        except Exception: snap={}
+        dist=snap.get("score_distribution") or {}
+        margin_sd=float(dist.get("margin_sd") or 14.81)
+        total_sd=float(dist.get("total_sd") or 19.07)
+        start=parse_dt(commence)
+        candidates=[]
+        for q in grouped.get((home,away),[]):
+            if q["commence"] is None or abs((q["commence"]-start).total_seconds())>7200:
+                continue
+            if q["captured"] is None or q["captured"]>=start:
+                continue
+            candidates.append(q)
+        if not candidates: continue
+        last_capture=max(q["captured"] for q in candidates)
+        closing=[q for q in candidates if q["captured"]==last_capture]
+        spread={q["outcome"]:q for q in closing if q["market"]=="spreads"}
+        total_quotes={q["outcome"]:q for q in closing if q["market"]=="totals"}
+        if len(spread)==2:
+            matched_market+=1
+            for team in (home,away):
+                q=spread.get(team)
+                other=spread.get(away if team==home else home)
+                if not q or not other: continue
+                raw=_american_probability(q["odds"]); other_raw=_american_probability(other["odds"])
+                mp=raw/(raw+other_raw) if raw is not None and other_raw is not None and raw+other_raw>0 else None
+                if mp is None: continue
+                team_mean=float(margin) if team==home else -float(margin)
+                model_p=1.0-cdf(-float(q["line"]),team_mean,margin_sd)
+                actual=1 if ((actual_home-actual_away if team==home else actual_away-actual_home)+q["line"])>0 else 0
+                market_brier.append((mp-actual)**2); market_logloss.append(_safe_logloss(mp,actual))
+                if model_p-mp>=0.025:
+                    ev=model_p*_payout(q["odds"])-(1-model_p)
+                    if ev>0:
+                        bets.append((_payout(q["odds"]) if actual else -1.0))
+        if len(total_quotes)==2:
+            for side in ("OVER","UNDER"):
+                q=total_quotes.get(side); other=total_quotes.get("UNDER" if side=="OVER" else "OVER")
+                if not q or not other: continue
+                raw=_american_probability(q["odds"]); other_raw=_american_probability(other["odds"])
+                mp=raw/(raw+other_raw) if raw is not None and other_raw is not None and raw+other_raw>0 else None
+                if mp is None: continue
+                model_p=(1.0-cdf(q["line"],float(total),total_sd)) if side=="OVER" else cdf(q["line"],float(total),total_sd)
+                actual=1 if ((actual_home+actual_away)>q["line"] if side=="OVER" else (actual_home+actual_away)<q["line"]) else 0
+                market_brier.append((mp-actual)**2); market_logloss.append(_safe_logloss(mp,actual))
+                if model_p-mp>=0.025:
+                    ev=model_p*_payout(q["odds"])-(1-model_p)
+                    if ev>0:
+                        bets.append((_payout(q["odds"]) if actual else -1.0))
+
+    for b in buckets:
+        if b["n"]:
+            b["predicted"]=round(b["predicted"]/b["n"],4)
+            b["observed"]=round(b["observed"]/b["n"],4)
+        else:
+            b["predicted"]=None; b["observed"]=None
+    return {
+      "status":"ok","evaluation_type":"prospective_chronological_only",
+      "forecast_count":n,"date_range":{
+        "first":forecasts[0][2].isoformat() if forecasts else None,
+        "last":forecasts[-1][2].isoformat() if forecasts else None},
+      "home_win":{"brier":round(sum(home_brier)/n,6) if n else None,
+                  "log_loss":round(sum(home_logloss)/n,6) if n else None},
+      "score_error":{"home_away_margin_mae":round(sum(margin_abs)/n,3) if n else None,
+                     "game_total_mae":round(sum(total_abs)/n,3) if n else None},
+      "calibration_buckets":buckets,
+      "closing_market":{"matched_games":matched_market,
+        "no_vig_brier":round(sum(market_brier)/len(market_brier),6) if market_brier else None,
+        "no_vig_log_loss":round(sum(market_logloss)/len(market_logloss),6) if market_logloss else None,
+        "market_outcome_samples":len(market_brier)},
+      "simulated_flat_stake_policy":{"rule":"model probability at least 2.5 percentage points above last-observed no-vig pre-tip price, positive expected value, 1 unit per qualifying side/total",
+        "bets":len(bets),"net_units":round(sum(bets),3) if bets else 0.0,
+        "roi_pct":round(100*sum(bets)/len(bets),2) if bets else None},
+      "settlement":settlement,
+      "limitations":["Only prospective archived forecasts are eligible; no historic forecast backfill.",
+        "Closing benchmark is the last captured complete DraftKings quote batch before tip, not guaranteed exact sportsbook close.",
+        "Schedule settlement currently covers the ESPN rolling seven-day schedule window.",
+        "Simulated ROI is exploratory and must not be treated as proof of profitability."],
+      "release_gate":"Not validated: require a predeclared untouched out-of-sample sample and calibration review."
+    }

@@ -4,9 +4,11 @@ on:
   push:
     branches:
       - research/ats-feature-study
+      - audit/game-model-root-cause
   pull_request:
     branches:
       - research/ats-feature-study
+      - audit/game-model-root-cause
   workflow_dispatch:
 
 permissions:
@@ -25,6 +27,6 @@ jobs:
         with:
           python-version: "3.12"
       - name: Compile Python sources
-        run: python -m py_compile src/api/index.py src/api/prediction_ledger.py src/api/slate_validation.py scripts/betting_performance_tracker.py
+        run: python -m py_compile src/api/index.py src/api/prediction_ledger.py src/api/slate_validation.py src/api/game_model.py src/api/quant_game_engine.py src/api/advanced_metrics.py scripts/betting_performance_tracker.py
       - name: Run tracker regression tests
-        run: python -m unittest tests.test_nba_settlement tests.test_betting_performance_tracker -v
+        run: python -m unittest tests.test_nba_settlement tests.test_betting_performance_tracker tests.test_game_model_probabilities -v

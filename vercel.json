@@ -23,6 +23,14 @@
     {
       "path": "/api/cron/freeze-daily",
       "schedule": "0 12 * * *"
+    },
+    {
+      "path": "/api/game-validation/collect",
+      "schedule": "0 14 * * *"
+    },
+    {
+      "path": "/api/game-forecasts",
+      "schedule": "15 11 * * *"
     }
   ],
   "git": {
