@@ -80,6 +80,8 @@ def initialize():
         CREATE TABLE IF NOT EXISTS nba_game_forecast_archive (
           id BIGSERIAL PRIMARY KEY,
           event_id TEXT NOT NULL,
+          home_team TEXT,
+          away_team TEXT,
           commence_time TIMESTAMPTZ NOT NULL,
           forecast_at TIMESTAMPTZ NOT NULL,
           slate_date DATE NOT NULL,
@@ -113,6 +115,8 @@ def initialize():
           ON nba_market_snapshots(event_id,market,outcome,captured_at DESC);
         CREATE INDEX IF NOT EXISTS nba_market_snapshots_capture
           ON nba_market_snapshots(captured_at DESC);
+        ALTER TABLE nba_game_forecast_archive ADD COLUMN IF NOT EXISTS home_team TEXT;
+        ALTER TABLE nba_game_forecast_archive ADD COLUMN IF NOT EXISTS away_team TEXT;
         ALTER TABLE nba_game_forecast_archive ADD COLUMN IF NOT EXISTS actual_home_score INTEGER;
         ALTER TABLE nba_game_forecast_archive ADD COLUMN IF NOT EXISTS actual_away_score INTEGER;
         ALTER TABLE nba_game_forecast_archive ADD COLUMN IF NOT EXISTS settled_at TIMESTAMPTZ;
@@ -142,14 +146,14 @@ def _persist_forecast_archive(forecasts, ratings, injury_meta=None):
                 payload["injury_report_meta"] = injury_meta or {}
                 cursor = conn.execute("""
                   INSERT INTO nba_game_forecast_archive
-                    (event_id,commence_time,forecast_at,slate_date,model_version,
+                    (event_id,home_team,away_team,commence_time,forecast_at,slate_date,model_version,
                      rating_source,data_quality,projected_home,projected_away,
                      projected_margin,projected_total,home_win_probability,
                      away_win_probability,snapshot)
-                  VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb)
+                  VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb)
                   ON CONFLICT(event_id,model_version,forecast_at) DO NOTHING
                 """, (
-                    str(row.get("event_id")), commence, now,
+                    str(row.get("event_id")), row.get("home_team"), row.get("away_team"), commence, now,
                     commence.astimezone(__import__("zoneinfo").ZoneInfo(_ET)).date(),
                     str(row.get("model_version") or "quant-matchup-v1"),
                     ratings.get("source"), ratings.get("data_quality"),
