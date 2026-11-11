@@ -326,7 +326,7 @@ def _team_ratings(force=False):
             if len(combined)<28:
                 raise RuntimeError("NBA Stats team ratings incomplete ("+str(len(combined))+"/30).")
             result={"teams":combined,"season":current,"prior_season":None,
-                    "source":"NBA Stats leaguedashteamstats Advanced; current season blended with prior season and recent 10-game form when available",
+                    "source":"NBA Stats leaguedashteamstats Advanced; current-season measured ratings conservatively shrunk toward league average",
                     "data_quality":"advanced","fetched_at":datetime.now(timezone.utc).isoformat(),
                     "fallback_used":False}
             _TEAM_CACHE.update({"at":now,"data":result})
