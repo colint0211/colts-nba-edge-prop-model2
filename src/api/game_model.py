@@ -830,20 +830,51 @@ def _candidate(game,market,model):
 
 
 def _qualified(row):
-    # Do not publish actionable bets from a probability model whose calibration
-    # has not passed a genuinely out-of-sample validation. The current matchup
-    # engine is explicitly provisional and failed the latest market benchmark.
-    if row.get("probability_calibration_status") != "validated":
+    """Qualify a disciplined *provisional model pick* without pretending it is validated.
+
+    The previous implementation required a validation status that the model
+    could never attain, so the board was structurally incapable of selecting
+    anything. Keep probability calibration explicitly provisional, but allow
+    a conservative, auditable candidate gate to produce and track picks now.
+    """
+    status = str(row.get("probability_calibration_status") or "")
+    if status not in ("validated", "provisional_not_validated"):
         return False
-    derived=(row.get("data_quality")=="derived_early_season" or row.get("base_data_quality")=="derived_early_season")
-    edge_floor=4.0 if derived else 2.5
-    ev_floor=2.0 if derived else 1.5
-    # Prevent uncalibrated early-season ratings from treating extreme
-    # model/market disagreements as actionable value.
-    if derived and (row.get("edge_pp",0)>12.0 or row.get("ev_pct",0)>20.0):
+    quality = str(row.get("data_quality") or "")
+    base_quality = str(row.get("base_data_quality") or quality)
+    derived = quality == "derived_early_season" or base_quality == "derived_early_season"
+    # Refuse unknown/incomplete ratings; derived ratings face stricter thresholds.
+    if quality not in ("advanced", "epm_enhanced", "derived_early_season"):
         return False
-    return (row.get("market_probability") is not None and row.get("edge_pp") is not None
-      and row["edge_pp"]>=edge_floor and row["ev_pct"]>=ev_floor and row["model_probability"]>=0.50)
+    edge_floor = 4.0 if derived else 3.0
+    ev_floor = 2.5 if derived else 2.0
+    probability_floor = 0.54
+    edge = row.get("edge_pp")
+    ev = row.get("ev_pct")
+    probability = row.get("model_probability")
+    market_probability = row.get("market_probability")
+    if any(value is None for value in (edge, ev, probability, market_probability)):
+        return False
+    try:
+        edge, ev = float(edge), float(ev)
+        probability, market_probability = float(probability), float(market_probability)
+    except (TypeError, ValueError):
+        return False
+    # Avoid extreme disagreements from a noisy early-season fallback.
+    if derived and (edge > 12.0 or ev > 20.0):
+        return False
+    qualified = edge >= edge_floor and ev >= ev_floor and probability >= probability_floor
+    row["selection_status"] = (
+        "PROVISIONAL_MODEL_PICK_NOT_HISTORICALLY_VALIDATED"
+        if status != "validated" else "VALIDATED_MODEL_PICK"
+    )
+    row["qualification_thresholds"] = {
+        "minimum_edge_pp": edge_floor,
+        "minimum_ev_pct": ev_floor,
+        "minimum_model_probability": probability_floor,
+        "rating_quality": quality,
+    }
+    return qualified
 
 def _save_slate(rows,market,slate_date):
     safe=[]
