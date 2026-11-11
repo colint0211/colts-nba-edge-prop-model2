@@ -97,6 +97,9 @@ def initialize():
         );
         CREATE INDEX IF NOT EXISTS nba_game_forecast_archive_event
           ON nba_game_forecast_archive(event_id, forecast_at DESC);
+        ALTER TABLE nba_game_forecast_archive ADD COLUMN IF NOT EXISTS actual_home_score INTEGER;
+        ALTER TABLE nba_game_forecast_archive ADD COLUMN IF NOT EXISTS actual_away_score INTEGER;
+        ALTER TABLE nba_game_forecast_archive ADD COLUMN IF NOT EXISTS settled_at TIMESTAMPTZ;
         """)
 
 
@@ -1058,7 +1061,7 @@ def build_board(force=False,preview_date=None):
         scale=float(dist.get("moneyline_logistic_scale") or 8.17)
         home_probability=1.0/(1.0+math.exp(-max(-35.0,min(35.0,float(model["projected_margin"])/scale))))
         forecasts.append({
-          "event_id":event_id,"matchup":game.get("matchup"),
+          "event_id":event_id,"commence_time":game.get("commence_time"),"matchup":game.get("matchup"),
           "home_team":game.get("home"),"away_team":game.get("away"),
           "projected_home":model.get("projected_home"),"projected_away":model.get("projected_away"),
           "projected_margin":model.get("projected_margin"),"projected_total":model.get("projected_total"),
@@ -1073,7 +1076,9 @@ def build_board(force=False,preview_date=None):
           "rating_source":model.get("rating_source"),"data_quality":model.get("data_quality")
         })
     forecasts.sort(key=lambda x:x.get("matchup") or "")
+    archive_status = _persist_forecast_archive(forecasts, ratings, injury_meta)
     return {"slate_date":slate_date,"preview":preview,"frozen":not preview,"sides":side_picks,"totals":total_picks,
+      "forecast_archive":archive_status,
       "forecasts":forecasts,"metrics":_metrics(),"settlement":settlement,"game_count":len(future_games),
       "source_status":{"odds":"PropLine DraftKings ("+odds_source+")","team_ratings":ratings["source"],
         "season":ratings["season"],"injuries":injury_meta.get("status","unavailable"),
@@ -1264,3 +1269,178 @@ def history(slate_date):
       "model_probability_pct":round(r[6]*100,2),"market_probability_pct":round(r[7]*100,2) if r[7] is not None else None,
       "projected_home":r[8],"projected_away":r[9],"projected_margin":r[10],"projected_total":r[11],
       "actual_value":r[12],"outcome":r[13],"profit_units":r[14],"created_at":r[15].isoformat() if r[15] else None} for r in rows]
+
+
+def settle_forecast_archive():
+    """Attach final ESPN scores to archived pregame forecasts; never rewrite forecasts."""
+    initialize()
+    schedule = _schedule(force=True)
+    completed = {(str(g.get("id")), g.get("home"), g.get("away")): g
+                 for g in schedule if g.get("completed") and g.get("home") and g.get("away")}
+    updated = 0
+    with _connect() as conn:
+        pending = conn.execute("""
+          SELECT id,event_id,home_team,away_team,commence_time
+          FROM nba_game_forecast_archive WHERE settled_at IS NULL
+          AND commence_time < NOW() ORDER BY commence_time LIMIT 500
+        """).fetchall()
+        for row_id,event_id,home,away,commence in pending:
+            game = completed.get((str(event_id),home,away))
+            if not game:
+                continue
+            cur = conn.execute("""
+              UPDATE nba_game_forecast_archive
+              SET actual_home_score=%s, actual_away_score=%s, settled_at=NOW()
+              WHERE id=%s AND settled_at IS NULL
+            """,(int(game["home_score"]),int(game["away_score"]),row_id))
+            updated += cur.rowcount
+    return {"pending_checked":len(pending),"newly_settled":updated,
+            "completed_games_in_schedule":len(completed),
+            "schedule_window_days":7}
+
+
+def _safe_logloss(prob, outcome):
+    p = min(1.0-1e-15,max(1e-15,float(prob)))
+    return -(outcome*math.log(p)+(1-outcome)*math.log(1-p))
+
+
+def validation_report():
+    """Chronological, prospective evaluation of immutable archived game forecasts.
+
+    Forecast accuracy is measured only on forecasts timestamped before tipoff.
+    Closing-market metrics use the last complete two-sided DraftKings snapshot
+    captured before tip. No historic forecasts are reconstructed or backfilled.
+    """
+    initialize()
+    settlement = settle_forecast_archive()
+    with _connect() as conn:
+        forecasts = conn.execute("""
+          SELECT id,event_id,commence_time,forecast_at,slate_date,model_version,
+                 home_team,away_team,projected_home,projected_away,projected_margin,
+                 projected_total,home_win_probability,away_win_probability,snapshot,
+                 actual_home_score,actual_away_score
+          FROM nba_game_forecast_archive
+          WHERE settled_at IS NOT NULL AND forecast_at < commence_time
+          ORDER BY commence_time,forecast_at
+        """).fetchall()
+        try:
+            quotes = conn.execute("""
+              SELECT captured_at,event_id,commence_time,home_team,away_team,market,outcome,line,odds
+              FROM nba_market_snapshots WHERE captured_at < commence_time
+              ORDER BY captured_at
+            """).fetchall()
+        except Exception:
+            quotes = []
+
+    def parse_dt(value):
+        if value is None: return None
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+    grouped = {}
+    for q in quotes:
+        captured,event_id,commence,home,away,market,outcome,line,odds=q
+        key=(home,away)
+        grouped.setdefault(key,[]).append({
+            "captured":parse_dt(captured),"commence":parse_dt(commence),
+            "market":market,"outcome":str(outcome).upper(),
+            "line":float(line),"odds":int(odds)
+        })
+
+    def cdf(x,mean,sd):
+        sd=max(0.1,float(sd))
+        return 0.5*(1.0+math.erf((float(x)-float(mean))/(sd*math.sqrt(2.0))))
+
+    n=len(forecasts); home_brier=[]; home_logloss=[]; margin_abs=[]; total_abs=[]
+    market_brier=[]; market_logloss=[]; bets=[]; matched_market=0
+    buckets=[{"lower":i/10,"upper":(i+1)/10,"n":0,"predicted":0.0,"observed":0.0} for i in range(10)]
+    for row in forecasts:
+        (rid,event_id,commence,forecast_at,slate_date,version,home,away,ph,pa,margin,total,
+         hp,ap,snapshot,actual_home,actual_away)=row
+        outcome=1 if actual_home>actual_away else 0
+        home_brier.append((float(hp)-outcome)**2)
+        home_logloss.append(_safe_logloss(hp,outcome))
+        margin_abs.append(abs(float(margin)-(actual_home-actual_away)))
+        total_abs.append(abs(float(total)-(actual_home+actual_away)))
+        idx=min(9,max(0,int(float(hp)*10)))
+        buckets[idx]["n"]+=1; buckets[idx]["predicted"]+=float(hp); buckets[idx]["observed"]+=outcome
+
+        try: snap=snapshot if isinstance(snapshot,dict) else json.loads(snapshot or "{}")
+        except Exception: snap={}
+        dist=snap.get("score_distribution") or {}
+        margin_sd=float(dist.get("margin_sd") or 14.81)
+        total_sd=float(dist.get("total_sd") or 19.07)
+        start=parse_dt(commence)
+        candidates=[]
+        for q in grouped.get((home,away),[]):
+            if q["commence"] is None or abs((q["commence"]-start).total_seconds())>7200:
+                continue
+            if q["captured"] is None or q["captured"]>=start:
+                continue
+            candidates.append(q)
+        if not candidates: continue
+        last_capture=max(q["captured"] for q in candidates)
+        closing=[q for q in candidates if q["captured"]==last_capture]
+        spread={q["outcome"]:q for q in closing if q["market"]=="spreads"}
+        total_quotes={q["outcome"]:q for q in closing if q["market"]=="totals"}
+        if len(spread)==2:
+            matched_market+=1
+            for team in (home,away):
+                q=spread.get(team)
+                other=spread.get(away if team==home else home)
+                if not q or not other: continue
+                raw=_american_probability(q["odds"]); other_raw=_american_probability(other["odds"])
+                mp=raw/(raw+other_raw) if raw is not None and other_raw is not None and raw+other_raw>0 else None
+                if mp is None: continue
+                team_mean=float(margin) if team==home else -float(margin)
+                model_p=1.0-cdf(-float(q["line"]),team_mean,margin_sd)
+                actual=1 if ((actual_home-actual_away if team==home else actual_away-actual_home)+q["line"])>0 else 0
+                market_brier.append((mp-actual)**2); market_logloss.append(_safe_logloss(mp,actual))
+                if model_p-mp>=0.025:
+                    ev=model_p*_payout(q["odds"])-(1-model_p)
+                    if ev>0:
+                        bets.append((_payout(q["odds"]) if actual else -1.0))
+        if len(total_quotes)==2:
+            for side in ("OVER","UNDER"):
+                q=total_quotes.get(side); other=total_quotes.get("UNDER" if side=="OVER" else "OVER")
+                if not q or not other: continue
+                raw=_american_probability(q["odds"]); other_raw=_american_probability(other["odds"])
+                mp=raw/(raw+other_raw) if raw is not None and other_raw is not None and raw+other_raw>0 else None
+                if mp is None: continue
+                model_p=(1.0-cdf(q["line"],float(total),total_sd)) if side=="OVER" else cdf(q["line"],float(total),total_sd)
+                actual=1 if ((actual_home+actual_away)>q["line"] if side=="OVER" else (actual_home+actual_away)<q["line"]) else 0
+                market_brier.append((mp-actual)**2); market_logloss.append(_safe_logloss(mp,actual))
+                if model_p-mp>=0.025:
+                    ev=model_p*_payout(q["odds"])-(1-model_p)
+                    if ev>0:
+                        bets.append((_payout(q["odds"]) if actual else -1.0))
+
+    for b in buckets:
+        if b["n"]:
+            b["predicted"]=round(b["predicted"]/b["n"],4)
+            b["observed"]=round(b["observed"]/b["n"],4)
+        else:
+            b["predicted"]=None; b["observed"]=None
+    return {
+      "status":"ok","evaluation_type":"prospective_chronological_only",
+      "forecast_count":n,"date_range":{
+        "first":forecasts[0][2].isoformat() if forecasts else None,
+        "last":forecasts[-1][2].isoformat() if forecasts else None},
+      "home_win":{"brier":round(sum(home_brier)/n,6) if n else None,
+                  "log_loss":round(sum(home_logloss)/n,6) if n else None},
+      "score_error":{"home_away_margin_mae":round(sum(margin_abs)/n,3) if n else None,
+                     "game_total_mae":round(sum(total_abs)/n,3) if n else None},
+      "calibration_buckets":buckets,
+      "closing_market":{"matched_games":matched_market,
+        "no_vig_brier":round(sum(market_brier)/len(market_brier),6) if market_brier else None,
+        "no_vig_log_loss":round(sum(market_logloss)/len(market_logloss),6) if market_logloss else None,
+        "market_outcome_samples":len(market_brier)},
+      "simulated_flat_stake_policy":{"rule":"model probability at least 2.5 percentage points above last-observed no-vig pre-tip price, positive expected value, 1 unit per qualifying side/total",
+        "bets":len(bets),"net_units":round(sum(bets),3) if bets else 0.0,
+        "roi_pct":round(100*sum(bets)/len(bets),2) if bets else None},
+      "settlement":settlement,
+      "limitations":["Only prospective archived forecasts are eligible; no historic forecast backfill.",
+        "Closing benchmark is the last captured complete DraftKings quote batch before tip, not guaranteed exact sportsbook close.",
+        "Schedule settlement currently covers the ESPN rolling seven-day schedule window.",
+        "Simulated ROI is exploratory and must not be treated as proof of profitability."],
+      "release_gate":"Not validated: require a predeclared untouched out-of-sample sample and calibration review."
+    }
