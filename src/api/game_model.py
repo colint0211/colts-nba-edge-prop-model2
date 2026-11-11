@@ -131,7 +131,7 @@ def _persist_forecast_archive(forecasts, ratings, injury_meta=None):
                   ON CONFLICT(event_id,model_version,forecast_at) DO NOTHING
                 """, (
                     str(row.get("event_id")), commence, now,
-                    str(row.get("commence_time"))[:10],
+                    commence.astimezone(__import__("zoneinfo").ZoneInfo(_ET)).date(),
                     str(row.get("model_version") or "quant-matchup-v1"),
                     ratings.get("source"), ratings.get("data_quality"),
                     float(row["projected_home"]), float(row["projected_away"]),
