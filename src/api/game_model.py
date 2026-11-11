@@ -208,32 +208,65 @@ def _parse_game_lines(events):
     return rows
 
 def _nba_stats(season,last_n=0):
-    params={
-      "LeagueID":"00","Season":season,"SeasonType":"Regular Season","MeasureType":"Advanced",
-      "PerMode":"PerGame","PlusMinus":"N","PaceAdjust":"N","Rank":"N","LastNGames":str(last_n),
-      "Month":"0","OpponentTeamID":"0","Location":"","Outcome":"","DateFrom":"","DateTo":"",
-      "SeasonSegment":"","VsConference":"","VsDivision":""
+    """Fetch measured Advanced team ratings through the official NBA Stats JSON API.
+
+    nba_api is a thin, free wrapper around stats.nba.com. It does not bypass
+    NBA network restrictions; failures are surfaced to the existing Tank01
+    fallback rather than silently presenting estimated values as official.
+    """
+    from nba_api.stats.endpoints import leaguedashteamstats
+
+    headers={
+        "Host":"stats.nba.com",
+        "User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        "Accept":"application/json, text/plain, */*",
+        "Accept-Language":"en-US,en;q=0.9",
+        "Referer":"https://www.nba.com/",
+        "Origin":"https://www.nba.com",
+        "Connection":"keep-alive",
+        "x-nba-stats-origin":"stats",
+        "x-nba-stats-token":"true"
     }
-    url="https://stats.nba.com/stats/leaguedashteamstats?"+urlencode(params)
-    headers={"Referer":"https://www.nba.com/","Origin":"https://www.nba.com","x-nba-stats-origin":"stats","x-nba-stats-token":"true"}
-    payload,_=_json(url,headers,30)
-    sets=payload.get("resultSets") or payload.get("resultSet") or []
-    if isinstance(sets,dict): sets=[sets]
-    target=next((x for x in sets if isinstance(x,dict) and "headers" in x and "rowSet" in x),None)
-    if not target: raise RuntimeError("NBA Stats did not return team advanced ratings.")
-    headers=target["headers"]; rows=target["rowSet"]; out={}
-    for row in rows:
-        item=dict(zip(headers,row))
+    endpoint=leaguedashteamstats.LeagueDashTeamStats(
+        season=season,
+        season_type_all_star="Regular Season",
+        measure_type_detailed_defense="Advanced",
+        per_mode_detailed="PerGame",
+        league_id_nullable="00",
+        last_n_games=last_n,
+        month=0,
+        opponent_team_id=0,
+        pace_adjust="N",
+        plus_minus="N",
+        rank="N",
+        timeout=35,
+        headers=headers
+    )
+    frames=endpoint.get_data_frames()
+    if not frames:
+        raise RuntimeError("nba_api returned no Advanced team stats data frame.")
+    rows=frames[0].to_dict(orient="records")
+    out={}
+    for item in rows:
         code=_canonical(item.get("TEAM_ABBREVIATION"))
         if not code: continue
+        try:
+            games=int(item.get("GP") or 0)
+            ortg=float(item.get("OFF_RATING"))
+            drtg=float(item.get("DEF_RATING"))
+            net=float(item.get("NET_RATING"))
+            pace=float(item.get("PACE"))
+        except (TypeError,ValueError):
+            continue
+        if not all(math.isfinite(v) for v in (ortg,drtg,net,pace)):
+            continue
         out[code]={
-          "team":code,"games":int(item.get("GP") or 0),
-          "ortg":float(item.get("OFF_RATING")),"drtg":float(item.get("DEF_RATING")),
-          "net":float(item.get("NET_RATING")),"pace":float(item.get("PACE")),
+          "team":code,"games":games,"ortg":ortg,"drtg":drtg,"net":net,"pace":pace,
           "efg":float(item.get("EFG_PCT") or 0),"tov":float(item.get("TM_TOV_PCT") or 0),
           "oreb":float(item.get("OREB_PCT") or 0),"ts":float(item.get("TS_PCT") or 0)
         }
-    if len(out)<28: raise RuntimeError("NBA Stats team ratings incomplete ("+str(len(out))+"/30).")
+    if len(out)<28:
+        raise RuntimeError("nba_api Advanced team table incomplete ("+str(len(out))+"/30).")
     return out
 
 def _tank01_ratings(force=False):
