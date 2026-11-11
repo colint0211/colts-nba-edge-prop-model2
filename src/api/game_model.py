@@ -782,7 +782,7 @@ def build_board(force=False,preview_date=None):
     return {"slate_date":slate_date,"preview":preview,"frozen":not preview,"sides":side_picks,"totals":total_picks,
       "metrics":_metrics(),"settlement":settlement,"game_count":len(future_games),
       "source_status":{"odds":"PropLine DraftKings ("+odds_source+")","team_ratings":ratings["source"],
-        "season":ratings["season"],"injuries":injury_meta.get("status","unavailable"),
+        "season":ratings["season"],"team_rating_quality":ratings.get("data_quality"),"team_rating_fallback_used":ratings.get("fallback_used",False),"team_rating_fallback_reason":ratings.get("fallback_reason"),"team_count":len(ratings.get("teams") or {}),"injuries":injury_meta.get("status","unavailable"),
         "player_impact":"True EPM/on-off not integrated; uncertain rotation availability blocks the game; known OUT players are disclosed but not individually valued",
         "reviewed_games":len(review_games),"prop_line_quota":quota,"saved_sides":side_saved,"saved_totals":total_saved,
         "unavailable_games":unique_unavailable[:10]},
