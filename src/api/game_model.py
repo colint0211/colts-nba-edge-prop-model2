@@ -208,6 +208,62 @@ def _parse_game_lines(events):
     return rows
 
 def _nba_stats(season,last_n=0):
+    """Fetch official NBA Advanced team ratings through Apify when configured.
+
+    The Apify Actor runs outside Vercel, avoiding the NBA Stats connection
+    timeout seen in Vercel serverless. Its flat-row output is accepted only
+    when all required Advanced fields are present for at least 28 teams.
+    """
+    apify_token=(os.getenv("APIFY_API_TOKEN") or os.getenv("APIFY_TOKEN") or "").strip()
+    if apify_token:
+        endpoint="https://api.apify.com/v2/acts/parseforge~nba-stats-scraper/run-sync-get-dataset-items"
+        body=json.dumps({"endpoint":"leaguedashteamstats","season":season,
+                         "seasonType":"Regular Season","maxItems":100}).encode()
+        req=Request(endpoint, data=body, method="POST", headers={
+            "Authorization":"Bearer "+apify_token,
+            "Content-Type":"application/json","Accept":"application/json"})
+        with urlopen(req, timeout=100) as response:
+            payload=json.loads(response.read().decode("utf-8","replace"))
+        if isinstance(payload,dict):
+            # Accommodate dataset wrappers as well as the documented flat rows.
+            payload=payload.get("items") or payload.get("data") or payload.get("results") or []
+        rows=[]
+        if isinstance(payload,list):
+            for entry in payload:
+                if not isinstance(entry,dict): continue
+                if "headers" in entry and ("rowSet" in entry or "rowset" in entry):
+                    cols=entry.get("headers") or []
+                    rows.extend(dict(zip(cols,row)) for row in (entry.get("rowSet") or entry.get("rowset") or []))
+                else:
+                    rows.append(entry)
+        out={}
+        for item in rows:
+            normalized={str(k).upper():v for k,v in item.items()}
+            code=_canonical(normalized.get("TEAM_ABBREVIATION") or normalized.get("TEAM_ABV")
+                            or normalized.get("TEAM") or normalized.get("TEAM_NAME"))
+            if not code: continue
+            try:
+                games=int(float(normalized.get("GP") or normalized.get("GAMES_PLAYED") or 0))
+                ortg=float(normalized["OFF_RATING"]); drtg=float(normalized["DEF_RATING"])
+                pace=float(normalized["PACE"])
+                net=float(normalized.get("NET_RATING",ortg-drtg))
+            except (KeyError,TypeError,ValueError):
+                continue
+            if not all(math.isfinite(x) for x in (ortg,drtg,pace,net)) or pace<=0:
+                continue
+            def metric(key):
+                try:
+                    value=float(normalized.get(key) or 0)
+                    return value if math.isfinite(value) else 0.0
+                except (TypeError,ValueError): return 0.0
+            out[code]={"team":code,"games":games,"ortg":ortg,"drtg":drtg,"net":net,
+                       "pace":pace,"efg":metric("EFG_PCT"),"tov":metric("TM_TOV_PCT"),
+                       "oreb":metric("OREB_PCT"),"ts":metric("TS_PCT")}
+        if len(out)<28:
+            raise RuntimeError("Apify NBA Stats output lacks a complete Advanced team table ("+str(len(out))+"/30); required OFF_RATING, DEF_RATING and PACE.")
+        return out
+
+    # Direct NBA Stats is retained as a no-token fallback for local testing.
     params={
       "LeagueID":"00","Season":season,"SeasonType":"Regular Season","MeasureType":"Advanced",
       "PerMode":"PerGame","PlusMinus":"N","PaceAdjust":"N","Rank":"N","LastNGames":str(last_n),
@@ -326,7 +382,7 @@ def _team_ratings(force=False):
             if len(combined)<28:
                 raise RuntimeError("NBA Stats team ratings incomplete ("+str(len(combined))+"/30).")
             result={"teams":combined,"season":current,"prior_season":None,
-                    "source":"NBA Stats leaguedashteamstats Advanced; current-season measured ratings conservatively shrunk toward league average",
+                    "source":("Apify ParseForge NBA Stats scraper; leaguedashteamstats Advanced" if (os.getenv("APIFY_API_TOKEN") or os.getenv("APIFY_TOKEN")) else "NBA Stats leaguedashteamstats Advanced")+"; current-season measured ratings conservatively shrunk toward league average",
                     "data_quality":"advanced","fetched_at":datetime.now(timezone.utc).isoformat(),
                     "fallback_used":False}
             _TEAM_CACHE.update({"at":now,"data":result})
