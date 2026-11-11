@@ -81,6 +81,20 @@ Use a chronological train / calibration / untouched test split. Never calibrate 
 - `src/api/prediction_ledger.py`
 - `tests/test_nba_settlement.py`
 
+## Validation pipeline implementation (2026-11-10)
+
+The audit branch now includes:
+- Immutable pregame forecast persistence from both the independent forecast endpoint and the scheduled game-board build.
+- Daily scheduled settlement of archived forecasts against completed ESPN scoreboard results. Settlement matches verified home/away teams and tip time, so ESPN and PropLine event IDs do not need to be identical.
+- A secured /api/game-validation/collect endpoint protected by CRON_SECRET.
+- A /api/game-validation/report endpoint with chronological forecast accuracy, home-win Brier score/log loss, margin and total MAE, calibration buckets, last-observed pre-tip DraftKings no-vig benchmark, and an explicitly exploratory flat-stake simulation.
+- One latest pregame forecast per event/model version in the report, preventing repeated refreshes from overweighting a game.
+- A daily Vercel cron at 14:00 UTC to settle completed forecasts.
+
+The daily /api/game-board cron also persists the full pregame forecast archive. DraftKings quote capture remains on its existing scheduled job. The closing benchmark is the latest complete captured pre-tip quote, not a guaranteed exact sportsbook close.
+
+The report intentionally returns insufficient-sample results when no settled prospective forecasts exist. It does not reconstruct past forecasts from current data and does not automatically promote calibration status to validated.
+
 ## Scope of this audit branch
 
-This commit records verified findings and the acceptance criteria. It deliberately does not change the prediction formula, data source, betting thresholds, production deployment, or existing ledger records. The next implementation step is to add the immutable all-game forecast archive and chronological replay evaluator, then run it against the available historical snapshots. If the database lacks sufficient pregame snapshots, the report must say so rather than fabricate a backtest.
+This commit records verified findings and the acceptance criteria. It deliberately does not change the prediction formula, data source, betting thresholds, production deployment, or existing ledger records. The engineering pipeline is implemented in this branch. Remaining proof is operational: merge/deploy it, confirm the Vercel cron and database permissions, and accumulate settled prospective forecasts. If the database lacks sufficient pregame snapshots, the report must say so rather than fabricate a backtest.
