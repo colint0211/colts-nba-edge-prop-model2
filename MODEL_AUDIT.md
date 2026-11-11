@@ -89,9 +89,10 @@ The audit branch now includes:
 - A secured /api/game-validation/collect endpoint protected by CRON_SECRET.
 - A /api/game-validation/report endpoint with chronological forecast accuracy, home-win Brier score/log loss, margin and total MAE, calibration buckets, last-observed pre-tip DraftKings no-vig benchmark, and an explicitly exploratory flat-stake simulation.
 - One latest pregame forecast per event/model version in the report, preventing repeated refreshes from overweighting a game.
+- A daily Vercel cron at 11:15 UTC to archive the full pregame forecast slate, before the 12:00 UTC board/odds capture.
 - A daily Vercel cron at 14:00 UTC to settle completed forecasts.
 
-The daily /api/game-board cron also persists the full pregame forecast archive. DraftKings quote capture remains on its existing scheduled job. The closing benchmark is the latest complete captured pre-tip quote, not a guaranteed exact sportsbook close.
+The dedicated /api/game-forecasts cron captures the full slate even if the game board has already frozen its official picks. The /api/game-board cron also persists forecasts when it rebuilds the board. DraftKings quote capture remains on its existing scheduled job. The closing benchmark is the latest complete captured pre-tip quote, not a guaranteed exact sportsbook close.
 
 The report intentionally returns insufficient-sample results when no settled prospective forecasts exist. It does not reconstruct past forecasts from current data and does not automatically promote calibration status to validated.
 
