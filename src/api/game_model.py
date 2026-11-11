@@ -210,9 +210,9 @@ def _parse_game_lines(events):
 def _nba_stats(season,last_n=0):
     """Read a validated official NBA Stats snapshot, then try the live API.
 
-    GitHub Actions fetches the official NBA Stats JSON outside Vercel and
-    commits a timestamped snapshot. Vercel can read that bundled file even
-    when stats.nba.com blocks or times out its cloud egress.
+    GitHub Actions fetches a validated Basketball-Reference snapshot and
+    commits it to the preview branch. NBA Stats remains a final live attempt,
+    but is known to time out from hosted cloud egress.
     """
     snapshot_path=os.path.join(os.path.dirname(__file__),"..","..","data","nba_team_advanced.json")
     try:
@@ -221,7 +221,7 @@ def _nba_stats(season,last_n=0):
         fetched=datetime.fromisoformat(str(snapshot.get("fetched_at","")).replace("Z","+00:00"))
         age=(datetime.now(timezone.utc)-fetched.astimezone(timezone.utc)).total_seconds()
         cached=snapshot.get("teams") or {}
-        if (snapshot.get("source")=="NBA Stats leaguedashteamstats Advanced"
+        if (snapshot.get("source")=="Basketball-Reference NBA team ratings and advanced stats"
                 and snapshot.get("season")==season and snapshot.get("team_count")==30
                 and len(cached)==30 and 0<=age<=86400):
             required=set(_TEAM_NAMES)
@@ -342,56 +342,45 @@ def _tank01_ratings(force=False):
 
 
 def _team_ratings(force=False):
-    """Prefer official NBA.com Advanced team ratings; fall back only if unavailable.
-
-    NBA Stats supplies measured ORtg, DRtg, pace and efficiency factors.
-    The Tank01 path remains a clearly labeled resilience fallback, not the
-    default source. USE_NBA_STATS_TEAM_RATINGS=0 can temporarily disable NBA.com.
-    """
+    """Prefer a validated Basketball-Reference team ratings snapshot."""
     now=time.time()
     if not force and _TEAM_CACHE["data"] and now-_TEAM_CACHE["at"]<21600:
         return _TEAM_CACHE["data"]
 
-    use_nba=os.getenv("USE_NBA_STATS_TEAM_RATINGS","1").strip().lower() not in ("0","false","no","off")
     nba_error=None
-    if use_nba:
-        try:
-            current_year=datetime.now(timezone.utc).year
-            season_start=current_year if datetime.now(timezone.utc).month>=7 else current_year-1
-            current=f"{season_start}-{str(season_start+1)[-2:]}"
-            previous=f"{season_start-1}-{str(season_start)[-2:]}"
-            current_stats=_nba_stats(current,0)
-            # Use one measured NBA Stats request per refresh. Additional prior-
-            # season and rolling-window requests made the live endpoint time out.
-            # Early-season values are conservatively shrunk toward the league mean.
-            league={key:sum(row[key] for row in current_stats.values())/len(current_stats)
-                    for key in ("ortg","drtg","pace","efg","tov","oreb","ts")}
-            combined={}
-            for team,cur in current_stats.items():
-                games=cur["games"]
-                prior_weight=max(0.12,min(0.65,8.0/(games+8.0))) if games>0 else 0.65
-                row={key:cur[key]*(1-prior_weight)+league[key]*prior_weight
-                     for key in ("ortg","drtg","pace","efg","tov","oreb","ts")}
-                row.update({"games":games,"net":row["ortg"]-row["drtg"],
-                            "prior_weight":prior_weight,"recent_sample":0,
-                            "source":"NBA Stats official Advanced team ratings"})
-                combined[team]=row
-            if len(combined)<28:
-                raise RuntimeError("NBA Stats team ratings incomplete ("+str(len(combined))+"/30).")
-            result={"teams":combined,"season":current,"prior_season":None,
-                    "source":"NBA Stats leaguedashteamstats Advanced; current-season measured ratings conservatively shrunk toward league average",
-                    "data_quality":"advanced","fetched_at":datetime.now(timezone.utc).isoformat(),
-                    "fallback_used":False}
-            _TEAM_CACHE.update({"at":now,"data":result})
-            return result
-        except Exception as exc:
-            nba_error=type(exc).__name__+": "+str(exc)[:180]
+    try:
+        current_year=datetime.now(timezone.utc).year
+        season_start=current_year if datetime.now(timezone.utc).month>=7 else current_year-1
+        current=f"{season_start}-{str(season_start+1)[-2:]}"
+        current_stats=_nba_stats(current,0)
+        league={key:sum(row[key] for row in current_stats.values())/len(current_stats)
+                for key in ("ortg","drtg","pace","efg","tov","oreb","ts")}
+        combined={}
+        for team,cur in current_stats.items():
+            games=cur["games"]
+            prior_weight=max(0.12,min(0.65,8.0/(games+8.0))) if games>0 else 0.65
+            row={key:cur[key]*(1-prior_weight)+league[key]*prior_weight
+                 for key in ("ortg","drtg","pace","efg","tov","oreb","ts")}
+            row.update({"games":games,"net":row["ortg"]-row["drtg"],
+                        "prior_weight":prior_weight,"recent_sample":0,
+                        "source":"Basketball-Reference current-season team ratings"})
+            combined[team]=row
+        if len(combined)!=30:
+            raise RuntimeError("Basketball-Reference team ratings incomplete ("+str(len(combined))+"/30).")
+        result={"teams":combined,"season":current,"prior_season":None,
+                "source":"Basketball-Reference NBA team ratings and advanced stats; current-season ratings conservatively shrunk toward league average",
+                "data_quality":"basketball_reference","fetched_at":datetime.now(timezone.utc).isoformat(),
+                "fallback_used":False,"primary_source":"Basketball-Reference"}
+        _TEAM_CACHE.update({"at":now,"data":result})
+        return result
+    except Exception as exc:
+        nba_error=type(exc).__name__+": "+str(exc)[:180]
 
     fallback=_tank01_ratings(force=True)
     fallback=dict(fallback)
     fallback["fallback_used"]=True
-    fallback["primary_source"]="NBA Stats leaguedashteamstats Advanced"
-    fallback["fallback_reason"]=nba_error or "NBA Stats disabled by USE_NBA_STATS_TEAM_RATINGS"
+    fallback["primary_source"]="Basketball-Reference team ratings and advanced stats"
+    fallback["fallback_reason"]=nba_error or "Basketball-Reference snapshot unavailable"
     _TEAM_CACHE.update({"at":now,"data":fallback})
     return fallback
 
