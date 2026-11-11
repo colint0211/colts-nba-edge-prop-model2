@@ -77,7 +77,72 @@ def initialize():
           market TEXT NOT NULL, slate_date TEXT NOT NULL, candidates JSONB NOT NULL DEFAULT '[]'::jsonb,
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY(market,slate_date)
         );
+        CREATE TABLE IF NOT EXISTS nba_game_forecast_archive (
+          id BIGSERIAL PRIMARY KEY,
+          event_id TEXT NOT NULL,
+          commence_time TIMESTAMPTZ NOT NULL,
+          forecast_at TIMESTAMPTZ NOT NULL,
+          slate_date DATE NOT NULL,
+          model_version TEXT NOT NULL,
+          rating_source TEXT,
+          data_quality TEXT,
+          projected_home DOUBLE PRECISION NOT NULL,
+          projected_away DOUBLE PRECISION NOT NULL,
+          projected_margin DOUBLE PRECISION NOT NULL,
+          projected_total DOUBLE PRECISION NOT NULL,
+          home_win_probability DOUBLE PRECISION NOT NULL,
+          away_win_probability DOUBLE PRECISION NOT NULL,
+          snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+          UNIQUE(event_id, model_version, forecast_at)
+        );
+        CREATE INDEX IF NOT EXISTS nba_game_forecast_archive_event
+          ON nba_game_forecast_archive(event_id, forecast_at DESC);
         """)
+
+
+def _persist_forecast_archive(forecasts, ratings, injury_meta=None):
+    """Append immutable, timestamped forecasts for every scheduled game.
+
+    This is a prospective archive. It intentionally does not backfill historical
+    predictions from today's ratings or injury reports.
+    """
+    if not forecasts:
+        return {"saved": 0, "attempted": 0}
+    now = datetime.now(timezone.utc)
+    saved = 0
+    with _connect() as conn:
+        for row in forecasts:
+            try:
+                commence = datetime.fromisoformat(str(row.get("commence_time") or "").replace("Z", "+00:00"))
+                if commence.tzinfo is None or commence <= now:
+                    continue
+                payload = dict(row)
+                payload["forecast_timestamp"] = now.isoformat()
+                payload["rating_snapshot_fetched_at"] = ratings.get("fetched_at")
+                payload["rating_season"] = ratings.get("season")
+                payload["injury_report_meta"] = injury_meta or {}
+                cursor = conn.execute("""
+                  INSERT INTO nba_game_forecast_archive
+                    (event_id,commence_time,forecast_at,slate_date,model_version,
+                     rating_source,data_quality,projected_home,projected_away,
+                     projected_margin,projected_total,home_win_probability,
+                     away_win_probability,snapshot)
+                  VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb)
+                  ON CONFLICT(event_id,model_version,forecast_at) DO NOTHING
+                """, (
+                    str(row.get("event_id")), commence, now,
+                    str(row.get("commence_time"))[:10],
+                    str(row.get("model_version") or "quant-matchup-v1"),
+                    ratings.get("source"), ratings.get("data_quality"),
+                    float(row["projected_home"]), float(row["projected_away"]),
+                    float(row["projected_margin"]), float(row["projected_total"]),
+                    float(row["home_win_probability"]), float(row["away_win_probability"]),
+                    json.dumps(payload, separators=(",", ":"), allow_nan=False)
+                ))
+                saved += cursor.rowcount
+            except (KeyError, TypeError, ValueError):
+                continue
+    return {"saved": saved, "attempted": len(forecasts)}
 
 def _json(url, headers=None, timeout=14):
     req = Request(url, headers={"User-Agent":"ColtsNBAEdge/2.0","Accept":"application/json",**(headers or {})})
@@ -686,8 +751,9 @@ def _candidate(game,market,model):
     logistic_scale=float(dist.get("moneyline_logistic_scale") or 8.17)
     margin_mean=float(model["projected_margin"])
     total_mean=float(model["projected_total"])
-    home_win=_logistic_cdf(0.0,margin_mean,logistic_scale)
-    away_win=1.0-home_win
+    # P(home wins) = P(home margin > 0); CDF(0) is the away-win tail.
+    away_win=_logistic_cdf(0.0,margin_mean,logistic_scale)
+    home_win=1.0-away_win
     if market=="sides":
         for team in (game["home"],game["away"]):
             quote=game["spreads"][team]; line=quote["line"]; odds=quote["odds"]
@@ -1075,7 +1141,9 @@ def build_forecasts(forecast_date=None,force=False):
           "injury_report_snapshot":injury_meta.get("snapshot_date")
         })
     forecasts.sort(key=lambda x:x.get("commence_time") or "")
+    archive_status = _persist_forecast_archive(forecasts, ratings, injury_meta)
     return {"forecast_date":target_date,"game_count":len(forecasts),"forecasts":forecasts,
+      "forecast_archive":archive_status,
       "source_status":{"team_ratings":ratings.get("source"),"data_quality":ratings.get("data_quality"),
         "schedule":"ESPN scoreboard","sportsbook_odds_used":False,
         "injury_adjustments":"fresh official report applied" if injury_meta.get("status")=="fresh" else "not applied; report "+str(injury_meta.get("status","unavailable"))},
