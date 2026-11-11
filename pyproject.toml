@@ -7,7 +7,8 @@ dependencies = [
     "numpy>=2.0,<3",
     "psycopg[binary]>=3.2,<4",
     "nba_api>=1.12.0,<2",
-    "curl_cffi>=0.11.0,<1"
+    "curl_cffi>=0.11.0,<1",
+    "duckdb>=1.2,<2"
 ]
 
 [tool.vercel]
