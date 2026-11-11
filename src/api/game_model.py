@@ -232,7 +232,7 @@ def _nba_stats(season,last_n=0):
     # NBA's Akamai/Bot Manager can silently stall ordinary Python TLS
     # fingerprints, especially from cloud runtimes. Warm a Chrome-impersonated
     # session on nba.com first, then reuse its cookies/TLS profile for stats.nba.com.
-    session=curl_requests.Session(impersonate="chrome120")
+    session=curl_requests.Session(impersonate="chrome120", http_version="v1")
     warmup=session.get("https://www.nba.com/stats/",headers=headers,timeout=18)
     if warmup.status_code>=400:
         raise RuntimeError("NBA.com session warmup returned HTTP "+str(warmup.status_code))
