@@ -208,12 +208,28 @@ def _parse_game_lines(events):
     return rows
 
 def _nba_stats(season,last_n=0):
-    """Fetch measured Advanced team ratings through the official NBA Stats JSON API.
+    """Read a validated official NBA Stats snapshot, then try the live API.
 
-    nba_api is a thin, free wrapper around stats.nba.com. It does not bypass
-    NBA network restrictions; failures are surfaced to the existing Tank01
-    fallback rather than silently presenting estimated values as official.
+    GitHub Actions fetches the official NBA Stats JSON outside Vercel and
+    commits a timestamped snapshot. Vercel can read that bundled file even
+    when stats.nba.com blocks or times out its cloud egress.
     """
+    snapshot_path=os.path.join(os.path.dirname(__file__),"..","..","data","nba_team_advanced.json")
+    try:
+        with open(snapshot_path,"r",encoding="utf-8") as handle:
+            snapshot=json.load(handle)
+        fetched=datetime.fromisoformat(str(snapshot.get("fetched_at","")).replace("Z","+00:00"))
+        age=(datetime.now(timezone.utc)-fetched.astimezone(timezone.utc)).total_seconds()
+        cached=snapshot.get("teams") or {}
+        if (snapshot.get("source")=="NBA Stats leaguedashteamstats Advanced"
+                and snapshot.get("season")==season and snapshot.get("team_count")==30
+                and len(cached)==30 and 0<=age<=86400):
+            required=set(_TEAM_NAMES)
+            if set(cached)==required:
+                return cached
+    except (OSError,ValueError,TypeError,KeyError):
+        pass
+
     from nba_api.stats.endpoints import leaguedashteamstats
     from nba_api.stats.library.http import NBAStatsHTTP
     from curl_cffi import requests as curl_requests
@@ -229,12 +245,8 @@ def _nba_stats(season,last_n=0):
         "x-nba-stats-origin":"stats",
         "x-nba-stats-token":"true"
     }
-    # Connect directly to the official stats host. A separate www.nba.com
-    # warmup can stall in cloud runtimes and prevents the real JSON request
-    # from ever being attempted. Force HTTP/1.1 to avoid the observed H2 reset.
     session=curl_requests.Session(impersonate="chrome120", http_version="v1")
     NBAStatsHTTP.get_session=lambda self: session
-
     endpoint=leaguedashteamstats.LeagueDashTeamStats(
         season=season,
         season_type_all_star="Regular Season",
@@ -273,7 +285,7 @@ def _nba_stats(season,last_n=0):
           "efg":float(item.get("EFG_PCT") or 0),"tov":float(item.get("TM_TOV_PCT") or 0),
           "oreb":float(item.get("OREB_PCT") or 0),"ts":float(item.get("TS_PCT") or 0)
         }
-    if len(out)<28:
+    if len(out)!=30:
         raise RuntimeError("nba_api Advanced team table incomplete ("+str(len(out))+"/30).")
     return out
 
