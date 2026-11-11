@@ -1,6 +1,6 @@
 import unittest
 
-from src.api.game_model import _candidate
+from src.api.game_model import _candidate, _safe_logloss
 
 
 class GameCandidateProbabilityTests(unittest.TestCase):
@@ -53,6 +53,11 @@ class GameCandidateProbabilityTests(unittest.TestCase):
         home = next(row for row in rows if row["selection"] == "BOS")
         self.assertLess(home["home_win_probability"], 0.5)
         self.assertGreater(home["away_win_probability"], 0.5)
+
+    def test_log_loss_is_finite_at_probability_boundaries(self):
+        self.assertGreater(_safe_logloss(1.0, 0), 30.0)
+        self.assertGreater(_safe_logloss(0.0, 1), 30.0)
+        self.assertAlmostEqual(_safe_logloss(0.8, 1), -__import__("math").log(0.8))
 
 
 if __name__ == "__main__":
