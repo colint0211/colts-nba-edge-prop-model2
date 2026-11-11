@@ -1321,7 +1321,7 @@ def validation_report():
                  actual_home_score,actual_away_score
           FROM nba_game_forecast_archive
           WHERE settled_at IS NOT NULL AND forecast_at < commence_time
-          ORDER BY commence_time,forecast_at
+          ORDER BY event_id,model_version,forecast_at DESC
         """).fetchall()
         try:
             quotes = conn.execute("""
@@ -1350,6 +1350,12 @@ def validation_report():
         sd=max(0.1,float(sd))
         return 0.5*(1.0+math.erf((float(x)-float(mean))/(sd*math.sqrt(2.0))))
 
+    latest = {}
+    for row in forecasts:
+        key=(str(row[1]),str(row[5]))
+        if key not in latest or parse_dt(row[3]) > parse_dt(latest[key][3]):
+            latest[key]=row
+    forecasts=sorted(latest.values(),key=lambda row:(row[2],row[3]))
     n=len(forecasts); home_brier=[]; home_logloss=[]; margin_abs=[]; total_abs=[]
     market_brier=[]; market_logloss=[]; bets=[]; matched_market=0
     buckets=[{"lower":i/10,"upper":(i+1)/10,"n":0,"predicted":0.0,"observed":0.0} for i in range(10)]
