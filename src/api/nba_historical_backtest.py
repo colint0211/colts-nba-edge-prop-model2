@@ -227,6 +227,21 @@ def run():
     totals = [x["actual_total"] for x in predictions]
     margin_bias = mean("projected_margin") - sum(margins) / len(margins)
     total_bias = mean("projected_total") - sum(totals) / len(totals)
+    calibration_bins = []
+    for lower in (0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9):
+        upper = lower + 0.1
+        bucket = [x for x in predictions
+                  if lower <= x["home_win_probability"] < upper
+                  or (upper >= 1.0 and x["home_win_probability"] == 1.0)]
+        if bucket:
+            calibration_bins.append({
+                "probability_range": f"{lower:.1f}-{upper:.1f}",
+                "games": len(bucket),
+                "mean_predicted_home_win_pct": round(
+                    100.0 * sum(x["home_win_probability"] for x in bucket) / len(bucket), 2),
+                "actual_home_win_pct": round(
+                    100.0 * sum(x["actual_margin"] > 0 for x in bucket) / len(bucket), 2),
+            })
     results = {
         "method": "Rolling last-10 team offensive/defensive points per possession and pace; only prior completed dates; same-day results held out; league shrinkage 15%; home-court +2 points.",
         "files": files,
@@ -244,6 +259,9 @@ def run():
             ) / len(predictions), 2),
             "winner_brier": round(mean("winner_brier"), 5),
             "baseline_winner_brier_50_50": 0.25,
+            "winner_brier_skill_vs_50_50": round(
+                1.0 - mean("winner_brier") / 0.25, 5),
+            "winner_probability_calibration_bins": calibration_bins,
         },
         "limitations": [
             "No historical DraftKings spreads or totals are present in this source; ROI, spread-cover calibration, total-line calibration and closing-line value are not measured.",
