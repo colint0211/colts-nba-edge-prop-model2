@@ -3910,6 +3910,30 @@ def collect_draftkings_market_snapshots(request: FastRequest):
         message = str(exc).replace(os.getenv("PROPLINE_API_KEY", "___never_match___"), "[redacted]")
         return JSONResponse({"status":"unavailable","error":type(exc).__name__,"detail":message[:240]},status_code=503)
 
+@app.get("/api/game-validation/collect")
+def collect_game_validation(request: FastRequest):
+    """Scheduled endpoint: settle immutable pregame forecasts against completed ESPN scores."""
+    expected = os.getenv("CRON_SECRET", "").strip()
+    if not expected:
+        raise HTTPException(status_code=503, detail="CRON_SECRET is not configured.")
+    supplied = request.headers.get("authorization", "")
+    if not secrets.compare_digest(supplied, "Bearer " + expected):
+        raise HTTPException(status_code=401, detail="Unauthorized.")
+    try:
+        return JSONResponse(game_model.settle_forecast_archive())
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Forecast settlement failed: " + type(exc).__name__)
+
+
+@app.get("/api/game-validation/report")
+def game_validation_report():
+    """Read the prospective game-model validation report."""
+    try:
+        return JSONResponse(game_model.validation_report())
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Validation report unavailable: " + type(exc).__name__)
+
+
 @app.get("/api/game-history")
 def game_sides_totals_history(slate_date: str):
     try:
