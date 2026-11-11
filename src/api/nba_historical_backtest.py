@@ -128,9 +128,10 @@ def status():
     }
 
 
-def run():
+def run(persist=True):
     import duckdb
-    _init_db()
+    if persist:
+        _init_db()
     all_games = []
     files = {}
     with tempfile.TemporaryDirectory(prefix="nba-pbp-backtest-") as folder:
@@ -271,9 +272,13 @@ def run():
         ],
         "model_influence": "disabled_until_out_of_sample_results_reviewed",
     }
-    with _connect() as conn:
-        conn.execute("""
-          INSERT INTO nba_historical_backtests(source,seasons,status,results)
-          VALUES(%s,%s,%s,%s::jsonb)
-        """, (SOURCE, list(SEASONS), "complete", json.dumps(results, allow_nan=False)))
+    if persist:
+        with _connect() as conn:
+            conn.execute("""
+              INSERT INTO nba_historical_backtests(source,seasons,status,results)
+              VALUES(%s,%s,%s,%s::jsonb)
+            """, (SOURCE, list(SEASONS), "complete", json.dumps(results, allow_nan=False)))
+    else:
+        with open("backtest_results.json", "w", encoding="utf-8") as output:
+            json.dump({"success": True, **results}, output, indent=2, allow_nan=False)
     return {"success": True, **results}
