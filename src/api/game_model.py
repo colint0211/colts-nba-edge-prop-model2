@@ -218,7 +218,7 @@ def _nba_stats(season,last_n=0):
     if apify_token:
         endpoint="https://api.apify.com/v2/acts/parseforge~nba-stats-scraper/run-sync-get-dataset-items"
         body=json.dumps({"endpoint":"leaguedashteamstats","season":season,
-                         "seasonType":"Regular Season","maxItems":100}).encode()
+                         "seasonType":"Regular Season","maxItems":30}).encode()
         req=Request(endpoint, data=body, method="POST", headers={
             "Authorization":"Bearer "+apify_token,
             "Content-Type":"application/json","Accept":"application/json"})
