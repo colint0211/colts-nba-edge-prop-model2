@@ -289,44 +289,70 @@ def _tank01_ratings(force=False):
 
 
 def _team_ratings(force=False):
-    # The NBA Stats endpoint has repeatedly timed out from the Vercel runtime.
-    # Use it only when explicitly enabled; Tank01 is the authenticated fallback.
-    if os.getenv("USE_NBA_STATS_TEAM_RATINGS","").strip().lower() in ("1","true","yes"):
-        now=time.time()
-        if not force and _TEAM_CACHE["data"] and now-_TEAM_CACHE["at"]<21600:
-            return _TEAM_CACHE["data"]
-        current_year=datetime.now(timezone.utc).year
-        season_start=current_year if datetime.now(timezone.utc).month>=7 else current_year-1
-        current=f"{season_start}-{str(season_start+1)[-2:]}"
-        previous=f"{season_start-1}-{str(season_start)[-2:]}"
-        current_stats=_nba_stats(current,0)
-        prior_stats={}
-        try: prior_stats=_nba_stats(previous,0)
-        except Exception: pass
-        recent={}
-        try: recent=_nba_stats(current,10)
-        except Exception: pass
-        combined={}
-        for team,cur in current_stats.items():
-            prior=prior_stats.get(team); games=cur["games"]
-            prior_weight=max(0.12,min(0.65,8.0/(games+8.0))) if prior else 0.0
-            row={}
-            for key in ("ortg","drtg","pace","efg","tov","oreb","ts"):
-                base=cur[key]*(1-prior_weight)+(prior[key]*prior_weight if prior else 0)
-                recent_row=recent.get(team)
-                if recent_row and recent_row.get("games",0)>=4:
-                    base=base*0.78+recent_row[key]*0.22
-                row[key]=base
-            row.update({"games":games,"net":row["ortg"]-row["drtg"],"prior_weight":prior_weight,
-                        "recent_sample":recent.get(team,{}).get("games",0),"source":"NBA Stats"})
-            combined[team]=row
-        if len(combined)<28: raise RuntimeError("Insufficient NBA Stats team ratings.")
-        result={"teams":combined,"season":current,"prior_season":previous,
-          "source":"NBA Stats leaguedashteamstats advanced","data_quality":"advanced","fetched_at":datetime.now(timezone.utc).isoformat()}
-        _TEAM_CACHE.update({"at":now,"data":result})
-        return result
-    return _tank01_ratings(force)
+    """Prefer official NBA.com Advanced team ratings; fall back only if unavailable.
 
+    NBA Stats supplies measured ORtg, DRtg, pace and efficiency factors.
+    The Tank01 path remains a clearly labeled resilience fallback, not the
+    default source. USE_NBA_STATS_TEAM_RATINGS=0 can temporarily disable NBA.com.
+    """
+    now=time.time()
+    if not force and _TEAM_CACHE["data"] and now-_TEAM_CACHE["at"]<21600:
+        return _TEAM_CACHE["data"]
+
+    use_nba=os.getenv("USE_NBA_STATS_TEAM_RATINGS","1").strip().lower() not in ("0","false","no","off")
+    nba_error=None
+    if use_nba:
+        try:
+            current_year=datetime.now(timezone.utc).year
+            season_start=current_year if datetime.now(timezone.utc).month>=7 else current_year-1
+            current=f"{season_start}-{str(season_start+1)[-2:]}"
+            previous=f"{season_start-1}-{str(season_start)[-2:]}"
+            current_stats=_nba_stats(current,0)
+            prior_stats={}
+            try:
+                prior_stats=_nba_stats(previous,0)
+            except Exception:
+                prior_stats={}
+            recent={}
+            try:
+                recent=_nba_stats(current,10)
+            except Exception:
+                recent={}
+            combined={}
+            for team,cur in current_stats.items():
+                prior=prior_stats.get(team)
+                games=cur["games"]
+                prior_weight=max(0.12,min(0.65,8.0/(games+8.0))) if prior and games>0 else 0.0
+                row={}
+                for key in ("ortg","drtg","pace","efg","tov","oreb","ts"):
+                    base=cur[key]*(1-prior_weight)+(prior[key]*prior_weight if prior else 0.0)
+                    recent_row=recent.get(team)
+                    if recent_row and recent_row.get("games",0)>=4:
+                        base=base*0.78+recent_row[key]*0.22
+                    row[key]=base
+                row.update({"games":games,"net":row["ortg"]-row["drtg"],
+                            "prior_weight":prior_weight,
+                            "recent_sample":recent.get(team,{}).get("games",0),
+                            "source":"NBA Stats official Advanced team ratings"})
+                combined[team]=row
+            if len(combined)<28:
+                raise RuntimeError("NBA Stats team ratings incomplete ("+str(len(combined))+"/30).")
+            result={"teams":combined,"season":current,"prior_season":previous if prior_stats else None,
+                    "source":"NBA Stats leaguedashteamstats Advanced; current season blended with prior season and recent 10-game form when available",
+                    "data_quality":"advanced","fetched_at":datetime.now(timezone.utc).isoformat(),
+                    "fallback_used":False}
+            _TEAM_CACHE.update({"at":now,"data":result})
+            return result
+        except Exception as exc:
+            nba_error=type(exc).__name__+": "+str(exc)[:180]
+
+    fallback=_tank01_ratings(force=True)
+    fallback=dict(fallback)
+    fallback["fallback_used"]=True
+    fallback["primary_source"]="NBA Stats leaguedashteamstats Advanced"
+    fallback["fallback_reason"]=nba_error or "NBA Stats disabled by USE_NBA_STATS_TEAM_RATINGS"
+    _TEAM_CACHE.update({"at":now,"data":fallback})
+    return fallback
 
 def _schedule(force=False):
     now=time.time()
