@@ -229,13 +229,10 @@ def _nba_stats(season,last_n=0):
         "x-nba-stats-origin":"stats",
         "x-nba-stats-token":"true"
     }
-    # NBA's Akamai/Bot Manager can silently stall ordinary Python TLS
-    # fingerprints, especially from cloud runtimes. Warm a Chrome-impersonated
-    # session on nba.com first, then reuse its cookies/TLS profile for stats.nba.com.
+    # Connect directly to the official stats host. A separate www.nba.com
+    # warmup can stall in cloud runtimes and prevents the real JSON request
+    # from ever being attempted. Force HTTP/1.1 to avoid the observed H2 reset.
     session=curl_requests.Session(impersonate="chrome120", http_version="v1")
-    warmup=session.get("https://www.nba.com/stats/",headers=headers,timeout=18)
-    if warmup.status_code>=400:
-        raise RuntimeError("NBA.com session warmup returned HTTP "+str(warmup.status_code))
     NBAStatsHTTP.get_session=lambda self: session
 
     endpoint=leaguedashteamstats.LeagueDashTeamStats(
