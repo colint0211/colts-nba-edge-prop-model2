@@ -1275,8 +1275,7 @@ def settle_forecast_archive():
     """Attach final ESPN scores to archived pregame forecasts; never rewrite forecasts."""
     initialize()
     schedule = _schedule(force=True)
-    completed = {(str(g.get("id")), g.get("home"), g.get("away")): g
-                 for g in schedule if g.get("completed") and g.get("home") and g.get("away")}
+    completed = [g for g in schedule if g.get("completed") and g.get("home") and g.get("away")]
     updated = 0
     with _connect() as conn:
         pending = conn.execute("""
@@ -1285,7 +1284,18 @@ def settle_forecast_archive():
           AND commence_time < NOW() ORDER BY commence_time LIMIT 500
         """).fetchall()
         for row_id,event_id,home,away,commence in pending:
-            game = completed.get((str(event_id),home,away))
+            target = commence if commence.tzinfo else commence.replace(tzinfo=timezone.utc)
+            game = None
+            for candidate in completed:
+                if candidate.get("home") != home or candidate.get("away") != away:
+                    continue
+                try:
+                    candidate_start = datetime.fromisoformat(str(candidate.get("date") or "").replace("Z","+00:00"))
+                    if abs((candidate_start-target).total_seconds()) <= 7200:
+                        game = candidate
+                        break
+                except Exception:
+                    continue
             if not game:
                 continue
             cur = conn.execute("""
