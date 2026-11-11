@@ -97,6 +97,22 @@ def initialize():
         );
         CREATE INDEX IF NOT EXISTS nba_game_forecast_archive_event
           ON nba_game_forecast_archive(event_id, forecast_at DESC);
+        CREATE TABLE IF NOT EXISTS nba_market_snapshots (
+          id BIGSERIAL PRIMARY KEY, batch_id TEXT NOT NULL,
+          captured_at TIMESTAMPTZ NOT NULL, event_id TEXT NOT NULL,
+          commence_time TIMESTAMPTZ, slate_date DATE NOT NULL,
+          matchup TEXT NOT NULL, home_team TEXT NOT NULL, away_team TEXT NOT NULL,
+          market TEXT NOT NULL CHECK (market IN ('spreads','totals')),
+          outcome TEXT NOT NULL, line DOUBLE PRECISION NOT NULL,
+          odds INTEGER NOT NULL, bookmaker TEXT NOT NULL, source TEXT NOT NULL,
+          raw_quote JSONB NOT NULL DEFAULT '{}'::jsonb
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS nba_market_snapshots_batch_quote
+          ON nba_market_snapshots(batch_id,event_id,market,outcome);
+        CREATE INDEX IF NOT EXISTS nba_market_snapshots_event_time
+          ON nba_market_snapshots(event_id,market,outcome,captured_at DESC);
+        CREATE INDEX IF NOT EXISTS nba_market_snapshots_capture
+          ON nba_market_snapshots(captured_at DESC);
         ALTER TABLE nba_game_forecast_archive ADD COLUMN IF NOT EXISTS actual_home_score INTEGER;
         ALTER TABLE nba_game_forecast_archive ADD COLUMN IF NOT EXISTS actual_away_score INTEGER;
         ALTER TABLE nba_game_forecast_archive ADD COLUMN IF NOT EXISTS settled_at TIMESTAMPTZ;
