@@ -215,6 +215,8 @@ def _nba_stats(season,last_n=0):
     fallback rather than silently presenting estimated values as official.
     """
     from nba_api.stats.endpoints import leaguedashteamstats
+    from nba_api.stats.library.http import NBAStatsHTTP
+    from curl_cffi import requests as curl_requests
 
     headers={
         "Host":"stats.nba.com",
@@ -227,6 +229,15 @@ def _nba_stats(season,last_n=0):
         "x-nba-stats-origin":"stats",
         "x-nba-stats-token":"true"
     }
+    # NBA's Akamai/Bot Manager can silently stall ordinary Python TLS
+    # fingerprints, especially from cloud runtimes. Warm a Chrome-impersonated
+    # session on nba.com first, then reuse its cookies/TLS profile for stats.nba.com.
+    session=curl_requests.Session(impersonate="chrome120")
+    warmup=session.get("https://www.nba.com/stats/",headers=headers,timeout=18)
+    if warmup.status_code>=400:
+        raise RuntimeError("NBA.com session warmup returned HTTP "+str(warmup.status_code))
+    NBAStatsHTTP.get_session=lambda self: session
+
     endpoint=leaguedashteamstats.LeagueDashTeamStats(
         season=season,
         season_type_all_star="Regular Season",
@@ -239,7 +250,7 @@ def _nba_stats(season,last_n=0):
         pace_adjust="N",
         plus_minus="N",
         rank="N",
-        timeout=35,
+        timeout=45,
         headers=headers
     )
     frames=endpoint.get_data_frames()
