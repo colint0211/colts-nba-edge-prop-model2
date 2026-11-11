@@ -49,10 +49,21 @@ def fetch_tables(url):
             if "Team Ratings Table" not in html and "Advanced Stats Table" not in html:
                 # HTML comments occasionally contain the table markup on B-Ref.
                 pass
-            tables = pd.read_html(StringIO(html))
+            # Basketball-Reference frequently wraps table markup in HTML
+            # comments. pandas.read_html on the raw page silently misses it.
+            fragments = [html]
+            fragments.extend(re.findall(r"<!--(.*?)-->", html, flags=re.DOTALL))
+            tables = []
+            for fragment in fragments:
+                try:
+                    tables.extend(pd.read_html(StringIO(fragment)))
+                except (ValueError, ImportError):
+                    continue
             if tables:
                 return tables
-            raise RuntimeError("No HTML tables found at " + url)
+            title = re.search(r"<title>(.*?)</title>", html, flags=re.I | re.S)
+            page_title = re.sub(r"\\s+", " ", title.group(1)).strip() if title else "unknown"
+            raise RuntimeError(f"No HTML tables found at {url}; page title={page_title}; response_bytes={len(html)}")
         except Exception as exc:
             last = exc
             if attempt < 2:
