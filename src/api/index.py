@@ -3931,7 +3931,7 @@ def game_validation_report():
     try:
         return JSONResponse(game_model.validation_report())
     except Exception as exc:
-        raise HTTPException(status_code=503, detail="Validation report unavailable: " + type(exc).__name__)
+        raise HTTPException(status_code=503, detail="Validation report unavailable: " + type(exc).__name__ + ": " + str(exc)[:220])
 
 
 @app.get("/api/game-history")
