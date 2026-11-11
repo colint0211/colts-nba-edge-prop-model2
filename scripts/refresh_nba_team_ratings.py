@@ -71,11 +71,13 @@ def fetch_tables(url):
     raise RuntimeError(f"Basketball-Reference fetch failed for {url}: {last}")
 
 def flat_columns(frame):
+    # Preserve parent headers: B-Ref has both unadjusted/adjusted ORtg
+    # and separate offense/defense eFG% columns.
     cols=[]
     for col in frame.columns:
         if isinstance(col, tuple):
             vals=[str(v).strip() for v in col if str(v).strip() and not str(v).startswith("Unnamed")]
-            cols.append(vals[-1] if vals else "")
+            cols.append("_".join(vals) if vals else "")
         else:
             cols.append(str(col).strip())
     frame=frame.copy()
@@ -85,8 +87,7 @@ def flat_columns(frame):
 def find_table(tables, required):
     for raw in tables:
         frame=flat_columns(raw)
-        cols=set(frame.columns)
-        if required.issubset(cols):
+        if required.issubset(set(frame.columns)):
             return frame
     raise RuntimeError("Could not find table with columns: " + ", ".join(sorted(required)))
 
@@ -101,7 +102,7 @@ def main():
     year, season=season_code(now)
     ratings_url=f"{BASE}/NBA_{year}_ratings.html"
     summary_url=f"{BASE}/NBA_{year}.html"
-    ratings=find_table(fetch_tables(ratings_url), {"Team","ORtg","DRtg"})
+    ratings=find_table(fetch_tables(ratings_url), {"Team","Unadjusted_ORtg","Unadjusted_DRtg"})
     advanced=find_table(fetch_tables(summary_url), {"Team","Pace","TS%"})
     adv_by_name={}
     for _, item in advanced.iterrows():
@@ -116,9 +117,9 @@ def main():
             continue
         adv=adv_by_name[code]
         try:
-            ortg=num(item["ORtg"]); drtg=num(item["DRtg"])
+            ortg=num(item["Unadjusted_ORtg"]); drtg=num(item["Unadjusted_DRtg"])
             pace=num(adv["Pace"]); ts=num(adv["TS%"])
-            efg=num(adv["eFG%"]); tov=num(adv["TOV%"]); oreb=num(adv["ORB%"])
+            efg=num(adv["Offense Four Factors_eFG%"]); tov=num(adv["Offense Four Factors_TOV%"]); oreb=num(adv["Offense Four Factors_ORB%"])
             wins=num(item.get("W")); losses=num(item.get("L"))
             games=int((wins or 0)+(losses or 0))
         except (TypeError,ValueError,KeyError):
