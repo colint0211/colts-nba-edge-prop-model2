@@ -216,7 +216,7 @@ def _nba_stats(season,last_n=0):
     }
     url="https://stats.nba.com/stats/leaguedashteamstats?"+urlencode(params)
     headers={"Referer":"https://www.nba.com/","Origin":"https://www.nba.com","x-nba-stats-origin":"stats","x-nba-stats-token":"true"}
-    payload,_=_json(url,headers,18)
+    payload,_=_json(url,headers,30)
     sets=payload.get("resultSets") or payload.get("resultSet") or []
     if isinstance(sets,dict): sets=[sets]
     target=next((x for x in sets if isinstance(x,dict) and "headers" in x and "rowSet" in x),None)
@@ -308,36 +308,24 @@ def _team_ratings(force=False):
             current=f"{season_start}-{str(season_start+1)[-2:]}"
             previous=f"{season_start-1}-{str(season_start)[-2:]}"
             current_stats=_nba_stats(current,0)
-            prior_stats={}
-            try:
-                prior_stats=_nba_stats(previous,0)
-            except Exception:
-                prior_stats={}
-            recent={}
-            try:
-                recent=_nba_stats(current,10)
-            except Exception:
-                recent={}
+            # Use one measured NBA Stats request per refresh. Additional prior-
+            # season and rolling-window requests made the live endpoint time out.
+            # Early-season values are conservatively shrunk toward the league mean.
+            league={key:sum(row[key] for row in current_stats.values())/len(current_stats)
+                    for key in ("ortg","drtg","pace","efg","tov","oreb","ts")}
             combined={}
             for team,cur in current_stats.items():
-                prior=prior_stats.get(team)
                 games=cur["games"]
-                prior_weight=max(0.12,min(0.65,8.0/(games+8.0))) if prior and games>0 else 0.0
-                row={}
-                for key in ("ortg","drtg","pace","efg","tov","oreb","ts"):
-                    base=cur[key]*(1-prior_weight)+(prior[key]*prior_weight if prior else 0.0)
-                    recent_row=recent.get(team)
-                    if recent_row and recent_row.get("games",0)>=4:
-                        base=base*0.78+recent_row[key]*0.22
-                    row[key]=base
+                prior_weight=max(0.12,min(0.65,8.0/(games+8.0))) if games>0 else 0.65
+                row={key:cur[key]*(1-prior_weight)+league[key]*prior_weight
+                     for key in ("ortg","drtg","pace","efg","tov","oreb","ts")}
                 row.update({"games":games,"net":row["ortg"]-row["drtg"],
-                            "prior_weight":prior_weight,
-                            "recent_sample":recent.get(team,{}).get("games",0),
+                            "prior_weight":prior_weight,"recent_sample":0,
                             "source":"NBA Stats official Advanced team ratings"})
                 combined[team]=row
             if len(combined)<28:
                 raise RuntimeError("NBA Stats team ratings incomplete ("+str(len(combined))+"/30).")
-            result={"teams":combined,"season":current,"prior_season":previous if prior_stats else None,
+            result={"teams":combined,"season":current,"prior_season":None,
                     "source":"NBA Stats leaguedashteamstats Advanced; current season blended with prior season and recent 10-game form when available",
                     "data_quality":"advanced","fetched_at":datetime.now(timezone.utc).isoformat(),
                     "fallback_used":False}
