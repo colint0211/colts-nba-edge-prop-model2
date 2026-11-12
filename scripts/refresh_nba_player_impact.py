@@ -105,8 +105,30 @@ def main():
     prior,prior_per,prior_adv=collect(current_year-1)
     current,cur_per,cur_adv=collect(current_year)
     players={}
+    # Prior-season BPM is a player trait proxy, not a team rating. When a player
+    # changes teams, carry a prior baseline across teams only when the normalized
+    # player identity is unique in the prior-season source. If multiple team rows
+    # exist, combine them using games played as weights.
+    prior_by_player={}
+    for (player_key, prior_team), prior_row in prior.items():
+        prior_by_player.setdefault(player_key, []).append(prior_row)
+
     for key in set(prior)|set(current):
-        old=prior.get(key); cur=current.get(key)
+        old=prior.get(key)
+        cur=current.get(key)
+        if old is None:
+            candidates=prior_by_player.get(key[0], [])
+            if candidates:
+                weights=[max(1, int(candidate.get("games") or 0)) for candidate in candidates]
+                total_weight=sum(weights)
+                old={
+                    "player": candidates[0]["player"],
+                    "team": candidates[0]["team"],
+                    "games": sum(int(candidate.get("games") or 0) for candidate in candidates),
+                    "minutes_per_game": sum(candidate["minutes_per_game"]*weight for candidate,weight in zip(candidates,weights))/total_weight,
+                    "bpm": sum(candidate["bpm"]*weight for candidate,weight in zip(candidates,weights))/total_weight,
+                    "prior_team_count": len(candidates),
+                }
         row=cur or old
         if not row: continue
         if cur and old:
@@ -133,6 +155,7 @@ def main():
             "bpm_prior":round(old["bpm"],2) if old else None,
             "bpm_shrunk":round(float(bpm),3),
             "impact_source":source,
+            "prior_team_count":int(old.get("prior_team_count",1)) if old else 0,
         }
     if len(players)<250: raise RuntimeError(f"Validated player impact output too small: {len(players)}")
     payload={
