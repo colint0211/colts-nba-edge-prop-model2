@@ -65,7 +65,8 @@ def number(value):
     if raw in ("","—","-"): return None
     return float(raw)
 def name_key(value):
-    return re.sub(r"[^a-z0-9]","",unicodedata.normalize("NFKD",str(value or "").casefold()).encode("ascii","ignore").decode("ascii"))
+    key=re.sub(r"[^a-z0-9]","",unicodedata.normalize("NFKD",str(value or "").casefold()).encode("ascii","ignore").decode("ascii"))
+    return re.sub(r"(jr|sr|ii|iii|iv|v)$","",key)
 def collect(year):
     per_url=f"{BASE}/NBA_{year}_per_game.html"
     adv_url=f"{BASE}/NBA_{year}_advanced.html"
