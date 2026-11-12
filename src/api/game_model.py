@@ -476,7 +476,17 @@ _PLAYER_IMPACT_TTL = 1800
 
 def _player_name_key(value):
     import re, unicodedata
-    normalized=unicodedata.normalize("NFKD",str(value or "").casefold()).encode("ascii","ignore").decode("ascii")
+    raw=str(value or "").strip()
+    if "," in raw:
+        parts=[part.strip() for part in raw.split(",") if part.strip()]
+        suffixes={"jr","sr","ii","iii","iv","v"}
+        if len(parts)==2:
+            raw=parts[1]+" "+parts[0]
+        elif len(parts)==3 and parts[1].casefold().replace(".","") in suffixes:
+            raw=parts[2]+" "+parts[0]+" "+parts[1]
+        elif len(parts)>=2:
+            raw=" ".join(parts[1:]+parts[:1])
+    normalized=unicodedata.normalize("NFKD",raw.casefold()).encode("ascii","ignore").decode("ascii")
     return re.sub(r"[^a-z0-9]", "", normalized)
 
 def _load_player_impact_snapshot(season):
@@ -887,7 +897,12 @@ def build_board(force=False,preview_date=None):
         "player_impact":"Basketball-Reference minutes + shrunk BPM replacement-level proxy (not on/off); OUT players priced only with fresh exact player/team matches; questionable/doubtful/day-to-day remain blocked pending calibrated availability probabilities",
         "player_impact_snapshot":_load_player_impact_snapshot(ratings["season"]).get("meta"),
         "totals_validation":{"official_picks_enabled":_TOTALS_OFFICIAL_ENABLED,"status":"disabled_pending_holdout_bias_recalibration","holdout_total_bias_points":4.529},
-        "reviewed_games":len(review_games),"prop_line_quota":quota,"saved_sides":side_saved,"saved_totals":total_saved,
+        "reviewed_games":len(review_games),
+        "injury_impact_audit":[{"event_id":event_id,"matchup":game_by_id[event_id]["matchup"],
+          "home":{"team":game_by_id[event_id]["home"],"points":home.get("points"),"unpriced":home.get("unpriced_injury"),"players":home.get("players",[])},
+          "away":{"team":game_by_id[event_id]["away"],"points":away.get("points"),"unpriced":away.get("unpriced_injury"),"players":away.get("players",[])}}
+          for event_id,(home,away) in reviewed.items()],
+        "prop_line_quota":quota,"saved_sides":side_saved,"saved_totals":total_saved,
         "unavailable_games":unique_unavailable[:10]},
       "model_policy":"Team-efficiency ratings projection with explicit early-season uncertainty. Not yet a historically fitted regression. Market odds are used only for EV and no-vig comparison, never as the model probability. Official game totals are disabled because the untouched 2026-27 holdout showed +4.53 points of total bias; sides remain separately eligible subject to injury and edge gates.",
       "thresholds":{"minimum_edge_pp":4.0 if ratings.get("data_quality")=="derived_early_season" else 2.5,
