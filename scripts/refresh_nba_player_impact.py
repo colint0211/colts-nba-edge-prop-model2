@@ -103,17 +103,23 @@ def main():
     current_year=now.year+1 if now.month>=7 else now.year
     current_season=f"{current_year-1}-{str(current_year)[-2:]}"
     prior,prior_per,prior_adv=collect(current_year-1)
+    older,older_per,older_adv=collect(current_year-2)
     current,cur_per,cur_adv=collect(current_year)
     players={}
     # Prior-season BPM is a player trait proxy, not a team rating. When a player
     # changes teams, carry a prior baseline across teams only when the normalized
     # player identity is unique in the prior-season source. If multiple team rows
     # exist, combine them using games played as weights.
-    prior_by_player={}
-    for (player_key, prior_team), prior_row in prior.items():
-        prior_by_player.setdefault(player_key, []).append(prior_row)
+    def by_player(rows):
+        grouped={}
+        for (player_key, prior_team), prior_row in rows.items():
+            grouped.setdefault(player_key, []).append(prior_row)
+        return grouped
 
-    for key in set(prior)|set(current):
+    prior_by_player=by_player(prior)
+    older_by_player=by_player(older)
+
+    for key in set(prior)|set(current)|set(older):
         old=prior.get(key)
         cur=current.get(key)
         if old is None:
@@ -128,20 +134,48 @@ def main():
                     "minutes_per_game": sum(candidate["minutes_per_game"]*weight for candidate,weight in zip(candidates,weights))/total_weight,
                     "bpm": sum(candidate["bpm"]*weight for candidate,weight in zip(candidates,weights))/total_weight,
                     "prior_team_count": len(candidates),
+                    "baseline_age_seasons": 1,
                 }
+        if old is None:
+            candidates=older_by_player.get(key[0], [])
+            if candidates:
+                weights=[max(1, int(candidate.get("games") or 0)) for candidate in candidates]
+                total_weight=sum(weights)
+                old={
+                    "player": candidates[0]["player"],
+                    "team": candidates[0]["team"],
+                    "games": sum(int(candidate.get("games") or 0) for candidate in candidates),
+                    "minutes_per_game": sum(candidate["minutes_per_game"]*weight for candidate,weight in zip(candidates,weights))/total_weight,
+                    "bpm": sum(candidate["bpm"]*weight for candidate,weight in zip(candidates,weights))/total_weight,
+                    "prior_team_count": len(candidates),
+                    "baseline_age_seasons": 2,
+                }
+        elif "baseline_age_seasons" not in old:
+            old=dict(old)
+            old["baseline_age_seasons"]=1
+            old["prior_team_count"]=1
         row=cur or old
         if not row: continue
+        baseline_age=int(old.get("baseline_age_seasons",1)) if old else 0
         if cur and old:
             n=max(0,cur["games"])
-            # Shrink early BPM toward prior season; never tune against outcomes.
-            current_weight=n/(n+15.0)
+            # A two-season-old baseline gets less influence than last season.
+            prior_strength=10.0 if baseline_age>=2 else 15.0
+            current_weight=n/(n+prior_strength)
             bpm=current_weight*cur["bpm"]+(1-current_weight)*old["bpm"]
             mpg=cur["minutes_per_game"] if n>=5 else 0.65*cur["minutes_per_game"]+0.35*old["minutes_per_game"]
             games=cur["games"]
-            source="current_and_prior_season_BPM_shrunk"
+            source="current_and_two_year_prior_BPM_shrunk" if baseline_age>=2 else "current_and_prior_season_BPM_shrunk"
         elif cur:
             bpm=0.60*cur["bpm"]; mpg=cur["minutes_per_game"]; games=cur["games"]
             source="current_season_BPM_heavily_shrunk"
+        elif baseline_age>=2:
+            # Older baseline only: shrink toward replacement level and reduce
+            # expected role minutes to reflect the extra season of uncertainty.
+            bpm=0.50*old["bpm"]+0.50*(-2.0)
+            mpg=0.80*old["minutes_per_game"]
+            games=0
+            source="two_year_prior_only_shrunk_to_replacement"
         else:
             bpm=old["bpm"]; mpg=old["minutes_per_game"]; games=old["games"]
             source="prior_season_only"
@@ -156,6 +190,7 @@ def main():
             "bpm_shrunk":round(float(bpm),3),
             "impact_source":source,
             "prior_team_count":int(old.get("prior_team_count",1)) if old else 0,
+            "baseline_age_seasons":baseline_age,
         }
     if len(players)<250: raise RuntimeError(f"Validated player impact output too small: {len(players)}")
     payload={
@@ -165,10 +200,11 @@ def main():
       "replacement_bpm":-2.0,
       "season":current_season,
       "prior_season":f"{current_year-2}-{str(current_year-1)[-2:]}",
+      "older_season":f"{current_year-3}-{str(current_year-2)[-2:]}",
       "fetched_at":now.isoformat(),
       "player_count":len(players),
       "players":players,
-      "source_urls":[cur_per,cur_adv,prior_per,prior_adv],
+      "source_urls":[cur_per,cur_adv,prior_per,prior_adv,older_per,older_adv],
     }
     path=Path(sys.argv[1] if len(sys.argv)>1 else "data/nba_player_impact.json")
     path.parent.mkdir(parents=True,exist_ok=True)
