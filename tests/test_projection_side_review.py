@@ -1,6 +1,6 @@
 import unittest
 
-from src.api.index import _projection_side_review
+from src.api.index import _apply_projection_side_guard, _projection_side_review
 
 
 class ProjectionSideReviewTests(unittest.TestCase):
@@ -25,6 +25,29 @@ class ProjectionSideReviewTests(unittest.TestCase):
         prop = {"line": 3.5, "best_side": "UNDER"}
         self.assertTrue(_projection_side_review(prop))
         self.assertEqual(prop["projection_alignment"], "unavailable")
+
+    def test_conflicting_under_is_removed_from_board(self):
+        prop = {
+            "projection": 4.0, "line": 3.5, "best_side": "UNDER",
+            "best_odds": 110, "best_probability": 60.0,
+            "expected_value_pct": 20.0, "recommendation": "VALUE CANDIDATE",
+        }
+        _apply_projection_side_guard(prop)
+        self.assertIsNone(prop["best_side"])
+        self.assertIsNone(prop["expected_value_pct"])
+        self.assertEqual(prop["recommendation"], "PASS")
+        self.assertEqual(prop["selection_gate_status"], "HOLD")
+        self.assertEqual(prop["model_side_before_projection_guard"], "UNDER")
+
+    def test_matching_over_remains_visible(self):
+        prop = {
+            "projection": 4.0, "line": 3.5, "best_side": "OVER",
+            "best_odds": -110, "best_probability": 60.0,
+            "expected_value_pct": 20.0, "recommendation": "VALUE CANDIDATE",
+        }
+        _apply_projection_side_guard(prop)
+        self.assertEqual(prop["best_side"], "OVER")
+        self.assertEqual(prop["expected_value_pct"], 20.0)
 
 
 if __name__ == "__main__":
