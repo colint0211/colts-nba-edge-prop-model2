@@ -1,0 +1,75 @@
+import unittest
+from unittest.mock import patch
+
+from src.api import game_model
+
+
+class PlayerImpactTests(unittest.TestCase):
+    def test_official_surname_first_name_matches_bref_name(self):
+        self.assertEqual(
+            game_model._player_name_key("Barnes, Scottie"),
+            game_model._player_name_key("Scottie Barnes"),
+        )
+
+    def test_jr_suffix_name_matches(self):
+        self.assertEqual(
+            game_model._player_name_key("McCullar Jr., Kevin"),
+            game_model._player_name_key("Kevin McCullar Jr."),
+        )
+
+    def test_confirmed_out_uses_fresh_player_impact_proxy(self):
+        snapshot = {
+            "available": True,
+            "players": {
+                "scottiebarnes|TOR": {
+                    "minutes_per_game": 35.0,
+                    "bpm_shrunk": 2.0,
+                    "games_current_season": 10,
+                }
+            },
+            "meta": {"replacement_bpm": -2.0, "status": "fresh"},
+        }
+        injury = [{
+            "team": "TOR",
+            "player": "Barnes, Scottie",
+            "status": "Out",
+            "game_date": "11/11/2026",
+            "reason": "Injury/Illness",
+        }]
+        with patch.object(game_model, "_load_player_impact_snapshot", return_value=snapshot):
+            result = game_model._injury_adjustment(
+                "TOR", injury, "2026-27", "2026-11-11T19:00:00-05:00", 100.0
+            )
+        self.assertFalse(result["unpriced_injury"])
+        self.assertTrue(result["players"][0]["impact_data_available"])
+        self.assertAlmostEqual(result["points"], -(4.0 * 35.0 / 48.0), places=3)
+
+    def test_questionable_player_remains_blocked(self):
+        snapshot = {
+            "available": True,
+            "players": {
+                "scottiebarnes|TOR": {
+                    "minutes_per_game": 35.0,
+                    "bpm_shrunk": 2.0,
+                    "games_current_season": 10,
+                }
+            },
+            "meta": {"replacement_bpm": -2.0, "status": "fresh"},
+        }
+        injury = [{
+            "team": "TOR",
+            "player": "Barnes, Scottie",
+            "status": "Questionable",
+            "game_date": "11/11/2026",
+            "reason": "Injury/Illness",
+        }]
+        with patch.object(game_model, "_load_player_impact_snapshot", return_value=snapshot):
+            result = game_model._injury_adjustment(
+                "TOR", injury, "2026-27", "2026-11-11T19:00:00-05:00", 100.0
+            )
+        self.assertTrue(result["unpriced_injury"])
+        self.assertFalse(result["players"][0]["impact_data_available"])
+
+
+if __name__ == "__main__":
+    unittest.main()
