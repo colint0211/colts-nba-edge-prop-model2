@@ -108,6 +108,11 @@ def collect(year):
         out[key]=row
     if len(out)<250:
         raise RuntimeError(f"Player snapshot too small for {year}: {len(out)} matched player-team rows")
+    for diagnostic_key in ("jusufnurkic","kristapsporzingis","vitkrejci"):
+        per_hits={team:row for (player_key,team),row in per_map.items() if player_key==diagnostic_key}
+        adv_hits={team:value for (player_key,team),value in adv_map.items() if player_key==diagnostic_key}
+        out_hits={team:row for (player_key,team),row in out.items() if player_key==diagnostic_key}
+        print(f"PLAYER_IMPACT_DIAGNOSTIC year={year} player={diagnostic_key} per={per_hits} advanced={adv_hits} matched={out_hits}")
     return out,per_url,adv_url
 def main():
     now=datetime.now(timezone.utc)
