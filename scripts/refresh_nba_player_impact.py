@@ -34,7 +34,10 @@ def tables(url):
     for attempt in range(3):
         try:
             response=requests.get(url,headers=HEADERS,timeout=30); response.raise_for_status()
-            html=response.text; fragments=[html]+re.findall(r"<!--(.*?)-->",html,re.S)
+            # Basketball-Reference pages are UTF-8. requests may guess a
+            # legacy encoding and corrupt names such as Nurkić/Porziņģis.
+            html=response.content.decode("utf-8",errors="replace")
+            fragments=[html]+re.findall(r"<!--(.*?)-->",html,re.S)
             found=[]
             for fragment in fragments:
                 try: found.extend(pd.read_html(StringIO(fragment)))
@@ -72,10 +75,6 @@ def collect(year):
     adv_url=f"{BASE}/NBA_{year}_advanced.html"
     per=find(tables(per_url),{"Player","Team","G","MP"})
     adv=find(tables(adv_url),{"Player","Team","BPM"})
-    if year in (2025,2026,2027):
-        for token in ("nurk","porz","krej"):
-            raw_names=sorted({str(value) for value in per["Player"].dropna() if token in str(value).casefold()})
-            print(f"PLAYER_IMPACT_RAW_NAMES year={year} token={token} names={raw_names[:10]}")
     per_map={}
     for _,r in per.iterrows():
         player=str(r.get("Player") or "").strip()
@@ -112,11 +111,6 @@ def collect(year):
         out[key]=row
     if len(out)<250:
         raise RuntimeError(f"Player snapshot too small for {year}: {len(out)} matched player-team rows")
-    for diagnostic_key in ("jusufnurkic","kristapsporzingis","vitkrejci"):
-        per_hits={team:row for (player_key,team),row in per_map.items() if player_key==diagnostic_key}
-        adv_hits={team:value for (player_key,team),value in adv_map.items() if player_key==diagnostic_key}
-        out_hits={team:row for (player_key,team),row in out.items() if player_key==diagnostic_key}
-        print(f"PLAYER_IMPACT_DIAGNOSTIC year={year} player={diagnostic_key} per={per_hits} advanced={adv_hits} matched={out_hits}")
     return out,per_url,adv_url
 def main():
     now=datetime.now(timezone.utc)
