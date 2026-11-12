@@ -487,15 +487,16 @@ def _injury_adjustment(team,injuries,season,game_date):
     unpriced=False
     for item in relevant:
         status=str(item.get("status") or "").lower()
-        # Known OUT players are already reflected in the current-season team
-        # performance sample when they have been absent. Uncertain availability
-        # cannot be valued without licensed EPM/on-off, so block the game.
-        uncertain=status in ("doubtful","questionable","day-to-day")
-        unpriced=unpriced or uncertain
+        # Do not silently assign zero impact to a confirmed OUT player.
+        # Until a validated player-level impact feed is available, any listed
+        # rotation-status injury is unpriced and the game is withheld.
+        # This is deliberately conservative: team-season ratings alone cannot
+        # identify the counterfactual cost of a player's absence.
+        unpriced=True
         details.append({"player":item.get("player"),"status":item.get("status"),
-          "minutes":None,"estimated_team_points":0.0,
-          "impact_data_available":not uncertain,
-          "impact_source":"known OUT; team baseline" if status=="out" else "unpriced availability risk"})
+          "minutes":None,"estimated_team_points":None,
+          "impact_data_available":False,
+          "impact_source":"unpriced player impact; game withheld pending validated player-level data"})
     return {"points":0.0,"players":details,"unpriced_injury":unpriced,
       "source":"official injury report; uncertain rotation availability blocks game"}
  
