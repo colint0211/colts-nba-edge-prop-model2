@@ -498,7 +498,7 @@ def _injury_adjustment(team,injuries,season,game_date):
           "impact_data_available":False,
           "impact_source":"unpriced player impact; game withheld pending validated player-level data"})
     return {"points":0.0,"players":details,"unpriced_injury":unpriced,
-      "source":"official injury report; uncertain rotation availability blocks game"}
+      "source":"official injury report; unpriced rotation injury/absence impact blocks game"}
  
  
 def _team_adjustment(team,opp,game_date,schedule,injuries,season,is_home):
@@ -776,7 +776,7 @@ def build_board(force=False,preview_date=None):
         game=game_by_id[event_id]
         model=dict(base_models[event_id])
         if home_injury.get("unpriced_injury") or away_injury.get("unpriced_injury"):
-            unavailable.append({"event_id":event_id,"reason":"questionable/doubtful/day-to-day rotation availability cannot be valued reliably; no pick"})
+            unavailable.append({"event_id":event_id,"reason":"listed rotation player has unpriced absence/availability impact; no pick"})
             continue
         home_adjustments=dict(model["home_adjustments"])
         away_adjustments=dict(model["away_adjustments"])
@@ -814,7 +814,7 @@ def build_board(force=False,preview_date=None):
       "metrics":_metrics(),"settlement":settlement,"game_count":len(future_games),
       "source_status":{"odds":"PropLine DraftKings ("+odds_source+")","team_ratings":ratings["source"],
         "season":ratings["season"],"team_rating_quality":ratings.get("data_quality"),"team_rating_fallback_used":ratings.get("fallback_used",False),"team_rating_fallback_reason":ratings.get("fallback_reason"),"team_count":len(ratings.get("teams") or {}),"injuries":injury_meta.get("status","unavailable"),
-        "player_impact":"True EPM/on-off not integrated; uncertain rotation availability blocks the game; known OUT players are disclosed but not individually valued",
+        "player_impact":"Validated player-level impact not integrated; any listed rotation OUT/questionable/doubtful/day-to-day status blocks the game until absence impact can be priced",
         "reviewed_games":len(review_games),"prop_line_quota":quota,"saved_sides":side_saved,"saved_totals":total_saved,
         "unavailable_games":unique_unavailable[:10]},
       "model_policy":"Team-efficiency ratings projection with explicit early-season uncertainty. Not yet a historically fitted regression. Market odds are used only for EV and no-vig comparison, never as the model probability.",
