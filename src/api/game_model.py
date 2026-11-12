@@ -887,6 +887,8 @@ def build_board(force=False,preview_date=None):
         if len(frozen)==2 and (frozen["sides"]["picks"] or frozen["totals"]["picks"]):
             return {"slate_date":slate_date,"frozen":True,"record_status":"LOCKED",
               "sides":frozen["sides"]["picks"],"totals":frozen["totals"]["picks"],
+              "experimental_totals":_experimental_totals_history(slate_date),
+              "experimental_totals_metrics":_experimental_totals_metrics(),
               "metrics":_metrics(),"settlement":settlement,
               "source_status":{"odds":"frozen DraftKings snapshot","team_ratings":"frozen pregame snapshot"}}
         # Legacy empty rows are not a valid pregame snapshot.
@@ -995,7 +997,7 @@ def build_board(force=False,preview_date=None):
             for event_id,home_injury,away_injury in pool.map(review_game,review_games):
                 reviewed[event_id]=(home_injury,away_injury)
 
-    sides=[]; totals=[]
+    sides=[]; totals=[]; experimental_totals=[]
     for event_id,(home_injury,away_injury) in reviewed.items():
         game=game_by_id[event_id]
         model=dict(base_models[event_id])
@@ -1015,12 +1017,14 @@ def build_board(force=False,preview_date=None):
         model["home_adjustments"]=home_adjustments; model["away_adjustments"]=away_adjustments
         for candidate in _candidate(game,"sides",model):
             if _qualified(candidate): sides.append(candidate)
+        experimental_totals.extend(_candidate(game,"totals",model))
         if _TOTALS_OFFICIAL_ENABLED:
             for candidate in _candidate(game,"totals",model):
                 if _qualified(candidate): totals.append(candidate)
 
     sides.sort(key=lambda x:(-x["ev_pct"],-x["edge_pp"]))
     totals.sort(key=lambda x:(-x["ev_pct"],-x["edge_pp"]))
+    experimental_totals.sort(key=lambda x:(-x["ev_pct"],-x["edge_pp"]))
     unique_unavailable=[]; seen_unavailable=set()
     for item in unavailable:
         key=(str(item.get("event_id") or ""),str(item.get("reason") or ""))
@@ -1032,11 +1036,14 @@ def build_board(force=False,preview_date=None):
         unique_unavailable.append(row)
     if preview:
         side_picks=sides[:5]; total_picks=totals[:5]; side_saved=0; total_saved=0
+        experimental_picks=experimental_totals[:10]
     else:
         side_picks,side_saved=_save_slate(sides,"sides",slate_date)
         total_picks,total_saved=_save_slate(totals,"totals",slate_date)
+        experimental_picks=_save_experimental_totals(experimental_totals,slate_date)
     return {"slate_date":slate_date,"preview":preview,"frozen":not preview,
-      "record_status":"PREVIEW" if preview else "LOCKED","sides":side_picks,"totals":total_picks,
+      "record_status":"PREVIEW" if preview else "LOCKED","sides":side_picks,"totals":total_picks,"experimental_totals":experimental_picks,
+      "experimental_totals_metrics":_experimental_totals_metrics(),
       "metrics":_metrics(),"settlement":settlement,"game_count":len(future_games),
       "source_status":{"odds":"PropLine DraftKings ("+odds_source+")","team_ratings":ratings["source"],
         "season":ratings["season"],"team_rating_quality":ratings.get("data_quality"),"team_rating_fallback_used":ratings.get("fallback_used",False),"team_rating_fallback_reason":ratings.get("fallback_reason"),"team_count":len(ratings.get("teams") or {}),"injuries":injury_meta.get("status","unavailable"),
