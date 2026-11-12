@@ -126,8 +126,10 @@ def score_game(prediction, game, sd):
         ("away", away_win, away_market, away_push, quote["away_odds"], -mean_margin, -quote["line"]),
     ):
         ev = market_ev(probability, side_push, odds)
-        edge = (probability - market_probability) * 100.0
-        if edge >= MIN_EDGE_PP and ev * 100.0 >= MIN_EV_PCT and probability >= 0.50:
+        conditional_probability = probability / max(1e-12, 1.0 - side_push)
+        conditional_probability = max(0.0, min(1.0, conditional_probability))
+        edge = (conditional_probability - market_probability) * 100.0
+        if edge >= MIN_EDGE_PP and ev * 100.0 >= MIN_EV_PCT and conditional_probability >= 0.50:
             actual_side_margin = actual_margin if side == "home" else -actual_margin
             result = actual_side_margin + signed_line
             outcome = "PUSH" if abs(result) < 1e-9 else ("WIN" if result > 0 else "LOSS")
@@ -135,7 +137,8 @@ def score_game(prediction, game, sd):
             candidates.append({
                 "date": prediction["date"], "game_id": prediction["game_id"],
                 "matchup": f"{away} @ {home}", "selection": side, "line": signed_line,
-                "odds": odds, "model_probability": probability,
+                "odds": odds, "model_probability": conditional_probability,
+                "model_win_probability_unconditional": probability, "model_push_probability": side_push,
                 "market_no_vig_probability": market_probability, "edge_pp": edge,
                 "ev_pct": ev * 100.0, "outcome": outcome, "profit_units": profit,
                 "actual_margin": actual_margin, "predicted_margin": mean_margin,
