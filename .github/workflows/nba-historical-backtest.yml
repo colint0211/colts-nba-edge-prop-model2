@@ -8,8 +8,10 @@ on:
     paths:
       - src/api/nba_historical_backtest.py
       - src/api/nba_live_aligned_backtest.py
+      - src/api/nba_historical_ats_backtest.py
       - src/api/game_model.py
       - tests/test_game_model_player_impact.py
+      - tests/test_historical_ats_backtest.py
       - .github/workflows/nba-historical-backtest.yml
       - requirements.txt
       - pyproject.toml
@@ -63,6 +65,12 @@ jobs:
       - name: Run production-formula-aligned walk-forward validation
         run: python -m src.api.nba_live_aligned_backtest
 
+      - name: Run opt-in DraftKings historical ATS validation
+        env:
+          DUNKAPI_API_KEY: ${{ secrets.DUNKAPI_API_KEY }}
+          NBA_ATS_BACKTEST_ENABLED: ${{ vars.NBA_ATS_BACKTEST_ENABLED }}
+        run: python -m src.api.nba_historical_ats_backtest
+
       - name: Save backtest results
         uses: actions/upload-artifact@v4
         with:
@@ -70,5 +78,6 @@ jobs:
           path: |
             backtest_results.json
             nba_live_aligned_backtest.json
+            nba_historical_ats_backtest.json
           if-no-files-found: error
           retention-days: 30
