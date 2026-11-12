@@ -17,6 +17,20 @@ class PlayerImpactTests(unittest.TestCase):
             game_model._player_name_key("Kevin McCullar Jr."),
         )
 
+    def test_diacritic_player_names_match_ascii_injury_reports(self):
+        self.assertEqual(
+            game_model._player_name_key("Porziņģis, Kristaps"),
+            game_model._player_name_key("Kristaps Porzingis"),
+        )
+        self.assertEqual(
+            game_model._player_name_key("Krejčí, Vít"),
+            game_model._player_name_key("Vit Krejci"),
+        )
+        self.assertEqual(
+            game_model._player_name_key("Nurkić, Jusuf"),
+            game_model._player_name_key("Jusuf Nurkic"),
+        )
+
     def test_official_suffix_can_match_bref_without_suffix(self):
         self.assertEqual(
             game_model._player_name_key("Butler III, Jimmy"),
