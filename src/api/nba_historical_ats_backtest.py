@@ -128,7 +128,8 @@ def score_game(prediction, game, sd):
         ev = market_ev(probability, side_push, odds)
         edge = (probability - market_probability) * 100.0
         if edge >= MIN_EDGE_PP and ev * 100.0 >= MIN_EV_PCT and probability >= 0.50:
-            result = actual_margin + signed_line
+            actual_side_margin = actual_margin if side == "home" else -actual_margin
+            result = actual_side_margin + signed_line
             outcome = "PUSH" if abs(result) < 1e-9 else ("WIN" if result > 0 else "LOSS")
             profit = 0.0 if outcome == "PUSH" else (american_profit(odds) if outcome == "WIN" else -1.0)
             candidates.append({
