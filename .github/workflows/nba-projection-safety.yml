@@ -1,0 +1,40 @@
+name: NBA prop projection-side safety tests
+
+on:
+  push:
+    branches:
+      - feature/nba-stats-off-def-primary
+    paths:
+      - src/api/index.py
+      - tests/test_projection_side_review.py
+      - .github/workflows/nba-projection-safety.yml
+  pull_request:
+    branches:
+      - main
+    paths:
+      - src/api/index.py
+      - tests/test_projection_side_review.py
+      - .github/workflows/nba-projection-safety.yml
+
+permissions:
+  contents: read
+
+jobs:
+  projection-side-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+      - name: Compile application
+        run: python -m compileall -q src
+      - name: Run projection-side safety tests
+        run: python -m unittest tests.test_projection_side_review -v
