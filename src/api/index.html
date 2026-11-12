@@ -60,6 +60,13 @@ table{width:100%;border-collapse:collapse;min-width:800px;font-size:12px}th,td{p
   <div class="stat"><div class="statlabel">Win rate</div><div id="winrate" class="num">—</div></div>
   <div class="stat"><div class="statlabel">Hypothetical units</div><div id="units" class="num">—</div></div>
  </div>
+ <div class="section">Independent records</div>
+ <div class="grid">
+  <div class="stat"><div class="statlabel">Sides · W–L</div><div id="recSides" class="num">—</div><div id="recSidesSub" class="muted">Official sides ledger</div></div>
+  <div class="stat"><div class="statlabel">Totals · W–L</div><div id="recTotals" class="num">—</div><div id="recTotalsSub" class="muted">Experimental totals ledger</div></div>
+  <div class="stat"><div class="statlabel">Top 5 EV props · W–L</div><div id="recTopEv" class="num">—</div><div id="recTopEvSub" class="muted">Across all five markets</div></div>
+  <div class="stat"><div class="statlabel">All five markets · W–L</div><div id="recAllProps" class="num">—</div><div id="recAllPropsSub" class="muted">Up to 25 locked props</div></div>
+ </div>
 
  <div class="section" id="boardTitle">Point spread candidates</div>
  <div class="hint" id="boardHint">Sides and totals are evaluated independently from sportsbook prices.</div>
@@ -84,6 +91,20 @@ table{width:100%;border-collapse:collapse;min-width:800px;font-size:12px}th,td{p
   <table><thead><tr><th>Market</th><th>Player</th><th>Matchup</th><th>Side</th><th>Line</th><th>Odds</th><th>Model %</th><th>Projection</th><th>Actual</th><th>Result</th><th>Units</th></tr></thead>
   <tbody id="propHistoryRows"><tr><td colspan="11">Loading…</td></tr></tbody></table>
  </div>
+ <div class="section">Top 5 EV player props · separate record</div>
+ <div class="hint">Five highest-EV picks selected across points, rebounds, assists, steals and threes. Settled independently from the market Top 5 sets.</div>
+ <div class="filters"><span id="topEvStatus" class="muted">Loading…</span></div>
+ <div class="tablewrap"><table><thead><tr><th>Market</th><th>Player</th><th>Matchup</th><th>Side</th><th>Line</th><th>Odds</th><th>Model %</th><th>EV</th><th>Actual</th><th>Result</th><th>Units</th></tr></thead><tbody id="topEvRows"><tr><td colspan="11">Loading…</td></tr></tbody></table></div>
+
+ <div class="section">All 5 player props combined · separate record</div>
+ <div class="hint">The five locked candidates from each of the five prop markets, up to 25 picks total. This record does not change the Top 5 EV record.</div>
+ <div class="filters"><span id="allPropsStatus" class="muted">Loading…</span></div>
+ <div class="tablewrap"><table><thead><tr><th>Market</th><th>Player</th><th>Matchup</th><th>Side</th><th>Line</th><th>Odds</th><th>Model %</th><th>EV</th><th>Actual</th><th>Result</th><th>Units</th></tr></thead><tbody id="allPropsRows"><tr><td colspan="11">Loading…</td></tr></tbody></table></div>
+
+ <div class="section">Experimental totals · separate record</div>
+ <div class="hint">Totals probabilities and EV are tracked separately from official sides. The total model remains experimental because its untouched holdout showed material projection bias.</div>
+ <div class="filters"><span id="totalsHistoryStatus" class="muted">Loading…</span></div>
+ <div class="tablewrap"><table><thead><tr><th>Matchup</th><th>Selection</th><th>Line</th><th>Odds</th><th>Model %</th><th>No-vig %</th><th>EV</th><th>Projection</th><th>Actual</th><th>Result</th><th>Units</th></tr></thead><tbody id="totalsHistoryRows"><tr><td colspan="11">Loading…</td></tr></tbody></table></div>
 
  <div class="section">Daily model results</div>
  <div class="hint">The model record below belongs only to this sides-and-totals model. Units are hypothetical at 1u per pick. The former player-prop ledger is preserved separately and is not included.</div>
@@ -206,7 +227,7 @@ function adjustmentText(x){
 function card(p,i){
  const side=market==='sides';
  const isOver=p.selection==='OVER';
- const label=side?'POINT SPREAD':'GAME TOTAL';
+ const label=side?'POINT SPREAD':'EXPERIMENTAL GAME TOTAL';
  const pick=side?(p.selection+' '+(p.line>0?'+':'')+p.line):(p.selection+' '+p.line);
  const edge=Number(p.edge_pp);
  const score=p.projected_away+' @ '+p.projected_home;
@@ -218,12 +239,12 @@ function card(p,i){
  '<div class="mini"><div class="mini-label">Model edge</div><div class="mini-value positive">+'+fmt(p.edge_pp,1)+' pp</div></div></div>'+
  '<div class="bottom"><span>Expected value: <b class="positive">+'+fmt(p.ev_pct,2)+'%</b></span><span>Projected score: '+fmt(p.projected_away,1)+' – '+fmt(p.projected_home,1)+'</span>'+
  '<span>'+ (side?'Projected cover margin: '+signed(p.expected_margin_after_spread):'Projected total: '+fmt(p.projected_total,1)+' · Line edge: '+signed(p.projected_total_edge))+'</span></div>'+
- '<div class="source">RESEARCH CANDIDATE ONLY — winner-probability validation does not establish spread-cover calibration; historical DraftKings closing-line/ATS validation is not yet available.</div>'+
+ '<div class="source">'+(side?'RESEARCH CANDIDATE ONLY — winner-probability validation does not establish spread-cover calibration; historical DraftKings closing-line/ATS validation is not yet available.':'EXPERIMENTAL TOTALS — model probability and EV are calculated from DraftKings prices, but totals are excluded from official picks because holdout bias remains unresolved.')+'</div>'+
  '<details><summary>Model factors and injury review</summary><p>Home: '+esc(adjustmentText(home))+'</p><p>Away: '+esc(adjustmentText(away))+'</p><p>Projected pace: '+fmt(p.projected_pace,1)+' · Model: '+esc(p.model_version)+'</p></details></article>';
 }
 function renderBoard(){
  if(!boardData)return;
- const list=market==='sides'?(boardData.sides||[]):(boardData.totals||[]);
+ const list=market==='sides'?(boardData.sides||[]):(boardData.experimental_totals||[]);
  let message='No '+(market==='sides'?'spread':'total')+' candidates passed the current model gates. No pick will be forced.';
  if(boardData.record_status==='MISSED_PREGAME_WINDOW')message='MISSED PREGAME WINDOW — no verified pregame snapshots were recorded. We will not recreate picks using postgame information.';
  else if(boardData.record_status==='WAITING_FOR_LINES')message='WAITING FOR DRAFTKINGS LINES — scheduled games remain open; no empty slate was saved.';
