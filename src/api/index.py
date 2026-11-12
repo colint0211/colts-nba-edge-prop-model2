@@ -2160,6 +2160,31 @@ def _projection_side_review(prop):
     return not aligned
 
 
+def _apply_projection_side_guard(prop):
+    """Remove a contradictory lean from every board, including already-frozen snapshots."""
+    if not isinstance(prop, dict):
+        return prop
+    side = str(prop.get("best_side") or "").strip().upper()
+    if side not in ("OVER", "UNDER"):
+        return prop
+    if not _projection_side_review(prop):
+        return prop
+
+    # Preserve the original model decision for audit, but never display it as a bet.
+    prop["model_side_before_projection_guard"] = side
+    prop["selection_gate_status"] = "HOLD"
+    prop["selection_gate_reason"] = prop.get("projection_review_reason")
+    prop["best_side"] = None
+    prop["best_odds"] = None
+    prop["best_probability"] = None
+    prop["expected_value_pct"] = None
+    prop["expected_profit_per_100"] = None
+    prop["edge_pp"] = None
+    prop["recommendation"] = "PASS"
+    prop["projection_review_required"] = True
+    return prop
+
+
 def _snapshot_daily_market_top5(market, props):
     """Select initial Top 5, then run targeted negative review and promote replacements."""
     try:
@@ -2193,7 +2218,7 @@ def _snapshot_daily_market_top5(market, props):
             reverse=True,
         )
         for item in ordered:
-            _projection_side_review(item)
+            _apply_projection_side_guard(item)
         if not ordered:
             return []
         frozen = prediction_ledger.freeze_daily_slate(market, slate_date, ordered)
@@ -2201,7 +2226,8 @@ def _snapshot_daily_market_top5(market, props):
         injury_feed = _load_official_injury_feed()
         eligible = []
         for prop in candidates:
-            if _projection_side_review(prop):
+            _apply_projection_side_guard(prop)
+            if prop.get("projection_review_required"):
                 prop["selection_gate_status"] = "HOLD"
                 prop["selection_gate_reason"] = prop.get("projection_review_reason")
                 continue
@@ -2378,6 +2404,7 @@ def proprietary_market_board(market: str = "rebounds"):
         # BEFORE revalidation. Otherwise every candidate appears UNKNOWN and the
         # pregame gate can never evaluate a legitimately scheduled matchup.
         for prop in frozen_props:
+            _apply_projection_side_guard(prop)
             _apply_official_injury(prop, injury_feed)
             _apply_balldontlie_game(prop, bdl_games)
         # Keep original candidate lines/snapshot intact; only the separate daily
@@ -2402,6 +2429,7 @@ def proprietary_market_board(market: str = "rebounds"):
     if cached_board and now - cached_board[0] < _BP_BOARD_TTL_SECONDS:
         cached_result = _json_safe(cached_board[1])
         for cached_prop in cached_result.get("props") or []:
+            _apply_projection_side_guard(cached_prop)
             _apply_balldontlie_game(cached_prop, bdl_games)
         cached_result["injury_feed"] = injury_feed.get("meta", {})
         cached_result["balldontlie"] = {key: value for key, value in bdl_games.items() if key != "games"}
@@ -2507,6 +2535,7 @@ def proprietary_market_board(market: str = "rebounds"):
             # Injury and return-to-play review is deliberately deferred until
             # after this market's provisional Top 5 has been ranked.
             _apply_balldontlie_game(market_prop, bdl_games)
+            _apply_projection_side_guard(market_prop)
             output.append(market_prop)
         except Exception as exc:
             failures.append(name + ": " + type(exc).__name__ + ": " + str(exc)[:180])
