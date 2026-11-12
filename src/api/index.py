@@ -2316,13 +2316,15 @@ def proprietary_market_board(market: str = "rebounds"):
         frozen_slate = None
     if frozen_slate and frozen_slate.get("candidates"):
         frozen_props = [dict(p) for p in (frozen_slate.get("candidates") or []) if isinstance(p, dict)]
-        # Re-run today's targeted injury/workload gate even for an already-frozen
-        # snapshot. The original source lines remain intact; unsafe picks are
-        # removed from the actionable Top 5 and replaced from the same snapshot.
-        frozen_props = _revalidate_frozen_market_candidates(market, frozen_props, injury_feed)
+        # Enrich the frozen snapshot with current injury and verified game state
+        # BEFORE revalidation. Otherwise every candidate appears UNKNOWN and the
+        # pregame gate can never evaluate a legitimately scheduled matchup.
         for prop in frozen_props:
             _apply_official_injury(prop, injury_feed)
             _apply_balldontlie_game(prop, bdl_games)
+        # Keep original candidate lines/snapshot intact; only the separate daily
+        # Top 5 ledger is refreshed when a candidate still clears every gate.
+        frozen_props = _revalidate_frozen_market_candidates(market, frozen_props, injury_feed)
         return JSONResponse({
             "market": market,
             "source": "Frozen Eastern-time daily slate · original PropLine/DraftKings snapshot",
