@@ -77,6 +77,14 @@ table{width:100%;border-collapse:collapse;min-width:800px;font-size:12px}th,td{p
  </div>
  <div id="board" class="cards"><div class="empty">Loading team ratings and DraftKings lines…</div></div>
 
+ <div class="section">Daily locked player prop picks</div>
+ <div class="hint">Only timestamped pregame selections that passed the daily eligibility gates appear here. Markets without qualified picks remain blank rather than forcing a play.</div>
+ <div class="filters"><span id="propHistoryStatus" class="muted">Loading player prop results…</span></div>
+ <div class="tablewrap">
+  <table><thead><tr><th>Market</th><th>Player</th><th>Matchup</th><th>Side</th><th>Line</th><th>Odds</th><th>Model %</th><th>Projection</th><th>Actual</th><th>Result</th><th>Units</th></tr></thead>
+  <tbody id="propHistoryRows"><tr><td colspan="11">Loading…</td></tr></tbody></table>
+ </div>
+
  <div class="section">Daily model results</div>
  <div class="hint">The model record below belongs only to this sides-and-totals model. Units are hypothetical at 1u per pick. The former player-prop ledger is preserved separately and is not included.</div>
  <div class="filters">
@@ -161,6 +169,28 @@ function renderPropBoard(m){
  }).join(''):'<div class="empty">No '+esc(m)+' prop projections are available. The model will not force a pick.</div>';
  if(d.unavailable?.length)el('updated').textContent+=' · '+d.unavailable.length+' player data issues';
 }
+async function loadDailyPropHistory(day){
+ const status=el('propHistoryStatus'),body=el('propHistoryRows');
+ if(!day){status.textContent='Choose a slate date to view player prop results.';return;}
+ try{
+  const r=await fetch('/api/model/daily-top5?slate_date='+encodeURIComponent(day)+'&t='+Date.now(),{cache:'no-store'});
+  const d=await r.json();if(!r.ok)throw Error(d.detail||'Player prop history unavailable');
+  const picks=d.predictions||[];
+  const wins=picks.filter(p=>p.outcome==='WIN').length;
+  const losses=picks.filter(p=>p.outcome==='LOSS').length;
+  const pushes=picks.filter(p=>p.outcome==='PUSH').length;
+  const pending=picks.filter(p=>!p.outcome).length;
+  status.textContent=picks.length+' locked player props · '+wins+'W – '+losses+'L'+(pushes?' · '+pushes+' pushes':'')+' · '+pending+' pending';
+  body.innerHTML=picks.length?picks.map(p=>{
+   const result=p.outcome||'PENDING',cls=result==='WIN'?'win':result==='LOSS'?'loss':result==='PUSH'?'push':'';
+   const profit=p.profit_units==null?'—':(p.profit_units>0?'+':'')+fmt(p.profit_units,2)+'u';
+   return '<tr><td>'+esc(p.market)+'</td><td>'+esc(p.player)+'</td><td>'+esc(p.game||'')+'</td><td>'+esc(p.side)+'</td><td>'+fmt(p.line,1)+'</td><td>'+odds(p.odds)+'</td><td>'+fmt(p.probability_pct,1)+'%</td><td>'+fmt(p.projection,1)+'</td><td>'+fmt(p.actual_value,1)+'</td><td class="'+cls+'">'+result+'</td><td>'+profit+'</td></tr>';
+  }).join(''):'<tr><td colspan="11">No qualified, locked player prop picks were recorded for '+esc(day)+'. Research candidates are not counted as official picks.</td></tr>';
+ }catch(e){
+  status.textContent='Player prop results unavailable: '+(e.message||e);
+  body.innerHTML='<tr><td colspan="11">Could not load the player prop ledger.</td></tr>';
+ }
+}
 function renderMetrics(m){
  const a=m?.all_time||{};el('settled').textContent=a.settled??0;
  el('record').textContent=(a.wins??0)+' – '+(a.losses??0)+(a.pushes?' / '+a.pushes+'P':'');
@@ -242,6 +272,7 @@ async function loadHistory(){
   const r=await fetch('/api/game-history?slate_date='+encodeURIComponent(day)+'&t='+Date.now(),{cache:'no-store'});
   const d=await r.json();if(!r.ok)throw Error(d.detail||'History unavailable');
   historyRows=d.predictions||[];renderMetrics(d.metrics);
+  await loadDailyPropHistory(day);
   const wins=historyRows.filter(x=>x.outcome==='WIN').length,losses=historyRows.filter(x=>x.outcome==='LOSS').length;
   const pending=historyRows.filter(x=>!x.outcome).length;
   el('historyStatus').textContent=historyRows.length+' model picks · '+wins+' wins · '+losses+' losses · '+pending+' pending';
