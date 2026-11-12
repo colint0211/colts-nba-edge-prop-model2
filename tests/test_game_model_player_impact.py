@@ -64,6 +64,87 @@ class PlayerImpactTests(unittest.TestCase):
         self.assertTrue(result["players"][0]["impact_data_available"])
         self.assertAlmostEqual(result["points"], -(4.0 * 35.0 / 48.0), places=3)
 
+    def test_out_player_with_zero_current_season_games_gets_no_double_counted_adjustment(self):
+        snapshot = {
+            "available": True,
+            "players": {
+                "jimmybutler|GSW": {
+                    "minutes_per_game": 31.1,
+                    "bpm_shrunk": 5.5,
+                    "bpm_prior": 5.5,
+                    "games_current_season": 0,
+                }
+            },
+            "meta": {"replacement_bpm": -2.0, "status": "fresh"},
+        }
+        injury = [{
+            "team": "GSW",
+            "player": "Butler III, Jimmy",
+            "status": "Out",
+            "game_date": "11/11/2026",
+            "reason": "Injury/Illness",
+        }]
+        with patch.object(game_model, "_load_player_impact_snapshot", return_value=snapshot):
+            result = game_model._injury_adjustment(
+                "GSW", injury, "2026-27", "2026-11-11T19:00:00-05:00", 100.0
+            )
+        self.assertFalse(result["unpriced_injury"])
+        self.assertEqual(result["points"], 0.0)
+        self.assertEqual(result["players"][0]["estimated_team_points"], 0.0)
+        self.assertIn("zero current-season appearances", result["players"][0]["impact_source"])
+
+    def test_missing_out_player_in_complete_current_season_table_is_zero_incremental(self):
+        snapshot = {
+            "available": True,
+            "players": {},
+            "meta": {
+                "replacement_bpm": -2.0,
+                "status": "fresh",
+                "current_season_player_table_complete": True,
+                "current_season_team_count": 30,
+            },
+        }
+        injury = [{
+            "team": "ORL",
+            "player": "Nelson, Izaiyah",
+            "status": "Out",
+            "game_date": "11/11/2026",
+            "reason": "Injury/Illness",
+        }]
+        with patch.object(game_model, "_load_player_impact_snapshot", return_value=snapshot):
+            result = game_model._injury_adjustment(
+                "ORL", injury, "2026-27", "2026-11-11T19:00:00-05:00", 100.0
+            )
+        self.assertFalse(result["unpriced_injury"])
+        self.assertEqual(result["points"], 0.0)
+        self.assertTrue(result["players"][0]["impact_data_available"])
+        self.assertIn("no current-season player row", result["players"][0]["impact_source"])
+
+    def test_missing_out_player_in_incomplete_snapshot_still_blocks(self):
+        snapshot = {
+            "available": True,
+            "players": {},
+            "meta": {
+                "replacement_bpm": -2.0,
+                "status": "fresh",
+                "current_season_player_table_complete": False,
+                "current_season_team_count": 20,
+            },
+        }
+        injury = [{
+            "team": "ORL",
+            "player": "Nelson, Izaiyah",
+            "status": "Out",
+            "game_date": "11/11/2026",
+            "reason": "Injury/Illness",
+        }]
+        with patch.object(game_model, "_load_player_impact_snapshot", return_value=snapshot):
+            result = game_model._injury_adjustment(
+                "ORL", injury, "2026-27", "2026-11-11T19:00:00-05:00", 100.0
+            )
+        self.assertTrue(result["unpriced_injury"])
+        self.assertFalse(result["players"][0]["impact_data_available"])
+
     def test_questionable_player_remains_blocked(self):
         snapshot = {
             "available": True,
