@@ -537,7 +537,16 @@ def _injury_adjustment(team,injuries,season,game_date,pace=100.0):
     for item in relevant:
         status=str(item.get("status") or "").casefold()
         name=str(item.get("player") or "")
-        record=players.get(_player_name_key(name)+"|"+team)
+        name_key=_player_name_key(name)
+        record=players.get(name_key+"|"+team)
+        if record is None:
+            # Some official reports append a suffix (e.g. "Butler III")
+            # that Basketball-Reference omits. Permit only suffix-only
+            # normalization after the exact full-name lookup fails.
+            import re
+            base_key=re.sub(r"(jr|sr|ii|iii|iv|v)$","",name_key)
+            if base_key!=name_key:
+                record=players.get(base_key+"|"+team)
         # Questionable/doubtful/day-to-day availability is probabilistic and
         # is not priced as a full absence. Keep the game out until confirmed.
         if status!="out":
@@ -557,6 +566,8 @@ def _injury_adjustment(team,injuries,season,game_date,pace=100.0):
             gp=int(record.get("games_current_season") or 0)
             if not (math.isfinite(mpg) and math.isfinite(bpm) and 0<=mpg<=48 and -12<=bpm<=12):
                 raise ValueError("invalid player impact values")
+            if gp<5 and record.get("bpm_prior") is None:
+                raise ValueError("fewer than five current games and no same-team prior-season baseline")
             raw=(bpm-replacement_bpm)*(mpg/48.0)*(float(pace)/100.0)
             impact=max(-2.5,min(5.5,raw))
             if not math.isfinite(impact): raise ValueError("non-finite impact")
