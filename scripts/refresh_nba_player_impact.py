@@ -6,7 +6,7 @@ The API combines BPM with minutes and a replacement-level baseline, and keeps
 strict fail-closed behavior when player/team matching is ambiguous.
 """
 from __future__ import annotations
-import json, re, sys, time
+import json, re, sys, time, unicodedata
 from datetime import datetime, timezone
 from io import StringIO
 from pathlib import Path
@@ -65,7 +65,7 @@ def number(value):
     if raw in ("","—","-"): return None
     return float(raw)
 def name_key(value):
-    return re.sub(r"[^a-z0-9]","",str(value or "").lower())
+    return re.sub(r"[^a-z0-9]","",unicodedata.normalize("NFKD",str(value or "").casefold()).encode("ascii","ignore").decode("ascii"))
 def collect(year):
     per_url=f"{BASE}/NBA_{year}_per_game.html"
     adv_url=f"{BASE}/NBA_{year}_advanced.html"
