@@ -22,8 +22,6 @@ jobs:
   backtest:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    env:
-      DATABASE_URL: ${{ secrets.DATABASE_URL }}
     steps:
       - name: Check out preview branch
         uses: actions/checkout@v4
@@ -39,17 +37,11 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
-      - name: Validate required database secret
-        run: |
-          if [ -z "$DATABASE_URL" ]; then
-            echo "::error::GitHub repository secret DATABASE_URL is missing."
-            exit 1
-          fi
       - name: Run leakage-safe historical backtest
         run: |
           python - <<'PY'
           from src.api.nba_historical_backtest import run
-          result = run()
+          result = run(persist=False)
           print("BACKTEST_RESULT=" + __import__("json").dumps({
               "success": result["success"],
               "games_scored": result["games_scored"],
@@ -58,3 +50,11 @@ jobs:
               "limitations": result["limitations"],
           }, sort_keys=True))
           PY
+
+      - name: Save backtest results
+        uses: actions/upload-artifact@v4
+        with:
+          name: nba-historical-backtest-results
+          path: backtest_results.json
+          if-no-files-found: error
+          retention-days: 30
