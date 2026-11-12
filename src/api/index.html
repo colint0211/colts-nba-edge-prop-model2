@@ -130,7 +130,14 @@ async function loadPropBoard(m){
 }
 function renderPropBoard(m){
  const d=propBoards[m]||{},list=(d.props||[]).slice(0,5);
- el('board').innerHTML=list.length?list.map((p,i)=>{
+  const missed=boardData.record_status==='MISSED_PREGAME_WINDOW';
+  const waiting=boardData.record_status==='WAITING_FOR_LINES';
+  const noGames=boardData.record_status==='NO_GAMES';
+  const emptyMessage=missed?'MISSED PREGAME WINDOW — no verified pregame '+(market==='sides'?'spread':'total')+' picks were recorded for this date. We will not recreate picks using postgame information.':
+    waiting?'Waiting for DraftKings lines for scheduled games. The slate remains open and will retry; no empty snapshot has been saved.':
+    noGames?'NO GAMES — no NBA games were found for this slate date.':
+    'No '+(market==='sides'?'spread':'total')+' bets currently clear the model’s value requirements. No bet is better than forcing a pick.';
+  el('board').innerHTML=list.length?list.map(card).join(''):'<div class="empty">'+esc(emptyMessage)+'</div>';
   const calibrated=p.calibration_applied===true;
   const recommendation=p.recommendation||'PASS';
   const gameState=(p.balldontlie_game||{}).game_state||'UNKNOWN';
@@ -205,7 +212,7 @@ async function loadBoard(refresh=false){
  try{
   const r=await fetch('/api/game-board'+(refresh?'?refresh=true':''),{cache:'no-store'});
   const d=await r.json();if(!r.ok)throw Error(d.detail||d.error||'Game board unavailable');
-  boardData=d;el('status').textContent=d.frozen?'SLATE LOCKED':'LIVE DATA';
+   boardData=d;el('status').textContent=d.record_status==='MISSED_PREGAME_WINDOW'?'MISSED PREGAME WINDOW':d.record_status==='WAITING_FOR_LINES'?'WAITING FOR LINES':d.record_status==='NO_GAMES'?'NO GAMES':d.frozen?'SLATE LOCKED':'LIVE DATA';
   el('updated').textContent='Updated '+new Date().toLocaleTimeString();
   el('slateDate').textContent='Slate: '+d.slate_date;
   el('historyDate').value=d.slate_date;
