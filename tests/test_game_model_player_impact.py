@@ -17,6 +17,12 @@ class PlayerImpactTests(unittest.TestCase):
             game_model._player_name_key("Kevin McCullar Jr."),
         )
 
+    def test_official_suffix_can_match_bref_without_suffix(self):
+        self.assertEqual(
+            game_model._player_name_key("Butler III, Jimmy"),
+            game_model._player_name_key("Jimmy Butler"),
+        )
+
     def test_confirmed_out_uses_fresh_player_impact_proxy(self):
         snapshot = {
             "available": True,
