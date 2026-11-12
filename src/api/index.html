@@ -184,17 +184,23 @@ function card(p,i){
  const home= p.home_adjustments||{},away=p.away_adjustments||{};
  return '<article class="card"><div class="top"><div><div class="name">'+(i+1)+'. '+esc(p.selection_name||p.selection)+'</div><div class="match">'+esc(p.matchup)+' · DraftKings</div></div><span class="decision">MODEL CANDIDATE</span></div>'+
  '<div class="linebox"><div><div class="line-label">'+label+'</div><div class="line">'+esc(pick)+'</div></div><div style="text-align:right"><div class="line-label">Sportsbook price</div><div class="line">'+odds(p.odds)+'</div></div></div>'+
- '<div class="metrics"><div class="mini"><div class="mini-label">Our probability</div><div class="mini-value">'+fmt(p.model_probability*100,1)+'%</div></div>'+
+ '<div class="metrics"><div class="mini"><div class="mini-label">Unvalidated model probability</div><div class="mini-value">'+fmt(p.model_probability*100,1)+'%</div></div>'+
  '<div class="mini"><div class="mini-label">No-vig market</div><div class="mini-value">'+fmt(p.market_probability*100,1)+'%</div></div>'+
  '<div class="mini"><div class="mini-label">Model edge</div><div class="mini-value positive">+'+fmt(p.edge_pp,1)+' pp</div></div></div>'+
  '<div class="bottom"><span>Expected value: <b class="positive">+'+fmt(p.ev_pct,2)+'%</b></span><span>Projected score: '+fmt(p.projected_away,1)+' – '+fmt(p.projected_home,1)+'</span>'+
  '<span>'+ (side?'Projected cover margin: '+signed(p.expected_margin_after_spread):'Projected total: '+fmt(p.projected_total,1)+' · Line edge: '+signed(p.projected_total_edge))+'</span></div>'+
+ '<div class="source">RESEARCH CANDIDATE ONLY — winner-probability validation does not establish spread-cover calibration; historical DraftKings closing-line/ATS validation is not yet available.</div>'+
  '<details><summary>Model factors and injury review</summary><p>Home: '+esc(adjustmentText(home))+'</p><p>Away: '+esc(adjustmentText(away))+'</p><p>Projected pace: '+fmt(p.projected_pace,1)+' · Model: '+esc(p.model_version)+'</p></details></article>';
 }
 function renderBoard(){
  if(!boardData)return;
  const list=market==='sides'?(boardData.sides||[]):(boardData.totals||[]);
- el('board').innerHTML=list.length?list.map(card).join(''):'<div class="empty">No '+(market==='sides'?'spread':'total')+' bets currently clear the model’s value requirements. No bet is better than forcing a pick.</div>';
+ let message='No '+(market==='sides'?'spread':'total')+' candidates passed the current model gates. No pick will be forced.';
+ if(boardData.record_status==='MISSED_PREGAME_WINDOW')message='MISSED PREGAME WINDOW — no verified pregame snapshots were recorded. We will not recreate picks using postgame information.';
+ else if(boardData.record_status==='WAITING_FOR_LINES')message='WAITING FOR DRAFTKINGS LINES — scheduled games remain open; no empty slate was saved.';
+ else if(boardData.record_status==='NO_GAMES')message='NO GAMES — no NBA games were found for this slate date.';
+ else if(market==='totals'&&boardData.source_status?.totals_validation?.official_picks_enabled===false)message='TOTALS DISABLED — the latest untouched holdout showed material projection bias. No official totals are issued until recalibration passes.';
+ el('board').innerHTML=list.length?list.map(card).join(''):'<div class="empty">'+esc(message)+'</div>';
 }
 function renderSources(s){
  if(!s){el('sources').textContent='Source diagnostics unavailable.';return}
