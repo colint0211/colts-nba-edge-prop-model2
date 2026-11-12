@@ -172,6 +172,8 @@ def save_predictions(rows, market=None):
                 ]
                 if prediction.get("daily_top5"):
                     identity_parts.extend(["daily_top5", str(prediction.get("slate_date") or "")])
+                if prediction.get("daily_record_group"):
+                    identity_parts.extend(["daily_record_group", str(prediction.get("daily_record_group")), str(prediction.get("daily_record_group_date") or "")])
             identity = "|".join(identity_parts)
             fingerprint = hashlib.sha256(identity.encode("utf-8")).hexdigest()
             snapshot = json.dumps(
@@ -539,6 +541,105 @@ def save_daily_top_five(rows, market, slate_date):
     result["already_saved"] = bool(existing_rows)
     result["filled"] = min(5, len(existing_rows) + result.get("saved", 0))
     return result
+
+
+
+def freeze_daily_record_groups(slate_date):
+    """Freeze independent cross-market Top 5 EV and combined-five-market records."""
+    slate_date = str(slate_date or "")
+    markets = ("points", "rebounds", "assists", "steals", "threes")
+    with _connect() as conn:
+        frozen = conn.execute(
+            "SELECT market FROM nba_daily_slates WHERE slate_date=%s",
+            (slate_date,),
+        ).fetchall()
+        if not set(markets).issubset({r[0] for r in frozen}):
+            return {"ready": False, "saved": 0}
+        rows = conn.execute(
+            "SELECT snapshot FROM nba_predictions WHERE snapshot->>'daily_top5'='true' AND snapshot->>'slate_date'=%s ORDER BY id",
+            (slate_date,),
+        ).fetchall()
+    picks = []
+    for (snap,) in rows:
+        if isinstance(snap, str):
+            try:
+                snap = json.loads(snap)
+            except Exception:
+                continue
+        if isinstance(snap, dict):
+            picks.append(snap)
+    def score(p):
+        return _number(p.get("expected_value_pct"))
+    ranked = sorted([p for p in picks if score(p) is not None], key=lambda p: score(p), reverse=True)
+    groups = {
+        "top5_ev_player_props": ranked[:5],
+        "all_five_player_props_combined": picks,
+    }
+    result = {}
+    for name, source in groups.items():
+        rows_to_save = []
+        seen = set()
+        for source_row in source:
+            item = dict(source_row)
+            item["daily_record_group"] = name
+            item["daily_record_group_date"] = slate_date
+            key = (item.get("market"), str(item.get("player") or "").casefold(),
+                   item.get("event_id") or item.get("game_id") or item.get("game"),
+                   item.get("line"), item.get("best_side"))
+            if key in seen:
+                continue
+            seen.add(key)
+            rows_to_save.append(item)
+        result[name] = save_predictions(rows_to_save)
+    return {"ready": True, "source_pick_count": len(picks),
+            "top5_ev_count": len(groups["top5_ev_player_props"]),
+            "combined_count": len(groups["all_five_player_props_combined"]),
+            "saved": result}
+
+
+def list_daily_record_group(slate_date, group_name):
+    with _connect() as conn:
+        rows = conn.execute(
+            """SELECT id,market,player,team,event,line,side,odds,blended_probability,
+                      projection,created_at,outcome,actual_value,profit_units,snapshot
+               FROM nba_predictions
+               WHERE snapshot->>'daily_record_group'=%s
+                 AND snapshot->>'daily_record_group_date'=%s ORDER BY id""",
+            (str(group_name), str(slate_date)),
+        ).fetchall()
+    result = []
+    for r in rows:
+        snap = r[14] if isinstance(r[14], dict) else {}
+        if isinstance(r[14], str):
+            try:
+                snap = json.loads(r[14])
+            except Exception:
+                snap = {}
+        result.append({
+            "id":r[0],"market":r[1],"player":r[2],"team":r[3],"game":r[4],
+            "line":r[5],"side":r[6],"odds":r[7],"probability_pct":round(r[8]*100,2),
+            "projection":r[9],"expected_value_pct":snap.get("expected_value_pct"),
+            "created_at":r[10].isoformat() if r[10] else None,"outcome":r[11],
+            "actual_value":r[12],"profit_units":r[13],"slate_date":str(slate_date),
+            "record_group":str(group_name),
+        })
+    return result
+
+
+def daily_record_group_metrics(group_name):
+    with _connect() as conn:
+        r = conn.execute(
+            """SELECT COUNT(*),COUNT(*) FILTER(WHERE outcome='WIN'),
+                      COUNT(*) FILTER(WHERE outcome='LOSS'),COUNT(*) FILTER(WHERE outcome='PUSH'),
+                      COALESCE(SUM(profit_units),0)
+               FROM nba_predictions WHERE snapshot->>'daily_record_group'=%s AND settled_at IS NOT NULL""",
+            (str(group_name),),
+        ).fetchone()
+    total,wins,losses,pushes,units = r
+    decisions = wins + losses
+    return {"settled":total,"wins":wins,"losses":losses,"pushes":pushes,
+            "win_rate_pct":round(wins/decisions*100,1) if decisions else None,
+            "net_units":round(float(units or 0),2)}
 
 
 def list_daily_top_five(slate_date, market="all"):
