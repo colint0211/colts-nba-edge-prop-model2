@@ -1,7 +1,6 @@
 import unittest
 
 from src.api.nba_free_ats_backtest import (
-    build_home_index,
     canonical_team,
     score_predictions,
     threshold_records,
@@ -31,13 +30,13 @@ class FreeAtsBacktestTests(unittest.TestCase):
             "date": "2026-10-20", "game_id": "game-1",
             "home": "DET", "away": "BOS",
             "actual_home": 121, "actual_away": 113,
-            "actual_margin": 8, "calibrated_margin": 2.0,
+            "actual_margin": 8, "calibrated_margin": 4.0,
         }]
         games = score_predictions(predictions, rows)
         self.assertEqual(len(games), 1)
         self.assertEqual(games[0]["closing_home_spread"], -2.5)
         self.assertEqual(games[0]["market_implied_home_margin"], 2.5)
-        self.assertEqual(games[0]["model_market_gap_points"], -0.5)
+        self.assertEqual(games[0]["model_market_gap_points"], 1.5)
         self.assertEqual(games[0]["ats_settlement"], "WIN")
 
     def test_score_mismatch_is_rejected(self):
