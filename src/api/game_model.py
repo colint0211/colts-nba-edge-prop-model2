@@ -76,6 +76,17 @@ def initialize():
         );
         CREATE INDEX IF NOT EXISTS nba_game_predictions_slate ON nba_game_predictions(slate_date,market);
         CREATE INDEX IF NOT EXISTS nba_game_predictions_pending ON nba_game_predictions(settled_at) WHERE settled_at IS NULL;
+        CREATE TABLE IF NOT EXISTS nba_experimental_totals (
+          id BIGSERIAL PRIMARY KEY, fingerprint TEXT NOT NULL UNIQUE, slate_date TEXT NOT NULL,
+          event_id TEXT NOT NULL, matchup TEXT NOT NULL, home_team TEXT NOT NULL, away_team TEXT NOT NULL,
+          selection TEXT NOT NULL, line DOUBLE PRECISION NOT NULL, odds INTEGER NOT NULL,
+          model_probability DOUBLE PRECISION NOT NULL, market_probability DOUBLE PRECISION,
+          projected_total DOUBLE PRECISION, snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), settled_at TIMESTAMPTZ,
+          actual_value DOUBLE PRECISION, outcome TEXT, profit_units DOUBLE PRECISION
+        );
+        CREATE INDEX IF NOT EXISTS nba_experimental_totals_slate ON nba_experimental_totals(slate_date);
+        CREATE INDEX IF NOT EXISTS nba_experimental_totals_pending ON nba_experimental_totals(settled_at) WHERE settled_at IS NULL;
         CREATE TABLE IF NOT EXISTS nba_game_slates (
           market TEXT NOT NULL, slate_date TEXT NOT NULL, candidates JSONB NOT NULL DEFAULT '[]'::jsonb,
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY(market,slate_date)
@@ -816,6 +827,44 @@ def _settle_pending():
               WHERE id=%s AND settled_at IS NULL""",(actual,outcome,profit,pid))
             settled+=cur.rowcount
     return {"checked":len(rows),"settled":settled}
+
+
+def _save_experimental_totals(rows, slate_date):
+    selected = sorted(rows or [], key=lambda r: (-(r.get("ev_pct") or -1e9), -(r.get("edge_pp") or -1e9)))[:5]
+    with _connect() as conn:
+        for row in selected:
+            identity = "|".join([str(slate_date), str(row.get("event_id")), str(row.get("selection")), str(row.get("line")), str(row.get("odds"))])
+            fingerprint = hashlib.sha256(identity.encode()).hexdigest()
+            conn.execute("""INSERT INTO nba_experimental_totals
+              (fingerprint,slate_date,event_id,matchup,home_team,away_team,selection,line,odds,model_probability,market_probability,projected_total,snapshot)
+              VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb) ON CONFLICT(fingerprint) DO NOTHING""",
+              (fingerprint,slate_date,str(row.get("event_id")),row.get("matchup"),row.get("home_team"),row.get("away_team"),
+               row.get("selection"),row.get("line"),row.get("odds"),row.get("model_probability"),row.get("market_probability"),
+               row.get("projected_total"),json.dumps(row,separators=(",",":"),allow_nan=False)))
+    return _experimental_totals_history(slate_date)
+
+
+def _experimental_totals_history(slate_date):
+    with _connect() as conn:
+        rows=conn.execute("SELECT id,selection,line,odds,model_probability,market_probability,projected_total,actual_value,outcome,profit_units,matchup,snapshot,created_at FROM nba_experimental_totals WHERE slate_date=%s ORDER BY id",(str(slate_date),)).fetchall()
+    out=[]
+    for r in rows:
+        snap=r[11] if isinstance(r[11],dict) else (json.loads(r[11]) if isinstance(r[11],str) else {})
+        out.append({"id":r[0],"selection":r[1],"line":r[2],"odds":r[3],"model_probability":r[4],
+          "market_probability":r[5],"projected_total":r[6],"actual_value":r[7],"outcome":r[8],
+          "profit_units":r[9],"matchup":r[10],"ev_pct":snap.get("ev_pct"),"edge_pp":snap.get("edge_pp"),
+          "created_at":r[12].isoformat() if r[12] else None,"experimental":True})
+    return out
+
+
+def _experimental_totals_metrics():
+    with _connect() as conn:
+        r=conn.execute("""SELECT COUNT(*),COUNT(*) FILTER(WHERE outcome='WIN'),
+          COUNT(*) FILTER(WHERE outcome='LOSS'),COUNT(*) FILTER(WHERE outcome='PUSH'),
+          COALESCE(SUM(profit_units),0) FROM nba_experimental_totals WHERE settled_at IS NOT NULL""").fetchone()
+    n,w,l,p,u=r
+    return {"settled":n,"wins":w,"losses":l,"pushes":p,"win_rate_pct":round(w/(w+l)*100,1) if w+l else None,"net_units":round(float(u or 0),2)}
+
 
 def build_board(force=False,preview_date=None):
     initialize()
