@@ -853,7 +853,10 @@ def _experimental_totals_history(slate_date):
         out.append({"id":r[0],"selection":r[1],"line":r[2],"odds":r[3],"model_probability":r[4],
           "market_probability":r[5],"projected_total":r[6],"actual_value":r[7],"outcome":r[8],
           "profit_units":r[9],"matchup":r[10],"ev_pct":snap.get("ev_pct"),"edge_pp":snap.get("edge_pp"),
-          "created_at":r[12].isoformat() if r[12] else None,"experimental":True})
+          "created_at":r[12].isoformat() if r[12] else None,"experimental":True,
+          "projected_home":snap.get("projected_home"),"projected_away":snap.get("projected_away"),
+          "projected_pace":snap.get("projected_pace"),"home_adjustments":snap.get("home_adjustments"),
+          "away_adjustments":snap.get("away_adjustments"),"selection_name":snap.get("selection_name")})
     return out
 
 
