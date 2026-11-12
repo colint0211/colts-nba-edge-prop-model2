@@ -835,9 +835,13 @@ def build_board(force=False,preview_date=None):
                 if item:
                     data=item[0] if isinstance(item[0],list) else json.loads(item[0] or "[]")
                     frozen[market]={"picks":data,"saved_at":item[1].isoformat() if item[1] else None}
-        if len(frozen)==2:
-            return {"slate_date":slate_date,"frozen":True,"sides":frozen["sides"]["picks"],"totals":frozen["totals"]["picks"],
-              "metrics":_metrics(),"settlement":settlement,"source_status":{"odds":"frozen DraftKings snapshot","team_ratings":"frozen pregame snapshot"}}
+        if len(frozen)==2 and (frozen["sides"]["picks"] or frozen["totals"]["picks"]):
+            return {"slate_date":slate_date,"frozen":True,"record_status":"LOCKED",
+              "sides":frozen["sides"]["picks"],"totals":frozen["totals"]["picks"],
+              "metrics":_metrics(),"settlement":settlement,
+              "source_status":{"odds":"frozen DraftKings snapshot","team_ratings":"frozen pregame snapshot"}}
+        # Legacy empty rows are not a valid pregame snapshot.
+        legacy_empty_slate=(len(frozen)==2 and not frozen["sides"]["picks"] and not frozen["totals"]["picks"])
     events,odds_source,quota=_fetch_lines(force)
     games=_parse_game_lines(events)
     if not games: raise RuntimeError("PropLine returned no upcoming NBA games with both DraftKings spread and full-game total quotes.")
@@ -860,27 +864,36 @@ def build_board(force=False,preview_date=None):
         schedule_probe=_schedule(force=False)
         if not schedule_probe:
             raise RuntimeError("Recent ESPN schedule unavailable; refusing to freeze an empty slate.")
-        has_scheduled_game=False
+        scheduled_on_date=[]
         for item in schedule_probe:
             try:
                 game_day=datetime.fromisoformat(item["date"].replace("Z","+00:00")).astimezone(ZoneInfo(_ET)).date().isoformat()
-                game_start=datetime.fromisoformat(item["date"].replace("Z","+00:00"))
-                if game_day==slate_date and game_start>now and not item.get("completed"):
-                    has_scheduled_game=True; break
+                if game_day==slate_date:
+                    scheduled_on_date.append(item)
             except Exception: continue
-        if has_scheduled_game:
-            return {"slate_date":slate_date,"frozen":False,"sides":[],"totals":[],
+        future_scheduled=[g for g in scheduled_on_date if not g.get("completed") and
+          datetime.fromisoformat(g["date"].replace("Z","+00:00"))>now]
+        if future_scheduled:
+            return {"slate_date":slate_date,"frozen":False,"record_status":"WAITING_FOR_LINES","sides":[],"totals":[],
               "metrics":_metrics(),"settlement":settlement,"game_count":0,
               "source_status":{"odds":"DraftKings lines not posted yet for scheduled games","team_ratings":"waiting for complete odds",
                 "injuries":"waiting for odds","prop_line_quota":quota},
-              "model_policy":"Games are scheduled for this date, but DraftKings spread/total lines are not available yet. The board will retry and will not freeze an empty slate."}
-        side_picks,side_saved=_save_slate([],"sides",slate_date)
-        total_picks,total_saved=_save_slate([],"totals",slate_date)
-        return {"slate_date":slate_date,"frozen":True,"sides":side_picks,"totals":total_picks,
+              "model_policy":"Games are scheduled for this date, but DraftKings spread/total lines are not available yet. The board will retry; no empty slate is saved."}
+        if scheduled_on_date:
+            return {"slate_date":slate_date,"frozen":False,"record_status":"MISSED_PREGAME_WINDOW","sides":[],"totals":[],
+              "metrics":_metrics(),"settlement":settlement,"game_count":0,
+              "source_status":{"odds":"No usable pregame DraftKings lines remain for this slate date","team_ratings":"not locked",
+                "injuries":"not locked","prop_line_quota":quota},
+              "model_policy":"MISSED PREGAME WINDOW: games on this date have already started or finished. No picks were recorded, and no postgame data will be used to recreate them."}
+        return {"slate_date":slate_date,"frozen":False,"record_status":"NO_GAMES","sides":[],"totals":[],
           "metrics":_metrics(),"settlement":settlement,"game_count":0,
-          "source_status":{"odds":"PropLine DraftKings ("+odds_source+")","team_ratings":"not needed; no remaining games on this slate date",
-            "injuries":"not needed","prop_line_quota":quota,"saved_sides":side_saved,"saved_totals":total_saved},
-          "model_policy":"No upcoming games remain on the active Eastern slate date. No picks were forced."}
+          "source_status":{"odds":"No games or DraftKings lines found for this date","team_ratings":"not needed",
+            "injuries":"not needed","prop_line_quota":quota},
+          "model_policy":"NO GAMES: no NBA games were found on this slate date. Nothing was saved."}
+    if not preview and legacy_empty_slate:
+        # Clear only the invalid empty placeholders so a valid pregame run can save.
+        with _connect() as conn:
+            conn.execute("DELETE FROM nba_game_slates WHERE slate_date=%s AND market IN ('sides','totals') AND candidates='[]'::jsonb",(slate_date,))
     ratings=_team_ratings(force)
     schedule=_schedule(force)
     try:
@@ -972,7 +985,8 @@ def build_board(force=False,preview_date=None):
     else:
         side_picks,side_saved=_save_slate(sides,"sides",slate_date)
         total_picks,total_saved=_save_slate(totals,"totals",slate_date)
-    return {"slate_date":slate_date,"preview":preview,"frozen":not preview,"sides":side_picks,"totals":total_picks,
+    return {"slate_date":slate_date,"preview":preview,"frozen":not preview,
+      "record_status":"PREVIEW" if preview else "LOCKED","sides":side_picks,"totals":total_picks,
       "metrics":_metrics(),"settlement":settlement,"game_count":len(future_games),
       "source_status":{"odds":"PropLine DraftKings ("+odds_source+")","team_ratings":ratings["source"],
         "season":ratings["season"],"team_rating_quality":ratings.get("data_quality"),"team_rating_fallback_used":ratings.get("fallback_used",False),"team_rating_fallback_reason":ratings.get("fallback_reason"),"team_count":len(ratings.get("teams") or {}),"injuries":injury_meta.get("status","unavailable"),
