@@ -134,7 +134,7 @@ function setSection(next){
  ['props','sides','totals'].forEach(x=>el('nav-'+x).classList.toggle('active',section===x));
  el('propMarkets').style.display=section==='props'?'flex':'none';
  el('boardTitle').textContent=section==='props'?'Player prop candidates':section==='sides'?'Point spread candidates':'Game total candidates';
- el('boardHint').textContent=section==='props'?'Proprietary player projections ranked by verified DraftKings lines and two-sided prices. Only available, qualified candidates are shown.':'Sides and totals are evaluated independently from sportsbook prices.';
+ el('boardHint').textContent=section==='props'?'Proprietary player projections ranked by verified DraftKings lines and two-sided prices. Five markets are shown separately; totals are experimental and not official picks.':'Sides and totals are evaluated independently from sportsbook prices.';
  if(section==='props'){loadPropBoard(propMarket);return;}
  market=section;renderBoard();
 }
@@ -284,8 +284,8 @@ function card(p,i){
  '<div class="linebox"><div><div class="line-label">'+label+'</div><div class="line">'+esc(pick)+'</div></div><div style="text-align:right"><div class="line-label">Sportsbook price</div><div class="line">'+odds(p.odds)+'</div></div></div>'+
  '<div class="metrics"><div class="mini"><div class="mini-label">Unvalidated model probability</div><div class="mini-value">'+fmt(p.model_probability*100,1)+'%</div></div>'+
  '<div class="mini"><div class="mini-label">No-vig market</div><div class="mini-value">'+fmt(p.market_probability*100,1)+'%</div></div>'+
- '<div class="mini"><div class="mini-label">Model edge</div><div class="mini-value positive">+'+fmt(p.edge_pp,1)+' pp</div></div></div>'+
- '<div class="bottom"><span>Expected value: <b class="positive">+'+fmt(p.ev_pct,2)+'%</b></span><span>Projected score: '+fmt(p.projected_away,1)+' – '+fmt(p.projected_home,1)+'</span>'+
+ '<div class="mini"><div class="mini-label">Model edge</div><div class="mini-value '+(Number(p.edge_pp)>=0?'positive':'negative')+'">'+(Number(p.edge_pp)>0?'+':'')+fmt(p.edge_pp,1)+' pp</div></div></div>'+
+ '<div class="bottom"><span>Expected value: <b class="'+(Number(p.ev_pct)>=0?'positive':'negative')+'">'+(Number(p.ev_pct)>0?'+':'')+fmt(p.ev_pct,2)+'%</b></span><span>Projected score: '+fmt(p.projected_away,1)+' – '+fmt(p.projected_home,1)+'</span>'+
  '<span>'+ (side?'Projected cover margin: '+signed(p.expected_margin_after_spread):'Projected total: '+fmt(p.projected_total,1)+' · Line edge: '+signed(p.projected_total_edge))+'</span></div>'+
  '<div class="source">'+(side?'RESEARCH CANDIDATE ONLY — winner-probability validation does not establish spread-cover calibration; historical DraftKings closing-line/ATS validation is not yet available.':'EXPERIMENTAL TOTALS — model probability and EV are calculated from DraftKings prices, but totals are excluded from official picks because holdout bias remains unresolved.')+'</div>'+
  '<details><summary>Model factors and injury review</summary><p>Home: '+esc(adjustmentText(home))+'</p><p>Away: '+esc(adjustmentText(away))+'</p><p>Projected pace: '+fmt(p.projected_pace,1)+' · Model: '+esc(p.model_version)+'</p></details></article>';
