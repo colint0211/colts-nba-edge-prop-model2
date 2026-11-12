@@ -203,12 +203,12 @@ async function loadBoard(refresh=false){
   el('updated').textContent='Updated '+new Date().toLocaleTimeString();
   el('slateDate').textContent='Slate: '+d.slate_date;
   el('historyDate').value=d.slate_date;
-  renderMetrics(d.metrics);renderBoard();renderSources(d.source_status);
+  renderMetrics(d.metrics);if(section!=='props')renderBoard();renderSources(d.source_status);
   if(d.settlement?.settled)el('updated').textContent+=' · '+d.settlement.settled+' results settled';
   await loadHistory();
  }catch(e){
   el('status').textContent='DATA UNAVAILABLE';
-  el('board').innerHTML='<div class="empty">The model did not generate picks because required data could not be verified.<br><br>'+esc(e.message||e)+'</div>';
+  if(section!=='props')el('board').innerHTML='<div class="empty">The model did not generate picks because required data could not be verified.<br><br>'+esc(e.message||e)+'</div>'; 
   el('sources').textContent='No model picks were created. The model will not substitute guessed team ratings or sportsbook-implied probabilities.';
  }
 }
