@@ -567,8 +567,13 @@ def _injury_adjustment(team,injuries,season,game_date,pace=100.0):
             gp=int(record.get("games_current_season") or 0)
             if not (math.isfinite(mpg) and math.isfinite(bpm) and 0<=mpg<=48 and -12<=bpm<=12):
                 raise ValueError("invalid player impact values")
-            if gp<5 and record.get("bpm_prior") is None:
-                raise ValueError("fewer than five current games and no same-team prior-season baseline")
+            # A tiny early-season sample is not enough to price a rotation player.
+            # Permit only a clearly low-minute role (<=12 MPG) after at least
+            # three appearances; the snapshot's heavy early-season BPM shrinkage
+            # plus the minute cap keeps this proxy contribution small. Higher-use
+            # players without a prior baseline remain a hard block.
+            if gp<5 and record.get("bpm_prior") is None and not (gp>=3 and mpg<=12.0):
+                raise ValueError("fewer than five current games and no same-team prior-season baseline; player is not a low-minute role")
             raw=(bpm-replacement_bpm)*(mpg/48.0)*(float(pace)/100.0)
             impact=max(-2.5,min(5.5,raw))
             if not math.isfinite(impact): raise ValueError("non-finite impact")
