@@ -454,11 +454,23 @@ def _situational(team,game_date,schedule,opponent,current_venue):
         if d<target: prior.append((d,g))
     prior.sort(key=lambda x:x[0],reverse=True)
     if not prior:
-        return {"rest_days":2,"travel_miles":0,"tz_change":0,"altitude_change":0}
+        return {"rest_days":2,"travel_miles":0,"tz_change":0,"altitude_change":0,
+                "is_back_to_back":False,"previous_opponent":None,"is_rematch":False,
+                "previous_game_margin":None,"previous_game_team_score":None,
+                "previous_game_opponent_score":None}
     last_date,last_game=prior[0]
     rest=max(0,(target-last_date).days-1)
     last_venue_code=team if last_game.get("home")==team else last_game.get("home")
     previous=_VENUES.get(last_venue_code)
+    previous_opponent=last_game.get("away") if last_game.get("home")==team else last_game.get("home")
+    team_score=last_game.get("home_score") if last_game.get("home")==team else last_game.get("away_score")
+    opponent_score=last_game.get("away_score") if last_game.get("home")==team else last_game.get("home_score")
+    try:
+        team_score=int(team_score) if team_score is not None else None
+        opponent_score=int(opponent_score) if opponent_score is not None else None
+    except (TypeError,ValueError):
+        team_score=opponent_score=None
+    previous_margin=(team_score-opponent_score) if team_score is not None and opponent_score is not None else None
     travel=_haversine(previous,current) if previous and current else 0.0
     tz_change=0.0
     if previous and current:
@@ -469,7 +481,11 @@ def _situational(team,game_date,schedule,opponent,current_venue):
         except Exception: pass
     home_venue=_VENUES.get(team)
     altitude_change=(current[3]-home_venue[3]) if current and home_venue else 0
-    return {"rest_days":rest,"travel_miles":round(travel),"tz_change":round(tz_change,1),"altitude_change":altitude_change}
+    return {"rest_days":rest,"travel_miles":round(travel),"tz_change":round(tz_change,1),"altitude_change":altitude_change,
+      "is_back_to_back":rest==0,"previous_opponent":previous_opponent,
+      "is_rematch":bool(opponent and previous_opponent==opponent),
+      "previous_game_margin":previous_margin,"previous_game_team_score":team_score,
+      "previous_game_opponent_score":opponent_score}
 
 _PLAYER_IMPACT_CACHE = {"at": 0.0, "data": None}
 _PLAYER_IMPACT_TTL = 1800
@@ -644,7 +660,12 @@ def _team_adjustment(team,opp,game_date,schedule,injuries,season,is_home,pace=10
     travel_penalty=min(1.0,sit["travel_miles"]/2500.0)*0.65
     timezone_penalty=min(0.6,abs(sit["tz_change"])*0.15)
     elevation_penalty=max(0.0,sit["altitude_change"]/5000.0)*0.35
-    return {"rest_days":sit["rest_days"],"travel_miles":sit["travel_miles"],
+    return {"rest_days":sit["rest_days"],"is_back_to_back":sit["is_back_to_back"],
+      "previous_opponent":sit["previous_opponent"],"is_rematch":sit["is_rematch"],
+      "previous_game_margin":sit["previous_game_margin"],
+      "previous_game_team_score":sit["previous_game_team_score"],
+      "previous_game_opponent_score":sit["previous_game_opponent_score"],
+      "travel_miles":sit["travel_miles"],
       "timezone_change_hours":sit["tz_change"],"altitude_change_feet":sit["altitude_change"],
       "rest_adjustment":rest,"travel_adjustment":-travel_penalty-timezone_penalty,
       "injury_adjustment":inj["points"],"injuries":inj["players"],"unpriced_injury":inj.get("unpriced_injury",False),
