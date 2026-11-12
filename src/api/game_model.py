@@ -671,7 +671,9 @@ def _score_game(game,ratings,schedule,injuries,season):
 def _candidate(game,market,model):
     candidates=[]
     if market=="sides":
-        mean=model["projected_margin"]; sd=13.5 if model.get("data_quality")=="derived_early_season" else 12.3
+        # Training-only residual SD from the 2024-25/2025-26 walk-forward fit.
+        # The 2026-27 holdout was not used to set this probability scale.
+        mean=model["projected_margin"]; sd=15.8 if model.get("data_quality")=="derived_early_season" else 14.789
         for team in (game["home"],game["away"]):
             quote=game["spreads"][team]; line=quote["line"]; odds=quote["odds"]
             team_mean=mean if team==game["home"] else -mean
@@ -963,7 +965,7 @@ def build_board(force=False,preview_date=None):
           for event_id,(home,away) in reviewed.items()],
         "prop_line_quota":quota,"saved_sides":side_saved,"saved_totals":total_saved,
         "unavailable_games":unique_unavailable[:10]},
-      "model_policy":"Team-efficiency ratings projection with explicit early-season uncertainty. Not yet a historically fitted regression. Market odds are used only for EV and no-vig comparison, never as the model probability. Official game totals are disabled because the untouched 2026-27 holdout showed +4.53 points of total bias; sides remain separately eligible subject to injury and edge gates.",
+      "model_policy":"Team-efficiency ratings projection with explicit early-season uncertainty. Side spread probabilities use a 14.789-point margin residual SD fitted on 2024-25/2025-26 training seasons only (15.8 for derived early-season ratings); 2026-27 remained untouched. This validates winner-probability scale, not ATS cover calibration: historical DraftKings closing lines, spread-cover calibration, ROI and CLV are unavailable. Market odds are used only for EV and no-vig comparison, never as the model probability. Official game totals are disabled because the untouched 2026-27 holdout showed +4.53 points of total bias; sides remain preview candidates subject to injury and edge gates.",
       "thresholds":{"minimum_edge_pp":4.0 if ratings.get("data_quality")=="derived_early_season" else 2.5,
         "maximum_edge_pp":12.0 if ratings.get("data_quality")=="derived_early_season" else None,
         "minimum_ev_pct":2.0 if ratings.get("data_quality")=="derived_early_season" else 1.5,
