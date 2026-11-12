@@ -471,7 +471,39 @@ def _situational(team,game_date,schedule,opponent,current_venue):
     altitude_change=(current[3]-home_venue[3]) if current and home_venue else 0
     return {"rest_days":rest,"travel_miles":round(travel),"tz_change":round(tz_change,1),"altitude_change":altitude_change}
 
-def _injury_adjustment(team,injuries,season,game_date):
+_PLAYER_IMPACT_CACHE = {"at": 0.0, "data": None}
+_PLAYER_IMPACT_TTL = 1800
+
+def _player_name_key(value):
+    import re
+    return re.sub(r"[^a-z0-9]", "", str(value or "").casefold())
+
+def _load_player_impact_snapshot(season):
+    """Load a fresh, season-matched B-Ref minutes/BPM snapshot; fail closed."""
+    now=time.time()
+    cached=_PLAYER_IMPACT_CACHE.get("data")
+    if cached is not None and now-_PLAYER_IMPACT_CACHE.get("at",0.0)<_PLAYER_IMPACT_TTL:
+        return cached
+    path=os.path.join(os.path.dirname(__file__),"..","..","data","nba_player_impact.json")
+    try:
+        with open(path,"r",encoding="utf-8") as handle: payload=json.load(handle)
+        fetched=datetime.fromisoformat(str(payload.get("fetched_at","")).replace("Z","+00:00"))
+        if fetched.tzinfo is None: fetched=fetched.replace(tzinfo=timezone.utc)
+        age=max(0.0,(datetime.now(timezone.utc)-fetched.astimezone(timezone.utc)).total_seconds())
+        players=payload.get("players") or {}
+        valid=(payload.get("schema_version")==1 and payload.get("season")==season
+            and payload.get("player_count")==len(players) and len(players)>=250 and age<=36*3600)
+        data={"available":bool(valid),"players":players if valid else {},
+            "meta":{"source":payload.get("source"),"season":payload.get("season"),
+            "fetched_at":payload.get("fetched_at"),"age_hours":round(age/3600,2),
+            "player_count":len(players),"status":"fresh" if valid else "stale_or_invalid",
+            "method":payload.get("method"),"replacement_bpm":payload.get("replacement_bpm",-2.0)}}
+    except Exception as exc:
+        data={"available":False,"players":{},"meta":{"status":"unavailable","error":type(exc).__name__}}
+    _PLAYER_IMPACT_CACHE.update({"at":now,"data":data})
+    return data
+
+def _injury_adjustment(team,injuries,season,game_date,pace=100.0):
     from zoneinfo import ZoneInfo
     try:
         target=datetime.fromisoformat(str(game_date).replace("Z","+00:00")).astimezone(ZoneInfo(_ET)).date()
@@ -479,36 +511,65 @@ def _injury_adjustment(team,injuries,season,game_date):
     relevant=[]
     for item in injuries:
         if item.get("team")!=team: continue
-        status=str(item.get("status") or "").lower()
+        status=str(item.get("status") or "").casefold()
         if status not in ("out","doubtful","questionable","day-to-day"): continue
-        reason=str(item.get("reason") or "").lower()
+        reason=str(item.get("reason") or "").casefold()
         if "g league" in reason or "two-way" in reason or "on assignment" in reason: continue
         raw_date=str(item.get("game_date") or "")
         try: report_date=datetime.strptime(raw_date,"%m/%d/%Y").date()
         except Exception: report_date=target
         if report_date==target: relevant.append(item)
-    details=[]
-    unpriced=False
+    snapshot=_load_player_impact_snapshot(season)
+    players=snapshot.get("players") or {}
+    replacement_bpm=float(snapshot.get("meta",{}).get("replacement_bpm",-2.0))
+    details=[]; unpriced=False; points=0.0
     for item in relevant:
-        status=str(item.get("status") or "").lower()
-        # Do not silently assign zero impact to a listed unavailable player.
-        # The current official report does not include validated minutes/role
-        # or on/off impact, so this model cannot reliably distinguish a core
-        # rotation player from a low-minute player. Treat every matching
-        # unavailable report as unpriced rather than inventing an impact.
-        unpriced=True
-        details.append({"player":item.get("player"),"status":item.get("status"),
-          "minutes":None,"estimated_team_points":None,
-          "impact_data_available":False,
-          "impact_source":"unpriced player impact; game withheld pending validated player-level data"})
-    return {"points":0.0,"players":details,"unpriced_injury":unpriced,
-      "source":"official injury report; listed unavailable-player impact unpriced and game blocked"}
- 
- 
-def _team_adjustment(team,opp,game_date,schedule,injuries,season,is_home):
+        status=str(item.get("status") or "").casefold()
+        name=str(item.get("player") or "")
+        record=players.get(_player_name_key(name)+"|"+team)
+        # Questionable/doubtful/day-to-day availability is probabilistic and
+        # is not priced as a full absence. Keep the game out until confirmed.
+        if status!="out":
+            unpriced=True
+            details.append({"player":name,"status":item.get("status"),"minutes":None,
+              "estimated_team_points":None,"impact_data_available":False,
+              "impact_source":"availability probability not calibrated; game withheld"})
+            continue
+        if not snapshot.get("available") or not record:
+            unpriced=True
+            details.append({"player":name,"status":item.get("status"),"minutes":None,
+              "estimated_team_points":None,"impact_data_available":False,
+              "impact_source":"fresh season-matched player impact record unavailable; game withheld"})
+            continue
+        try:
+            mpg=float(record["minutes_per_game"]); bpm=float(record["bpm_shrunk"])
+            gp=int(record.get("games_current_season") or 0)
+            if not (math.isfinite(mpg) and math.isfinite(bpm) and 0<=mpg<=48 and -12<=bpm<=12):
+                raise ValueError("invalid player impact values")
+            raw=(bpm-replacement_bpm)*(mpg/48.0)*(float(pace)/100.0)
+            impact=max(-2.5,min(5.5,raw))
+            if not math.isfinite(impact): raise ValueError("non-finite impact")
+            points-=impact
+            details.append({"player":name,"status":item.get("status"),
+              "minutes":round(mpg,2),"games_current_season":gp,
+              "bpm_shrunk":round(bpm,3),"replacement_bpm":replacement_bpm,
+              "estimated_team_points":round(-impact,3),
+              "impact_data_available":True,
+              "impact_source":"Basketball-Reference minutes + shrunk BPM proxy (not on/off)",
+              "impact_method":"(BPM - replacement BPM) × MPG/48 × team pace/100"})
+        except (KeyError,TypeError,ValueError,OverflowError):
+            unpriced=True
+            details.append({"player":name,"status":item.get("status"),"minutes":None,
+              "estimated_team_points":None,"impact_data_available":False,
+              "impact_source":"invalid player impact record; game withheld"})
+    return {"points":round(points,3),"players":details,"unpriced_injury":unpriced,
+      "source":"official NBA injury report + Basketball-Reference minutes/BPM proxy",
+      "player_impact_meta":snapshot.get("meta")}
+
+def _team_adjustment(team,opp,game_date,schedule,injuries,season,is_home,pace=100.0):
     current_venue=team if is_home else opp
     sit=_situational(team,game_date,schedule,opp,current_venue)
-    inj=_injury_adjustment(team,injuries,season,game_date)
+    inj=_injury_adjustment(team,injuries,season,game_date,pace)
     rest=0.0
     if sit["rest_days"]==0: rest-=1.0
     elif sit["rest_days"]>=2: rest+=0.25
@@ -528,8 +589,8 @@ def _score_game(game,ratings,schedule,injuries,season):
     pace=(h["pace"]+a["pace"])/2.0
     home_eff=(h["ortg"]+a["drtg"])/2.0
     away_eff=(a["ortg"]+h["drtg"])/2.0
-    home_adj=_team_adjustment(home,away,game.get("commence_time"),schedule,injuries,season,True)
-    away_adj=_team_adjustment(away,home,game.get("commence_time"),schedule,injuries,season,False)
+    home_adj=_team_adjustment(home,away,game.get("commence_time"),schedule,injuries,season,True,pace)
+    away_adj=_team_adjustment(away,home,game.get("commence_time"),schedule,injuries,season,False,pace)
     home_points=home_eff*pace/100.0+2.0+home_adj["total_adjustment"]
     away_points=away_eff*pace/100.0+away_adj["total_adjustment"]
     return {"projected_home":round(home_points,2),"projected_away":round(away_points,2),
@@ -768,8 +829,8 @@ def build_board(force=False,preview_date=None):
     review_games=[game_by_id[event_id] for event_id in review_ids if event_id in game_by_id]
 
     def review_game(game):
-        home=_injury_adjustment(game["home"],injuries,ratings["season"],game["commence_time"])
-        away=_injury_adjustment(game["away"],injuries,ratings["season"],game["commence_time"])
+        home=_injury_adjustment(game["home"],injuries,ratings["season"],game["commence_time"],ratings["teams"][game["home"]]["pace"])
+        away=_injury_adjustment(game["away"],injuries,ratings["season"],game["commence_time"],ratings["teams"][game["away"]]["pace"])
         return game["event_id"],home,away
 
     reviewed={}
@@ -783,7 +844,7 @@ def build_board(force=False,preview_date=None):
         game=game_by_id[event_id]
         model=dict(base_models[event_id])
         if home_injury.get("unpriced_injury") or away_injury.get("unpriced_injury"):
-            unavailable.append({"event_id":event_id,"reason":"official report lists an unavailable player whose role and absence impact are not priced; no pick"})
+            unavailable.append({"event_id":event_id,"reason":"official report lists an unavailable player whose absence impact or availability probability is not validated; no pick"})
             continue
         home_adjustments=dict(model["home_adjustments"])
         away_adjustments=dict(model["away_adjustments"])
@@ -822,7 +883,8 @@ def build_board(force=False,preview_date=None):
       "metrics":_metrics(),"settlement":settlement,"game_count":len(future_games),
       "source_status":{"odds":"PropLine DraftKings ("+odds_source+")","team_ratings":ratings["source"],
         "season":ratings["season"],"team_rating_quality":ratings.get("data_quality"),"team_rating_fallback_used":ratings.get("fallback_used",False),"team_rating_fallback_reason":ratings.get("fallback_reason"),"team_count":len(ratings.get("teams") or {}),"injuries":injury_meta.get("status","unavailable"),
-        "player_impact":"Validated player-level minutes/role/on-off impact not integrated; any listed OUT/questionable/doubtful/day-to-day player blocks the game because the feed cannot distinguish rotation from low-minute players",
+        "player_impact":"Basketball-Reference minutes + shrunk BPM replacement-level proxy (not on/off); OUT players priced only with fresh exact player/team matches; questionable/doubtful/day-to-day remain blocked pending calibrated availability probabilities",
+        "player_impact_snapshot":_load_player_impact_snapshot(ratings["season"]).get("meta"),
         "totals_validation":{"official_picks_enabled":_TOTALS_OFFICIAL_ENABLED,"status":"disabled_pending_holdout_bias_recalibration","holdout_total_bias_points":4.529},
         "reviewed_games":len(review_games),"prop_line_quota":quota,"saved_sides":side_saved,"saved_totals":total_saved,
         "unavailable_games":unique_unavailable[:10]},
