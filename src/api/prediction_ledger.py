@@ -583,6 +583,7 @@ def freeze_daily_record_groups(slate_date):
             item = dict(source_row)
             item["daily_record_group"] = name
             item["daily_record_group_date"] = slate_date
+            item["daily_top5"] = False
             key = (item.get("market"), str(item.get("player") or "").casefold(),
                    item.get("event_id") or item.get("game_id") or item.get("game"),
                    item.get("line"), item.get("best_side"))
