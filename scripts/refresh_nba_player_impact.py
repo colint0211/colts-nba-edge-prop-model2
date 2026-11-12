@@ -196,7 +196,7 @@ def main():
     payload={
       "schema_version":1,
       "source":"Basketball-Reference per-game minutes + Advanced BPM",
-      "method":"BPM is a box-score-derived proxy, not on/off. Estimated absence points = (shrunk BPM - replacement BPM) * MPG/48 * team pace/100; replacement BPM fixed at -2.0. Current BPM is shrunk toward prior season with 15-game prior strength.",
+      "method":"BPM is a box-score-derived proxy, not on/off. Estimated absence points = (shrunk BPM - replacement BPM) * MPG/48 * team pace/100; replacement BPM fixed at -2.0. Current BPM is shrunk toward a prior-season player baseline (15-game strength), or a two-year-old baseline (10-game strength) when last season is unavailable. Two-year-only BPM is shrunk 50% toward replacement level and minutes reduced 20%. Cross-team prior records are combined by games played.",
       "replacement_bpm":-2.0,
       "season":current_season,
       "prior_season":f"{current_year-2}-{str(current_year-1)[-2:]}",
