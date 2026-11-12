@@ -327,7 +327,7 @@ async function loadHistory(){
  try{
   const r=await fetch('/api/game-history?slate_date='+encodeURIComponent(day)+'&t='+Date.now(),{cache:'no-store'});
   const d=await r.json();if(!r.ok)throw Error(d.detail||'History unavailable');
-  historyRows=d.predictions||[];renderMetrics(d.metrics);
+  historyRows=d.predictions||[];
   await loadDailyPropHistory(day);
   await loadRecordGroups(day);
   await loadExperimentalTotalsHistory(day);
