@@ -76,7 +76,7 @@ def collect(year):
     for _,r in per.iterrows():
         player=str(r.get("Player") or "").strip()
         raw_team=str(r.get("Team") or "").strip()
-        team=TEAM.get(raw_team)
+        team=TEAM.get(raw_team) or ("TOT" if raw_team=="TOT" else None)
         key=(name_key(player),team)
         if not player or not team or not key[0]: continue
         gp=number(r.get("G")); mpg=number(r.get("MP"))
@@ -86,10 +86,21 @@ def collect(year):
     adv_map={}
     for _,r in adv.iterrows():
         player=str(r.get("Player") or "").strip()
-        team=TEAM.get(str(r.get("Team") or "").strip())
+        raw_team=str(r.get("Team") or "").strip()
+        team=TEAM.get(raw_team) or ("TOT" if raw_team=="TOT" else None)
         bpm=number(r.get("BPM"))
         if not player or not team or bpm is None or not -25<=bpm<=25: continue
         adv_map[(name_key(player),team)]=bpm
+    # Basketball-Reference marks traded-player aggregate rows as TOT. Prefer
+    # that single season aggregate when both per-game and advanced TOT rows exist;
+    # otherwise keep the team-specific rows and do not manufacture an aggregate.
+    tot_players={
+        player_key for player_key, team in per_map
+        if team=="TOT" and (player_key,"TOT") in adv_map
+    }
+    if tot_players:
+        per_map={key:row for key,row in per_map.items() if key[0] not in tot_players or key[1]=="TOT"}
+        adv_map={key:value for key,value in adv_map.items() if key[0] not in tot_players or key[1]=="TOT"}
     out={}
     for key,row in per_map.items():
         if key not in adv_map: continue
