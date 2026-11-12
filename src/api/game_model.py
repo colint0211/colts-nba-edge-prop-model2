@@ -848,8 +848,10 @@ def build_board(force=False,preview_date=None):
             unavailable.append({"event_id":game.get("event_id"),"reason":type(exc).__name__})
     base_sides.sort(key=lambda x:(-x["ev_pct"],-x["edge_pp"]))
     base_totals.sort(key=lambda x:(-x["ev_pct"],-x["edge_pp"]))
-    review_ids={x["event_id"] for x in base_sides[:10]+base_totals[:10]}
-    review_games=[game_by_id[event_id] for event_id in review_ids if event_id in game_by_id]
+    # Injury adjustments can reorder the entire board. Review every game
+    # before final ranking so a high-impact absence outside the initial top
+    # ten cannot be missed.
+    review_games=list(future_games)
 
     def review_game(game):
         home=_injury_adjustment(game["home"],injuries,ratings["season"],game["commence_time"],ratings["teams"][game["home"]]["pace"])
