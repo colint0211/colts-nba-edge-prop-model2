@@ -1,0 +1,48 @@
+name: Refresh NBA player role and impact proxy
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "41 */6 * * *"
+  push:
+    branches: [feature/nba-stats-off-def-primary]
+    paths:
+      - scripts/refresh_nba_player_impact.py
+      - .github/workflows/refresh-nba-player-impact.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: nba-player-impact-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Check out preview branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/nba-stats-off-def-primary
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install player table parser
+        run: python -m pip install --upgrade pip pandas lxml requests
+      - name: Fetch and validate player minutes and BPM
+        run: python scripts/refresh_nba_player_impact.py
+      - name: Publish validated player snapshot
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/nba_player_impact.json
+          if git diff --cached --quiet; then
+            echo "Player impact snapshot unchanged."
+          else
+            git commit -m "Refresh NBA player role and impact proxy"
+            git push origin HEAD:feature/nba-stats-off-def-primary
+          fi
