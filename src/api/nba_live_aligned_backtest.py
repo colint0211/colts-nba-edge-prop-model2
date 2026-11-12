@@ -117,8 +117,10 @@ def run():
             pred=predict(g["home"],g["away"],history,league)
             if pred:
                 scored.append({"date":day,"season":g["season"],"game_id":g["id"],
+                  "home":g["home"],"away":g["away"],
                   "margin":pred["margin"],"total":pred["total"],
                   "actual_margin":g["hs"]-g["as"],"actual_total":g["hs"]+g["as"],
+                  "actual_home":g["hs"],"actual_away":g["as"],
                   "home_prior":pred["home_prior"],"away_prior":pred["away_prior"]})
         for g in batch:
             history[g["home"]].append((g["hp"],g["hs"],g["ap"],g["as"]))
@@ -138,6 +140,7 @@ def run():
       "train_raw":train_summary,"holdout_raw":summarize(hold,probability_sd=train_margin_sd),
       "calibration_fit_on_train_only":{"margin_offset_points":round(margin_offset,3),"total_offset_points":round(total_offset,3),"margin_residual_sd_points":train_margin_sd},
       "holdout_after_train_calibration":summarize(hold,margin_offset,total_offset,probability_sd=train_margin_sd),
+      "holdout_predictions":[{**r,"calibrated_margin":r["margin"]+margin_offset} for r in hold],
       "games_scored":len(scored),"date_range":{"first":scored[0]["date"],"last":scored[-1]["date"]},
       "limitations":["This validates the live projection equations using historical rolling team ratings, not the exact historical Basketball-Reference snapshot pipeline.",
         "Historical pregame injury reports and player on/off data are unavailable; injured-player games are not injury-adjusted.",
