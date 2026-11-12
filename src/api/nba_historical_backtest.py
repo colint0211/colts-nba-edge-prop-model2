@@ -157,7 +157,7 @@ def run(persist=True):
                 """).fetchall()
                 for row in rows:
                     all_games.append({
-                        "date": str(row[0]), "game_id": str(row[1]),
+                        "date": str(row[0]), "season": season, "game_id": str(row[1]),
                         "home": str(row[2]), "away": str(row[3]),
                         "home_score": float(row[4]), "away_score": float(row[5]),
                         "home_poss": float(row[6]), "away_poss": float(row[7]),
@@ -193,7 +193,7 @@ def run(persist=True):
                 win_prob = 1.0 - _cdf(0.0, forecast["margin"], MARGIN_SD)
                 actual_win = 1.0 if actual_margin > 0 else 0.0
                 day_predictions.append({
-                    "date": day, "game_id": game["game_id"],
+                    "date": day, "season": game["season"], "game_id": game["game_id"],
                     "home": game["home"], "away": game["away"],
                     "projected_home": forecast["home"], "projected_away": forecast["away"],
                     "projected_margin": forecast["margin"], "projected_total": forecast["total"],
@@ -243,6 +243,26 @@ def run(persist=True):
                 "actual_home_win_pct": round(
                     100.0 * sum(x["actual_margin"] > 0 for x in bucket) / len(bucket), 2),
             })
+    def summarize(rows):
+        if not rows:
+            return None
+        n = len(rows)
+        return {
+            "games": n,
+            "margin_mae_points": round(sum(x["margin_abs_error"] for x in rows) / n, 3),
+            "total_mae_points": round(sum(x["total_abs_error"] for x in rows) / n, 3),
+            "margin_bias_points": round(sum(x["projected_margin"] - x["actual_margin"] for x in rows) / n, 3),
+            "total_bias_points": round(sum(x["projected_total"] - x["actual_total"] for x in rows) / n, 3),
+            "winner_accuracy_pct": round(100.0 * sum(
+                (x["projected_margin"] > 0) == (x["actual_margin"] > 0) for x in rows
+            ) / n, 2),
+            "winner_brier": round(sum(x["winner_brier"] for x in rows) / n, 5),
+        }
+
+    season_metrics = {
+        str(season): summarize([x for x in predictions if x["season"] == season])
+        for season in SEASONS
+    }
     results = {
         "method": "Rolling last-10 team offensive/defensive points per possession and pace; only prior completed dates; same-day results held out; league shrinkage 15%; home-court +2 points.",
         "files": files,
@@ -250,6 +270,9 @@ def run(persist=True):
         "games_scored": len(predictions),
         "dates_scored": scored_dates,
         "date_range": {"first": predictions[0]["date"], "last": predictions[-1]["date"]},
+        "season_metrics": season_metrics,
+        "holdout_season": str(max(SEASONS)),
+        "holdout_metrics": season_metrics.get(str(max(SEASONS))),
         "metrics": {
             "margin_mae_points": round(mean("margin_abs_error"), 3),
             "total_mae_points": round(mean("total_abs_error"), 3),
