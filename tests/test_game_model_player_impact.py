@@ -325,3 +325,28 @@ class PlayerImpactTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+    def test_back_to_back_rematch_context_is_detected_without_extra_unvalidated_adjustment(self):
+        schedule = [{
+            "date": "2026-11-11T03:00:00Z",
+            "home": "POR",
+            "away": "OKC",
+            "completed": True,
+            "home_score": 123,
+            "away_score": 103,
+        }]
+        target = "2026-11-11T22:00:00-05:00"
+        portland = game_model._situational("POR", target, schedule, "OKC", "POR")
+        okc = game_model._situational("OKC", target, schedule, "POR", "POR")
+        self.assertTrue(portland["is_back_to_back"])
+        self.assertTrue(okc["is_back_to_back"])
+        self.assertTrue(portland["is_rematch"])
+        self.assertTrue(okc["is_rematch"])
+        self.assertEqual(portland["previous_opponent"], "OKC")
+        self.assertEqual(okc["previous_opponent"], "POR")
+        self.assertEqual(portland["previous_game_margin"], 20)
+        self.assertEqual(okc["previous_game_margin"], -20)
+        # Context is surfaced for audit; no unvalidated rematch coefficient is applied.
+        self.assertEqual(portland["rest_days"], 0)
+        self.assertEqual(okc["rest_days"], 0)
