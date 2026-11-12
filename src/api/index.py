@@ -3506,6 +3506,7 @@ def get_daily_top5(slate_date: str, market: str = "all"):
         return JSONResponse({
             "predictions": prediction_ledger.list_daily_top_five(slate_date, market),
             "all_time": prediction_ledger.daily_top_five_metrics(),
+            "record_groups": prediction_ledger.freeze_daily_record_groups(slate_date),
             "settlement": settlement_status,
         })
     except Exception as exc:
