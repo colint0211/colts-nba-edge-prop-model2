@@ -487,7 +487,8 @@ def _player_name_key(value):
         elif len(parts)>=2:
             raw=" ".join(parts[1:]+parts[:1])
     normalized=unicodedata.normalize("NFKD",raw.casefold()).encode("ascii","ignore").decode("ascii")
-    return re.sub(r"[^a-z0-9]", "", normalized)
+    key=re.sub(r"[^a-z0-9]", "", normalized)
+    return re.sub(r"(jr|sr|ii|iii|iv|v)$","",key)
 
 def _load_player_impact_snapshot(season):
     """Load a fresh, season-matched B-Ref minutes/BPM snapshot; fail closed."""
