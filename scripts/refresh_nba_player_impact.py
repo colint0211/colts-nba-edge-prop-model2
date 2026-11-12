@@ -76,7 +76,7 @@ def collect(year):
     for _,r in per.iterrows():
         player=str(r.get("Player") or "").strip()
         raw_team=str(r.get("Team") or "").strip()
-        team=TEAM.get(raw_team) or ("TOT" if raw_team=="TOT" else None)
+        team=TEAM.get(raw_team) or ("TOT" if re.fullmatch(r"\d+TM",raw_team) else None)
         key=(name_key(player),team)
         if not player or not team or not key[0]: continue
         gp=number(r.get("G")); mpg=number(r.get("MP"))
@@ -87,7 +87,7 @@ def collect(year):
     for _,r in adv.iterrows():
         player=str(r.get("Player") or "").strip()
         raw_team=str(r.get("Team") or "").strip()
-        team=TEAM.get(raw_team) or ("TOT" if raw_team=="TOT" else None)
+        team=TEAM.get(raw_team) or ("TOT" if re.fullmatch(r"\d+TM",raw_team) else None)
         bpm=number(r.get("BPM"))
         if not player or not team or bpm is None or not -25<=bpm<=25: continue
         adv_map[(name_key(player),team)]=bpm
