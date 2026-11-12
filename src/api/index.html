@@ -179,7 +179,7 @@ function renderPropBoard(m){
    '<div class="mini"><div class="mini-label">Model probability</div><div class="mini-value">'+prob+'</div></div>'+
    '<div class="mini"><div class="mini-label">Estimated EV · unvalidated</div><div class="mini-value gold">'+evText+'</div></div></div>'+
    '<div class="bottom"><span>Odds: O '+odds(p.over_odds)+' / U '+odds(p.under_odds)+'</span><span>'+esc(stateText)+'</span><span>Sample: '+(p.games_used??'—')+' games</span></div>'+
-   '<div class="source">RESEARCH ONLY — '+esc(calibratedText)+'. Model has not beaten the no-vig market benchmark in this market. Do not treat this as an official bet.</div>'+
+   '<div class="source">'+(held?'HOLD — '+esc(p.projection_review_reason||'Projection and selected side conflict. No side or EV is published.')+' ':'RESEARCH ONLY — ')+esc(calibratedText)+'. Model has not beaten the no-vig market benchmark in this market. Do not treat this as an official bet.</div>'+
    (p.probability_note?'<details><summary>Model notes</summary><p>'+esc(p.probability_note)+'</p></details>':'')+
    '</article>';
  }).join(''):'<div class="empty">No '+esc(m)+' prop projections are available. The model will not force a pick.</div>';
