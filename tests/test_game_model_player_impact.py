@@ -133,5 +133,66 @@ class PlayerImpactTests(unittest.TestCase):
         self.assertFalse(result["players"][0]["impact_data_available"])
 
 
+    def test_unique_cross_team_player_record_is_used(self):
+        snapshot = {
+            "available": True,
+            "players": {
+                "tobiasharris|DET": {
+                    "minutes_per_game": 27.7,
+                    "bpm_shrunk": 1.4,
+                    "bpm_prior": 1.4,
+                    "games_current_season": 0,
+                }
+            },
+            "meta": {"replacement_bpm": -2.0, "status": "fresh"},
+        }
+        injury = [{
+            "team": "SAS",
+            "player": "Harris, Tobias",
+            "status": "Out",
+            "game_date": "11/11/2026",
+            "reason": "Injury/Illness",
+        }]
+        with patch.object(game_model, "_load_player_impact_snapshot", return_value=snapshot):
+            result = game_model._injury_adjustment(
+                "SAS", injury, "2026-27", "2026-11-11T19:00:00-05:00", 100.0
+            )
+        self.assertFalse(result["unpriced_injury"])
+        self.assertTrue(result["players"][0]["impact_data_available"])
+
+    def test_ambiguous_cross_team_player_records_remain_blocked(self):
+        snapshot = {
+            "available": True,
+            "players": {
+                "tobiasharris|DET": {
+                    "minutes_per_game": 27.7,
+                    "bpm_shrunk": 1.4,
+                    "bpm_prior": 1.4,
+                    "games_current_season": 0,
+                },
+                "tobiasharris|PHI": {
+                    "minutes_per_game": 25.0,
+                    "bpm_shrunk": 0.8,
+                    "bpm_prior": 0.8,
+                    "games_current_season": 0,
+                },
+            },
+            "meta": {"replacement_bpm": -2.0, "status": "fresh"},
+        }
+        injury = [{
+            "team": "SAS",
+            "player": "Harris, Tobias",
+            "status": "Out",
+            "game_date": "11/11/2026",
+            "reason": "Injury/Illness",
+        }]
+        with patch.object(game_model, "_load_player_impact_snapshot", return_value=snapshot):
+            result = game_model._injury_adjustment(
+                "SAS", injury, "2026-27", "2026-11-11T19:00:00-05:00", 100.0
+            )
+        self.assertTrue(result["unpriced_injury"])
+        self.assertFalse(result["players"][0]["impact_data_available"])
+
+
 if __name__ == "__main__":
     unittest.main()
