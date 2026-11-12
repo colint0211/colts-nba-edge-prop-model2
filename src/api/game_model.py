@@ -475,8 +475,9 @@ _PLAYER_IMPACT_CACHE = {"at": 0.0, "data": None}
 _PLAYER_IMPACT_TTL = 1800
 
 def _player_name_key(value):
-    import re
-    return re.sub(r"[^a-z0-9]", "", str(value or "").casefold())
+    import re, unicodedata
+    normalized=unicodedata.normalize("NFKD",str(value or "").casefold()).encode("ascii","ignore").decode("ascii")
+    return re.sub(r"[^a-z0-9]", "", normalized)
 
 def _load_player_impact_snapshot(season):
     """Load a fresh, season-matched B-Ref minutes/BPM snapshot; fail closed."""
