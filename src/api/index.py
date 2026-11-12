@@ -2171,27 +2171,80 @@ def _projection_side_review(prop):
 
 
 def _apply_projection_side_guard(prop):
-    """Remove a contradictory lean from every board, including already-frozen snapshots."""
+    """Make projection direction authoritative, then price that side with its own odds."""
     if not isinstance(prop, dict):
         return prop
-    side = str(prop.get("best_side") or "").strip().upper()
-    if side not in ("OVER", "UNDER"):
-        return prop
-    if not _projection_side_review(prop):
+    try:
+        projection = float(prop.get("projection"))
+        line = float(prop.get("line"))
+    except (TypeError, ValueError, OverflowError):
+        projection = line = None
+    if projection is None or line is None or not math.isfinite(projection) or not math.isfinite(line):
+        prop["best_side"] = None
+        prop["best_odds"] = None
+        prop["best_probability"] = None
+        prop["expected_value_pct"] = None
+        prop["expected_profit_per_100"] = None
+        prop["edge_pp"] = None
+        prop["recommendation"] = "PASS"
+        prop["projection_alignment"] = "unavailable"
+        prop["projection_review_required"] = False
+        prop["projection_review_reason"] = "Projection or betting line is unavailable; no side selected."
         return prop
 
-    # Preserve the original model decision for audit, but never display it as a bet.
-    prop["model_side_before_projection_guard"] = side
-    prop["selection_gate_status"] = "HOLD"
-    prop["selection_gate_reason"] = prop.get("projection_review_reason")
-    prop["best_side"] = None
-    prop["best_odds"] = None
-    prop["best_probability"] = None
-    prop["expected_value_pct"] = None
-    prop["expected_profit_per_100"] = None
-    prop["edge_pp"] = None
-    prop["recommendation"] = "PASS"
-    prop["projection_review_required"] = True
+    if abs(projection - line) < 1e-9:
+        desired_side = None
+    else:
+        desired_side = "OVER" if projection > line else "UNDER"
+
+    prop["model_side_before_projection_guard"] = prop.get("best_side")
+    prop["projection_direction"] = desired_side or "AT_LINE"
+    prop["best_side"] = desired_side
+    prop["projection_alignment"] = "aligned" if desired_side else "at_line"
+    prop["projection_review_required"] = False
+
+    if desired_side:
+        prefix = desired_side.lower()
+        probability = prop.get(prefix + "_probability")
+        odds = prop.get(prefix + "_odds")
+        opposite_probability = prop.get(("under" if desired_side == "OVER" else "over") + "_probability")
+        try:
+            probability = float(probability) / (100.0 if float(probability) > 1 else 1.0)
+            opposite_probability = float(opposite_probability) / (100.0 if float(opposite_probability) > 1 else 1.0)
+            odds = float(odds)
+            ev = _odds_profit(probability, opposite_probability, odds)
+        except (TypeError, ValueError, OverflowError):
+            ev = None
+        if ev is not None and math.isfinite(ev):
+            prop["best_probability"] = round(probability * 100, 2)
+            prop["best_odds"] = odds
+            prop["expected_value_pct"] = round(ev * 100, 2)
+            prop["expected_profit_per_100"] = round(ev * 100, 2)
+            edge = prop.get(prefix + "_edge_pp")
+            prop["edge_pp"] = edge
+            prop["recommendation"] = "VALUE CANDIDATE" if ev > 0.05 else ("LEAN / VERIFY" if ev > 0 else "PASS")
+            prop["selection_gate_status"] = "PASS" if ev > 0 else "REJECT"
+            prop["selection_gate_reason"] = "Projection direction selected " + desired_side + "; EV recalculated using that side's probability and odds."
+        else:
+            prop["best_probability"] = None
+            prop["best_odds"] = None
+            prop["expected_value_pct"] = None
+            prop["expected_profit_per_100"] = None
+            prop["edge_pp"] = None
+            prop["recommendation"] = "PASS"
+            prop["selection_gate_status"] = "REJECT"
+            prop["selection_gate_reason"] = "Projection direction is " + desired_side + " but its probability or price is unavailable; no bet rating."
+    else:
+        prop["best_probability"] = None
+        prop["best_odds"] = None
+        prop["expected_value_pct"] = None
+        prop["expected_profit_per_100"] = None
+        prop["edge_pp"] = None
+        prop["recommendation"] = "PASS"
+        prop["selection_gate_status"] = "REJECT"
+        prop["selection_gate_reason"] = "Projection is on the betting line; no directional side."
+
+    prop["projection_review_reason"] = prop.get("selection_gate_reason")
     return prop
 
 
@@ -3957,6 +4010,7 @@ async def api_proxy(path: str, request: FastRequest):
                             prop["reason"] = "Local points model could not verify player history: " + type(model_error).__name__
                     for prop in props:
                         _apply_balldontlie_game(prop, bdl_games)
+                        _apply_projection_side_guard(prop)
                     board_payload["injury_feed"] = injury_feed.get("meta", {})
                     board_payload["balldontlie"] = {key: value for key, value in bdl_games.items() if key != "games"}
                     board_payload["props"] = props
