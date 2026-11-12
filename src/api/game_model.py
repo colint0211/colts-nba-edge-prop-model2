@@ -15,6 +15,10 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 _ET = "America/New_York"
+# Latest formula-aligned walk-forward validation showed material total-projection
+# bias (+4.53 points on the untouched 2026-27 holdout). Keep totals out of the
+# official ledger until a new, independently validated calibration passes.
+_TOTALS_OFFICIAL_ENABLED = False
 _PROP_CACHE = {"at": 0.0, "events": None, "quota": {}}
 _TEAM_CACHE = {"at": 0.0, "data": None}
 _SCHEDULE_CACHE = {"at": 0.0, "data": None}
@@ -487,18 +491,18 @@ def _injury_adjustment(team,injuries,season,game_date):
     unpriced=False
     for item in relevant:
         status=str(item.get("status") or "").lower()
-        # Do not silently assign zero impact to a confirmed OUT player.
-        # Until a validated player-level impact feed is available, any listed
-        # rotation-status injury is unpriced and the game is withheld.
-        # This is deliberately conservative: team-season ratings alone cannot
-        # identify the counterfactual cost of a player's absence.
+        # Do not silently assign zero impact to a listed unavailable player.
+        # The current official report does not include validated minutes/role
+        # or on/off impact, so this model cannot reliably distinguish a core
+        # rotation player from a low-minute player. Treat every matching
+        # unavailable report as unpriced rather than inventing an impact.
         unpriced=True
         details.append({"player":item.get("player"),"status":item.get("status"),
           "minutes":None,"estimated_team_points":None,
           "impact_data_available":False,
           "impact_source":"unpriced player impact; game withheld pending validated player-level data"})
     return {"points":0.0,"players":details,"unpriced_injury":unpriced,
-      "source":"official injury report; unpriced rotation injury/absence impact blocks game"}
+      "source":"official injury report; listed unavailable-player impact unpriced and game blocked"}
  
  
 def _team_adjustment(team,opp,game_date,schedule,injuries,season,is_home):
@@ -749,10 +753,13 @@ def build_board(force=False,preview_date=None):
                 if _qualified(candidate): base_sides.append(candidate)
                 elif ratings.get("data_quality")=="derived_early_season" and (candidate.get("edge_pp",0)>12 or candidate.get("ev_pct",0)>20):
                     unavailable.append({"event_id":game.get("event_id"),"reason":"extreme early-season model/market gap withheld pending calibration"})
-            for candidate in _candidate(game,"totals",model):
-                if _qualified(candidate): base_totals.append(candidate)
-                elif ratings.get("data_quality")=="derived_early_season" and (candidate.get("edge_pp",0)>12 or candidate.get("ev_pct",0)>20):
-                    unavailable.append({"event_id":game.get("event_id"),"reason":"extreme early-season model/market gap withheld pending calibration"})
+            if _TOTALS_OFFICIAL_ENABLED:
+                for candidate in _candidate(game,"totals",model):
+                    if _qualified(candidate): base_totals.append(candidate)
+                    elif ratings.get("data_quality")=="derived_early_season" and (candidate.get("edge_pp",0)>12 or candidate.get("ev_pct",0)>20):
+                        unavailable.append({"event_id":game.get("event_id"),"reason":"extreme early-season model/market gap withheld pending calibration"})
+            else:
+                unavailable.append({"event_id":game.get("event_id"),"reason":"game totals disabled: latest untouched holdout shows material projection bias; no totals are eligible for official picks"})
         except Exception as exc:
             unavailable.append({"event_id":game.get("event_id"),"reason":type(exc).__name__})
     base_sides.sort(key=lambda x:(-x["ev_pct"],-x["edge_pp"]))
@@ -776,7 +783,7 @@ def build_board(force=False,preview_date=None):
         game=game_by_id[event_id]
         model=dict(base_models[event_id])
         if home_injury.get("unpriced_injury") or away_injury.get("unpriced_injury"):
-            unavailable.append({"event_id":event_id,"reason":"listed rotation player has unpriced absence/availability impact; no pick"})
+            unavailable.append({"event_id":event_id,"reason":"official report lists an unavailable player whose role and absence impact are not priced; no pick"})
             continue
         home_adjustments=dict(model["home_adjustments"])
         away_adjustments=dict(model["away_adjustments"])
@@ -791,8 +798,9 @@ def build_board(force=False,preview_date=None):
         model["home_adjustments"]=home_adjustments; model["away_adjustments"]=away_adjustments
         for candidate in _candidate(game,"sides",model):
             if _qualified(candidate): sides.append(candidate)
-        for candidate in _candidate(game,"totals",model):
-            if _qualified(candidate): totals.append(candidate)
+        if _TOTALS_OFFICIAL_ENABLED:
+            for candidate in _candidate(game,"totals",model):
+                if _qualified(candidate): totals.append(candidate)
 
     sides.sort(key=lambda x:(-x["ev_pct"],-x["edge_pp"]))
     totals.sort(key=lambda x:(-x["ev_pct"],-x["edge_pp"]))
@@ -814,10 +822,11 @@ def build_board(force=False,preview_date=None):
       "metrics":_metrics(),"settlement":settlement,"game_count":len(future_games),
       "source_status":{"odds":"PropLine DraftKings ("+odds_source+")","team_ratings":ratings["source"],
         "season":ratings["season"],"team_rating_quality":ratings.get("data_quality"),"team_rating_fallback_used":ratings.get("fallback_used",False),"team_rating_fallback_reason":ratings.get("fallback_reason"),"team_count":len(ratings.get("teams") or {}),"injuries":injury_meta.get("status","unavailable"),
-        "player_impact":"Validated player-level impact not integrated; any listed rotation OUT/questionable/doubtful/day-to-day status blocks the game until absence impact can be priced",
+        "player_impact":"Validated player-level minutes/role/on-off impact not integrated; any listed OUT/questionable/doubtful/day-to-day player blocks the game because the feed cannot distinguish rotation from low-minute players",
+        "totals_validation":{"official_picks_enabled":_TOTALS_OFFICIAL_ENABLED,"status":"disabled_pending_holdout_bias_recalibration","holdout_total_bias_points":4.529},
         "reviewed_games":len(review_games),"prop_line_quota":quota,"saved_sides":side_saved,"saved_totals":total_saved,
         "unavailable_games":unique_unavailable[:10]},
-      "model_policy":"Team-efficiency ratings projection with explicit early-season uncertainty. Not yet a historically fitted regression. Market odds are used only for EV and no-vig comparison, never as the model probability.",
+      "model_policy":"Team-efficiency ratings projection with explicit early-season uncertainty. Not yet a historically fitted regression. Market odds are used only for EV and no-vig comparison, never as the model probability. Official game totals are disabled because the untouched 2026-27 holdout showed +4.53 points of total bias; sides remain separately eligible subject to injury and edge gates.",
       "thresholds":{"minimum_edge_pp":4.0 if ratings.get("data_quality")=="derived_early_season" else 2.5,
         "maximum_edge_pp":12.0 if ratings.get("data_quality")=="derived_early_season" else None,
         "minimum_ev_pct":2.0 if ratings.get("data_quality")=="derived_early_season" else 1.5,
