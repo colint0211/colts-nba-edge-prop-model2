@@ -5,7 +5,7 @@ with only information available before each game date. Calibration offsets are
 fit on prior seasons only and evaluated on the untouched latest-season holdout.
 Historical injury reports and DraftKings closing lines are not in this source.
 """
-import json, os, tempfile
+import json, math, os, tempfile
 from collections import defaultdict, deque
 from urllib.request import Request, urlopen
 import duckdb
@@ -54,16 +54,31 @@ def predict(home,away,history,league):
             "home_prior":h["games"],"away_prior":a["games"]}
 
 
-def summarize(rows, margin_offset=0.0, total_offset=0.0):
+def summarize(rows, margin_offset=0.0, total_offset=0.0, probability_sd=None):
     if not rows: return None
     n=len(rows)
     me=[(r["margin"]+margin_offset)-r["actual_margin"] for r in rows]
     te=[(r["total"]+total_offset)-r["actual_total"] for r in rows]
+    margin_bias=sum(me)/n
+    total_bias=sum(te)/n
+    margin_rmse=math.sqrt(sum(x*x for x in me)/n)
+    total_rmse=math.sqrt(sum(x*x for x in te)/n)
+    margin_sd=math.sqrt(sum((x-margin_bias)**2 for x in me)/n)
+    total_sd=math.sqrt(sum((x-total_bias)**2 for x in te)/n)
+    sd=max(1.0,float(probability_sd or margin_sd))
+    probs=[0.5*(1.0+math.erf((r["margin"]+margin_offset)/(sd*math.sqrt(2.0)))) for r in rows]
+    outcomes=[1.0 if r["actual_margin"]>0 else 0.0 for r in rows]
+    brier=sum((p-y)**2 for p,y in zip(probs,outcomes))/n
+    log_loss=-sum(y*math.log(max(1e-12,min(1-1e-12,p)))+(1-y)*math.log(max(1e-12,min(1-1e-12,1-p))) for p,y in zip(probs,outcomes))/n
     return {"games":n,
       "margin_mae":round(sum(abs(x) for x in me)/n,3),
+      "margin_rmse":round(margin_rmse,3),"margin_residual_sd":round(margin_sd,3),
       "total_mae":round(sum(abs(x) for x in te)/n,3),
-      "margin_bias":round(sum(me)/n,3),"total_bias":round(sum(te)/n,3),
-      "winner_accuracy_pct":round(100*sum(((r["margin"]+margin_offset)>0)==(r["actual_margin"]>0) for r in rows)/n,2)}
+      "total_rmse":round(total_rmse,3),"total_residual_sd":round(total_sd,3),
+      "margin_bias":round(margin_bias,3),"total_bias":round(total_bias,3),
+      "winner_accuracy_pct":round(100*sum(((r["margin"]+margin_offset)>0)==(r["actual_margin"]>0) for r in rows)/n,2),
+      "winner_brier":round(brier,5),"winner_log_loss":round(log_loss,5),
+      "probability_sd_points":round(sd,3)}
 
 
 def run():
@@ -115,12 +130,14 @@ def run():
     # Estimate additive calibration offsets from training seasons only.
     margin_offset=sum(r["actual_margin"]-r["margin"] for r in train)/len(train)
     total_offset=sum(r["actual_total"]-r["total"] for r in train)/len(train)
+    train_summary=summarize(train)
+    train_margin_sd=train_summary["margin_residual_sd"]
     result={"success":True,"method":"Walk-forward replay of live opponent-adjusted ORtg/DRtg and blended pace projection equations; last-10 team games; 15% league shrinkage; +2 home court; same-day outcomes withheld.",
       "source":"ramirobentes/nba_data PBP parquet","files":files,
       "train_seasons":[2025,2026],"holdout_season":2027,
-      "train_raw":summarize(train),"holdout_raw":summarize(hold),
-      "calibration_fit_on_train_only":{"margin_offset_points":round(margin_offset,3),"total_offset_points":round(total_offset,3)},
-      "holdout_after_train_calibration":summarize(hold,margin_offset,total_offset),
+      "train_raw":train_summary,"holdout_raw":summarize(hold,probability_sd=train_margin_sd),
+      "calibration_fit_on_train_only":{"margin_offset_points":round(margin_offset,3),"total_offset_points":round(total_offset,3),"margin_residual_sd_points":train_margin_sd},
+      "holdout_after_train_calibration":summarize(hold,margin_offset,total_offset,probability_sd=train_margin_sd),
       "games_scored":len(scored),"date_range":{"first":scored[0]["date"],"last":scored[-1]["date"]},
       "limitations":["This validates the live projection equations using historical rolling team ratings, not the exact historical Basketball-Reference snapshot pipeline.",
         "Historical pregame injury reports and player on/off data are unavailable; injured-player games are not injury-adjusted.",
