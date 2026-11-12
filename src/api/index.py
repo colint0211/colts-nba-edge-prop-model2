@@ -204,12 +204,23 @@ def _apply_balldontlie_game(prop, feed):
             break
     if not match:
         return
+    raw_status = str(match.get("status") or "").strip().lower()
+    if any(token in raw_status for token in ("final", "completed", "game over")):
+        game_state = "FINAL"
+    elif any(token in raw_status for token in ("qtr", "quarter", "half", "overtime", "in progress", "live")):
+        game_state = "LIVE"
+    else:
+        # Scheduled tip-time strings are pregame; missing/unknown statuses fail closed.
+        game_state = "PRE_GAME" if raw_status and any(ch.isdigit() for ch in raw_status) else "UNKNOWN"
     prop["balldontlie_game"] = {
         "source": "BALLDONTLIE",
         "game_id": match.get("id"),
         "date": match.get("date"),
         "datetime": match.get("datetime"),
         "status": match.get("status"),
+        "game_state": game_state,
+        "pregame_eligible": game_state == "PRE_GAME",
+        "official_play_eligible": game_state == "PRE_GAME" and prop.get("calibration_applied") is True,
         "period": match.get("period"),
         "clock": match.get("time"),
         "home_team": match.get("home_team"),
@@ -2156,6 +2167,10 @@ def _snapshot_daily_market_top5(market, props):
         for prop in candidates:
             if prop.get("injury_blocked") or prop.get("injury_flag"):
                 continue
+            # Official props require empirical calibration and verified pregame status.
+            game = prop.get("balldontlie_game") or {}
+            if prop.get("calibration_applied") is not True or game.get("game_state") != "PRE_GAME":
+                continue
             if prop.get("recommendation") not in ("VALUE CANDIDATE", "LEAN / VERIFY"):
                 continue
             # Mixed current/prior-season samples are allowed into the risk review;
@@ -2240,6 +2255,11 @@ def _revalidate_frozen_market_candidates(market, candidates, injury_feed):
     )
     eligible = []
     for p in ordered:
+        # Keep frozen historical candidates for audit, but never re-promote an
+        # uncalibrated or non-pregame candidate as an official play.
+        game = p.get("balldontlie_game") or {}
+        if p.get("calibration_applied") is not True or game.get("game_state") != "PRE_GAME":
+            continue
         if p.get("recommendation") not in ("VALUE CANDIDATE", "LEAN / VERIFY"):
             continue
         # Mixed current/prior-season samples must undergo the workload review.
