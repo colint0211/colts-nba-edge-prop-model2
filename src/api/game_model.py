@@ -555,9 +555,15 @@ def _injury_adjustment(team,injuries,season,game_date,pace=100.0):
         # supports traded players with a prior-season baseline without guessing
         # between multiple team-season rows.
         if record is None:
-            matches=[value for key,value in players.items() if key.startswith(name_key+"|")]
-            if len(matches)==1:
-                record=matches[0]
+            # Prefer an official Basketball-Reference traded-player aggregate
+            # (TOT) when present; otherwise require a single cross-team match.
+            total_record=players.get(name_key+"|TOT")
+            if total_record is not None:
+                record=total_record
+            else:
+                matches=[value for key,value in players.items() if key.startswith(name_key+"|")]
+                if len(matches)==1:
+                    record=matches[0]
         # Questionable/doubtful/day-to-day availability is probabilistic and
         # is not priced as a full absence. Keep the game out until confirmed.
         if status!="out":
