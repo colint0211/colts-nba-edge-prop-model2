@@ -3655,6 +3655,14 @@ def game_sides_totals_history(slate_date: str):
         raise HTTPException(status_code=503, detail="Game-model history is temporarily unavailable: " + type(exc).__name__)
 
 
+@app.get("/api/game-experimental-totals-history")
+def game_experimental_totals_history(slate_date: str):
+    try:
+        game_model.initialize()
+        return JSONResponse({"slate_date": slate_date, "predictions": game_model._experimental_totals_history(slate_date), "metrics": game_model._experimental_totals_metrics()})
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Experimental totals history unavailable: " + type(exc).__name__)
+
 @app.get("/api/game-metrics")
 def game_sides_totals_metrics():
     try:
