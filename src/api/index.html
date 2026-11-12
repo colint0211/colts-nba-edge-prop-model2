@@ -166,7 +166,8 @@ function renderPropBoard(m){
   const calibrated=p.calibration_applied===true;
   const status=gameState==='LIVE'?'IN-GAME · EXCLUDED':gameState==='FINAL'?'FINAL · AUDIT ONLY':
    gameState!=='PRE_GAME'?'PREGAME UNVERIFIED · RESEARCH ONLY':'RESEARCH ONLY · NOT AN OFFICIAL PLAY';
-  const side=p.best_side||'NO LEAN';
+  const held=p.projection_review_required===true;
+  const side=held?'HOLD · REVIEW':(p.best_side||'NO LEAN');
   const ev=score(p);
   const evText=ev>-1e8?(ev>0?'+':'')+fmt(ev,1)+'%':'—';
   const prob=p.best_probability==null?'—':fmt(p.best_probability,1)+'%';
