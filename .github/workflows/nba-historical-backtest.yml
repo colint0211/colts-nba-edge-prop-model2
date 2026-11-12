@@ -9,6 +9,7 @@ on:
       - src/api/nba_historical_backtest.py
       - src/api/nba_live_aligned_backtest.py
       - src/api/game_model.py
+      - tests/test_game_model_player_impact.py
       - .github/workflows/nba-historical-backtest.yml
       - requirements.txt
       - pyproject.toml
@@ -42,6 +43,9 @@ jobs:
 
       - name: Compile application modules
         run: python -m compileall -q src
+
+      - name: Test injury impact matching and safety gates
+        run: python -m unittest discover -s tests -v
       - name: Run leakage-safe historical backtest
         run: |
           python - <<'PY'
