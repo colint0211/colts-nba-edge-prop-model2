@@ -129,20 +129,24 @@ async function loadPropBoard(m){
  }catch(e){host.innerHTML='<div class="empty">Player props unavailable: '+esc(e.message||e)+'. No picks have been fabricated.</div>';}
 }
 function renderPropBoard(m){
- const d=propBoards[m]||{},list=d.props||[];
+ const d=propBoards[m]||{},list=(d.props||[]).slice(0,5);
  el('board').innerHTML=list.length?list.map((p,i)=>{
-  const recommendation=p.recommendation||'PASS',qualified=recommendation!=='PASS'&&p.best_side;
+  const calibrated=p.calibration_applied===true;
+  const recommendation=p.recommendation||'PASS';
+  const qualified=calibrated&&recommendation!=='PASS'&&p.best_side;
   const side=p.best_side||'PROJECTION ONLY';
-  const ev=p.expected_value_pct,edge=p.edge_pp,prob=p.best_probability;
-  return '<article class="card '+(qualified?'':'pass')+'"><div class="top"><div><div class="name">'+(i+1)+'. '+esc(p.player||'Unknown player')+'</div><div class="match">'+esc(p.team||'')+' · '+esc(p.game||'')+'</div></div><span class="decision">'+esc(recommendation)+'</span></div>'+
-  '<div class="linebox"><div><div class="line-label">'+esc(m.toUpperCase())+' · DraftKings line</div><div class="line">'+fmt(p.line,1)+'</div></div><div style="text-align:right"><div class="line-label">Model lean</div><div class="line">'+esc(side)+'</div></div></div>'+
+  const edge=calibrated?p.edge_pp:null,prob=p.best_probability;
+  const status=calibrated?recommendation:'PROVISIONAL · NOT OFFICIAL';
+  return '<article class="card '+(qualified?'':'pass')+'"><div class="top"><div><div class="name">'+(i+1)+'. '+esc(p.player||'Unknown player')+'</div><div class="match">'+esc(p.team||'')+' · '+esc(p.game||'')+'</div></div><span class="decision">'+esc(status)+'</span></div>'+
+  '<div class="linebox"><div><div class="line-label">'+esc(m.toUpperCase())+' · DraftKings line</div><div class="line">'+fmt(p.line,1)+'</div></div><div style="text-align:right"><div class="line-label">Model lean · unvalidated</div><div class="line">'+esc(side)+'</div></div></div>'+
   '<div class="metrics"><div class="mini"><div class="mini-label">Projection</div><div class="mini-value">'+fmt(p.projection??p.projected_value,1)+'</div></div>'+
-  '<div class="mini"><div class="mini-label">Best-side probability</div><div class="mini-value">'+(prob==null?'—':fmt(prob,1)+'%')+'</div></div>'+
-  '<div class="mini"><div class="mini-label">Expected value</div><div class="mini-value '+(ev!=null&&ev>0?'positive':'gold')+'">'+(ev==null?'—':fmt(ev,2)+'%')+'</div></div></div>'+
-  '<div class="bottom"><span>Odds: O '+odds(p.over_odds)+' / U '+odds(p.under_odds)+'</span><span>Edge: '+(edge==null?'—':signed(edge)+' pp')+'</span><span>Sample: '+(p.games_used??'—')+' games · '+esc(p.confidence||'unrated')+'</span></div>'+
+  '<div class="mini"><div class="mini-label">Raw model probability</div><div class="mini-value">'+(prob==null?'—':fmt(prob,1)+'%')+'</div></div>'+
+  '<div class="mini"><div class="mini-label">EV · validation required</div><div class="mini-value gold">—</div></div></div>'+
+  '<div class="bottom"><span>Odds: O '+odds(p.over_odds)+' / U '+odds(p.under_odds)+'</span><span>Validated edge: '+(edge==null?'—':signed(edge)+' pp')+'</span><span>Sample: '+(p.games_used??'—')+' games · '+esc(p.confidence||'unrated')+'</span></div>'+
+  '<div class="source">Raw probability and lean are research-only until out-of-sample calibration is complete. No official prop bet.</div>'+
   (p.probability_note?'<details><summary>Model notes</summary><p>'+esc(p.probability_note)+'</p></details>':'')+
   '</article>';
- }).join(''):'<div class="empty">No qualified '+esc(m)+' props are available. The model will not force a pick.</div>';
+ }).join(''):'<div class="empty">No '+esc(m)+' prop projections are available. The model will not force a pick.</div>';
  if(d.unavailable?.length)el('updated').textContent+=' · '+d.unavailable.length+' player data issues';
 }
 function renderMetrics(m){
