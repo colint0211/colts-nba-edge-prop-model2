@@ -929,7 +929,7 @@ def build_board(force=False,preview_date=None):
       "metrics":_metrics(),"settlement":settlement,"game_count":len(future_games),
       "source_status":{"odds":"PropLine DraftKings ("+odds_source+")","team_ratings":ratings["source"],
         "season":ratings["season"],"team_rating_quality":ratings.get("data_quality"),"team_rating_fallback_used":ratings.get("fallback_used",False),"team_rating_fallback_reason":ratings.get("fallback_reason"),"team_count":len(ratings.get("teams") or {}),"injuries":injury_meta.get("status","unavailable"),
-        "player_impact":"Basketball-Reference minutes + shrunk BPM replacement-level proxy (not on/off); OUT players priced only with fresh exact player/team matches; questionable/doubtful/day-to-day remain blocked pending calibrated availability probabilities",
+        "player_impact":"Basketball-Reference minutes + shrunk BPM replacement-level proxy (not on/off); OUT players priced only with fresh exact-team, official TOT, or unique cross-team player matches; questionable/doubtful/day-to-day remain blocked pending calibrated availability probabilities",
         "player_impact_snapshot":_load_player_impact_snapshot(ratings["season"]).get("meta"),
         "totals_validation":{"official_picks_enabled":_TOTALS_OFFICIAL_ENABLED,"status":"disabled_pending_holdout_bias_recalibration","holdout_total_bias_points":4.529},
         "reviewed_games":len(review_games),
