@@ -2133,6 +2133,33 @@ def _post_selection_negative_review(prop, market, injury_feed):
     return True, "Passed post-selection negative review"
 
 
+def _projection_side_review(prop):
+    """Fail closed when the displayed mean points opposite to the selected side."""
+    if not isinstance(prop, dict):
+        return False
+    projection = _number(prop.get("projection"))
+    line = _number(prop.get("line"))
+    side = str(prop.get("best_side") or "").strip().upper()
+    if projection is None or line is None or side not in ("OVER", "UNDER"):
+        prop["projection_alignment"] = "unavailable"
+        prop["projection_review_required"] = True
+        prop["projection_review_reason"] = "Projection, line, or selected side is missing."
+        return True
+    if abs(projection - line) < 1e-9:
+        prop["projection_alignment"] = "at_line"
+        prop["projection_review_required"] = False
+        prop["projection_review_reason"] = "Projection is effectively on the betting line."
+        return False
+    aligned = (projection > line and side == "OVER") or (projection < line and side == "UNDER")
+    prop["projection_alignment"] = "aligned" if aligned else "conflict"
+    prop["projection_review_required"] = not aligned
+    prop["projection_review_reason"] = (
+        "Projection direction supports the selected side." if aligned else
+        f"Projection {projection:.2f} is on the opposite side of line {line:.2f} from selected {side}; hold for review."
+    )
+    return not aligned
+
+
 def _snapshot_daily_market_top5(market, props):
     """Select initial Top 5, then run targeted negative review and promote replacements."""
     try:
@@ -2165,6 +2192,8 @@ def _snapshot_daily_market_top5(market, props):
             key=lambda item: float(item.get("expected_value_pct") if item.get("expected_value_pct") is not None else -1e9),
             reverse=True,
         )
+        for item in ordered:
+            _projection_side_review(item)
         if not ordered:
             return []
         frozen = prediction_ledger.freeze_daily_slate(market, slate_date, ordered)
@@ -2172,6 +2201,11 @@ def _snapshot_daily_market_top5(market, props):
         injury_feed = _load_official_injury_feed()
         eligible = []
         for prop in candidates:
+            if _projection_side_review(prop):
+                prop["selection_gate_status"] = "HOLD"
+                prop["selection_gate_reason"] = prop.get("projection_review_reason")
+                continue
+            prop["selection_gate_status"] = "ELIGIBLE_FOR_REVIEW"
             if prop.get("injury_blocked") or prop.get("injury_flag"):
                 continue
             # Official props require empirical calibration and verified pregame status.
@@ -2269,6 +2303,10 @@ def _revalidate_frozen_market_candidates(market, candidates, injury_feed):
             continue
         if p.get("recommendation") not in ("VALUE CANDIDATE", "LEAN / VERIFY"):
             continue
+        if _projection_side_review(p):
+            p["selection_gate_status"] = "HOLD"
+            p["selection_gate_reason"] = p.get("projection_review_reason")
+            continue
         # Mixed current/prior-season samples must undergo the workload review.
         try:
             ev=float(p.get("expected_value_pct"))
@@ -2292,8 +2330,15 @@ def _revalidate_frozen_market_candidates(market, candidates, injury_feed):
             passed=False; reason="Negative review failed safely: "+type(exc).__name__
             p["negative_review"]={"status":"review_failed","reason":reason}
         p["post_selection_reviewed"]=True
+        if passed and _projection_side_review(p):
+            passed=False
+            reason=p.get("projection_review_reason")
         if passed and p.get("best_side") in ("OVER","UNDER") and float(p.get("expected_value_pct") or 0)>0:
+            p["selection_gate_status"]="APPROVED"
             selected.append(p)
+        else:
+            p["selection_gate_status"]="HOLD"
+            p["selection_gate_reason"]=reason
             if len(selected)==5: break
     selected_keys={(_norm_player_name(p.get("player")),str(p.get("game") or "").casefold()) for p in selected}
     for p in ordered:
