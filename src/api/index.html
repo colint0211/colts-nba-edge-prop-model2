@@ -133,10 +133,10 @@ function renderPropBoard(m){
  el('board').innerHTML=list.length?list.map((p,i)=>{
   const calibrated=p.calibration_applied===true;
   const recommendation=p.recommendation||'PASS';
-  const qualified=calibrated&&recommendation!=='PASS'&&p.best_side;
+  const gameState=(p.balldontlie_game||{}).game_state||'UNKNOWN';
+  const qualified=calibrated&&gameState==='PRE_GAME'&&recommendation!=='PASS'&&p.best_side;
   const side=p.best_side||'PROJECTION ONLY';
   const edge=calibrated?p.edge_pp:null,prob=p.best_probability;
-  const gameState=(p.balldontlie_game||{}).game_state||'UNKNOWN';
   const status=gameState==='LIVE'?'IN-GAME · NOT PREGAME':gameState==='FINAL'?'FINAL · NOT PREGAME':!calibrated?'PROVISIONAL · NOT OFFICIAL':recommendation;
   const stateNote=gameState==='LIVE'?'Game already started; excluded from new pregame plays.':gameState==='FINAL'?'Game is final; retained for audit only.':gameState==='UNKNOWN'?'Pregame status could not be verified; no official play.':'Verified pregame status.';
   return '<article class="card '+(qualified?'':'pass')+'"><div class="top"><div><div class="name">'+(i+1)+'. '+esc(p.player||'Unknown player')+'</div><div class="match">'+esc(p.team||'')+' · '+esc(p.game||'')+'</div></div><span class="decision">'+esc(status)+'</span></div>'+
