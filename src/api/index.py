@@ -3513,6 +3513,22 @@ def get_daily_top5(slate_date: str, market: str = "all"):
         raise HTTPException(status_code=503, detail="Daily Top 5 history is temporarily unavailable.") from exc
 
 
+@app.get("/api/model/record-groups")
+def model_record_groups(slate_date: str):
+    try:
+        prediction_ledger.initialize()
+        freeze_status = prediction_ledger.freeze_daily_record_groups(slate_date)
+        names = ("top5_ev_player_props", "all_five_player_props_combined")
+        groups = {}
+        for name in names:
+            groups[name] = {
+                "predictions": prediction_ledger.list_daily_record_group(slate_date, name),
+                "metrics": prediction_ledger.daily_record_group_metrics(name),
+            }
+        return JSONResponse({"slate_date": slate_date, "freeze": freeze_status, "groups": groups})
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Player-prop record groups unavailable: " + type(exc).__name__)
+
 @app.get("/api/model/ledger")
 def model_ledger(status: str = "unsettled", market: str = "all", limit: int = 100):
     try:
