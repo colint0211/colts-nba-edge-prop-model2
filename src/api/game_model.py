@@ -841,10 +841,11 @@ def build_board(force=False,preview_date=None):
               "metrics":_metrics(),"settlement":settlement,
               "source_status":{"odds":"frozen DraftKings snapshot","team_ratings":"frozen pregame snapshot"}}
         # Legacy empty rows are not a valid pregame snapshot.
-        legacy_empty_slate=(len(frozen)==2 and not frozen["sides"]["picks"] and not frozen["totals"]["picks"])
+        legacy_empty_slate=(bool(frozen) and not any(item["picks"] for item in frozen.values()))
     events,odds_source,quota=_fetch_lines(force)
     games=_parse_game_lines(events)
-    if not games: raise RuntimeError("PropLine returned no upcoming NBA games with both DraftKings spread and full-game total quotes.")
+    # An empty odds response is classified against the official schedule below;
+    # it must not abort before we can distinguish waiting, missed, and no-game states.
     from zoneinfo import ZoneInfo
     now=datetime.now(timezone.utc)
     future_games=[]
