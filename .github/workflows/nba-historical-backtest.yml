@@ -2,6 +2,12 @@ name: NBA historical walk-forward backtest
 
 on:
   workflow_dispatch:
+    inputs:
+      run_paid_ats:
+        description: "Spend up to 210 DunkAPI credits on historical DraftKings ATS validation"
+        required: true
+        type: boolean
+        default: false
   push:
     branches:
       - feature/nba-stats-off-def-primary
@@ -68,7 +74,7 @@ jobs:
       - name: Run opt-in DraftKings historical ATS validation
         env:
           DUNKAPI_API_KEY: ${{ secrets.DUNKAPI_API_KEY }}
-          NBA_ATS_BACKTEST_ENABLED: ${{ vars.NBA_ATS_BACKTEST_ENABLED }}
+          NBA_ATS_BACKTEST_ENABLED: ${{ inputs.run_paid_ats && 'true' || 'false' }}
         run: python -m src.api.nba_historical_ats_backtest
 
       - name: Save backtest results
