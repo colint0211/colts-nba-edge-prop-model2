@@ -548,6 +548,16 @@ def _injury_adjustment(team,injuries,season,game_date,pace=100.0):
             base_key=re.sub(r"(jr|sr|ii|iii|iv|v)$","",name_key)
             if base_key!=name_key:
                 record=players.get(base_key+"|"+team)
+                if record is None:
+                    name_key=base_key
+        # A verified player record from another team can be used only when the
+        # normalized player identity has exactly one snapshot record. This
+        # supports traded players with a prior-season baseline without guessing
+        # between multiple team-season rows.
+        if record is None:
+            matches=[value for key,value in players.items() if key.startswith(name_key+"|")]
+            if len(matches)==1:
+                record=matches[0]
         # Questionable/doubtful/day-to-day availability is probabilistic and
         # is not priced as a full absence. Keep the game out until confirmed.
         if status!="out":
