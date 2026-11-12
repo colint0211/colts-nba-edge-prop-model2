@@ -212,6 +212,54 @@ async function loadDailyPropHistory(day){
   body.innerHTML='<tr><td colspan="11">Could not load the player prop ledger.</td></tr>';
  }
 }
+
+function recordSummary(target,sub,metric){
+ const m=metric||{};
+ el(target).textContent=(m.wins??0)+' – '+(m.losses??0)+(m.pushes?' / '+m.pushes+'P':'');
+ el(sub).textContent=(m.win_rate_pct==null?'—':fmt(m.win_rate_pct,1)+'%')+' win rate · '+(m.net_units>0?'+':'')+fmt(m.net_units??0,2)+'u · '+(m.settled??0)+' settled';
+}
+function renderGameRecordStats(d){
+ recordSummary('recSides','recSidesSub',d?.metrics?.by_market?.sides);
+ recordSummary('recTotals','recTotalsSub',d?.experimental_totals_metrics);
+}
+function renderPropGroupRows(rows){
+ return (rows||[]).length?rows.map(p=>{
+  const result=p.outcome||'PENDING',cls=result==='WIN'?'win':result==='LOSS'?'loss':result==='PUSH'?'push':'';
+  const profit=p.profit_units==null?'—':(p.profit_units>0?'+':'')+fmt(p.profit_units,2)+'u';
+  return '<tr><td>'+esc(p.market)+'</td><td>'+esc(p.player)+'</td><td>'+esc(p.game||'')+'</td><td>'+esc(p.side)+'</td><td>'+fmt(p.line,1)+'</td><td>'+odds(p.odds)+'</td><td>'+fmt(p.probability_pct,1)+'%</td><td>'+fmt(p.expected_value_pct,1)+'%</td><td>'+fmt(p.actual_value,1)+'</td><td class="'+cls+'">'+result+'</td><td>'+profit+'</td></tr>';
+ }).join(''):'<tr><td colspan="11">No picks have been frozen in this record for this slate date.</td></tr>';
+}
+async function loadRecordGroups(day){
+ try{
+  const r=await fetch('/api/model/record-groups?slate_date='+encodeURIComponent(day)+'&t='+Date.now(),{cache:'no-store'});
+  const d=await r.json();if(!r.ok)throw Error(d.detail||'Player-prop record groups unavailable');
+  const top=d.groups?.top5_ev_player_props||{},all=d.groups?.all_five_player_props_combined||{};
+  const tm=top.metrics||{},am=all.metrics||{};
+  recordSummary('recTopEv','recTopEvSub',tm);
+  recordSummary('recAllProps','recAllPropsSub',am);
+  const topRows=top.predictions||[],allRows=all.predictions||[];
+  el('topEvStatus').textContent=topRows.length+' saved picks · '+(tm.wins??0)+'W – '+(tm.losses??0)+'L · '+(tm.settled??0)+' settled';
+  el('allPropsStatus').textContent=allRows.length+' saved picks · '+(am.wins??0)+'W – '+(am.losses??0)+'L · '+(am.settled??0)+' settled';
+  el('topEvRows').innerHTML=renderPropGroupRows(topRows);
+  el('allPropsRows').innerHTML=renderPropGroupRows(allRows);
+ }catch(e){
+  el('topEvStatus').textContent='Record unavailable: '+(e.message||e);
+  el('allPropsStatus').textContent='Record unavailable: '+(e.message||e);
+ }
+}
+async function loadExperimentalTotalsHistory(day){
+ try{
+  const r=await fetch('/api/game-experimental-totals-history?slate_date='+encodeURIComponent(day)+'&t='+Date.now(),{cache:'no-store'});
+  const d=await r.json();if(!r.ok)throw Error(d.detail||'Experimental totals history unavailable');
+  const rows=d.predictions||[],m=d.metrics||{};
+  el('totalsHistoryStatus').textContent=rows.length+' locked experimental totals · '+(m.wins??0)+'W – '+(m.losses??0)+'L · '+(m.settled??0)+' settled · '+(m.net_units>0?'+':'')+fmt(m.net_units??0,2)+'u all-time';
+  el('totalsHistoryRows').innerHTML=rows.length?rows.map(p=>{
+   const result=p.outcome||'PENDING',cls=result==='WIN'?'win':result==='LOSS'?'loss':result==='PUSH'?'push':'';
+   return '<tr><td>'+esc(p.matchup)+'</td><td>'+esc(p.selection)+'</td><td>'+fmt(p.line,1)+'</td><td>'+odds(p.odds)+'</td><td>'+fmt(p.model_probability*100,1)+'%</td><td>'+fmt(p.market_probability*100,1)+'%</td><td>'+fmt(p.ev_pct,2)+'%</td><td>'+fmt(p.projected_total,1)+'</td><td>'+fmt(p.actual_value,1)+'</td><td class="'+cls+'">'+result+'</td><td>'+(p.profit_units==null?'—':(p.profit_units>0?'+':'')+fmt(p.profit_units,2)+'u')+'</td></tr>';
+  }).join(''):'<tr><td colspan="11">No experimental totals were locked for this date.</td></tr>';
+ }catch(e){el('totalsHistoryStatus').textContent='Totals record unavailable: '+(e.message||e);}
+}
+
 function renderMetrics(m){
  const a=m?.all_time||{};el('settled').textContent=a.settled??0;
  el('record').textContent=(a.wins??0)+' – '+(a.losses??0)+(a.pushes?' / '+a.pushes+'P':'');
@@ -276,7 +324,7 @@ async function loadBoard(refresh=false){
   el('updated').textContent='Updated '+new Date().toLocaleTimeString();
   el('slateDate').textContent='Slate: '+d.slate_date;
   el('historyDate').value=d.slate_date;
-  renderMetrics(d.metrics);if(section!=='props')renderBoard();renderSources(d.source_status);
+  renderMetrics(d.metrics);renderGameRecordStats(d);if(section!=='props')renderBoard();renderSources(d.source_status);
   if(d.settlement?.settled)el('updated').textContent+=' · '+d.settlement.settled+' results settled';
   await loadHistory();
  }catch(e){
@@ -294,6 +342,8 @@ async function loadHistory(){
   const d=await r.json();if(!r.ok)throw Error(d.detail||'History unavailable');
   historyRows=d.predictions||[];renderMetrics(d.metrics);
   await loadDailyPropHistory(day);
+  await loadRecordGroups(day);
+  await loadExperimentalTotalsHistory(day);
   const wins=historyRows.filter(x=>x.outcome==='WIN').length,losses=historyRows.filter(x=>x.outcome==='LOSS').length;
   const pending=historyRows.filter(x=>!x.outcome).length;
   el('historyStatus').textContent=historyRows.length+' model picks · '+wins+' wins · '+losses+' losses · '+pending+' pending';
