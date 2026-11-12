@@ -72,6 +72,10 @@ def collect(year):
     adv_url=f"{BASE}/NBA_{year}_advanced.html"
     per=find(tables(per_url),{"Player","Team","G","MP"})
     adv=find(tables(adv_url),{"Player","Team","BPM"})
+    if year in (2025,2026,2027):
+        for token in ("nurk","porz","krej"):
+            raw_names=sorted({str(value) for value in per["Player"].dropna() if token in str(value).casefold()})
+            print(f"PLAYER_IMPACT_RAW_NAMES year={year} token={token} names={raw_names[:10]}")
     per_map={}
     for _,r in per.iterrows():
         player=str(r.get("Player") or "").strip()
