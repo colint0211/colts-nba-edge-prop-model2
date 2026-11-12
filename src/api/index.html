@@ -123,7 +123,6 @@ async function loadPropBoard(m){
   const r=await fetch('/api/proprietary-market-board?market='+encodeURIComponent(m)+'&t='+Date.now(),{cache:'no-store'});
   const d=await r.json();if(!r.ok)throw Error(d.detail||d.error||'Player prop board unavailable');
   propBoards[m]=d;renderPropBoard(m);
-  el('status').textContent=d.daily_frozen?'PROP SLATE LOCKED':'PLAYER PROP DATA';
   el('updated').textContent='Player props · '+m+' · '+(d.source||'model');
   el('slateDate').textContent='Slate: '+(d.daily_slate_date||'today');
  }catch(e){host.innerHTML='<div class="empty">Player props unavailable: '+esc(e.message||e)+'. No picks have been fabricated.</div>';}
