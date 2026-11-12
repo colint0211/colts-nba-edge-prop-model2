@@ -2137,8 +2137,18 @@ def _projection_side_review(prop):
     """Fail closed when the displayed mean points opposite to the selected side."""
     if not isinstance(prop, dict):
         return False
-    projection = _number(prop.get("projection"))
-    line = _number(prop.get("line"))
+    try:
+        projection = float(prop.get("projection"))
+        if not math.isfinite(projection):
+            projection = None
+    except (TypeError, ValueError, OverflowError):
+        projection = None
+    try:
+        line = float(prop.get("line"))
+        if not math.isfinite(line):
+            line = None
+    except (TypeError, ValueError, OverflowError):
+        line = None
     side = str(prop.get("best_side") or "").strip().upper()
     if projection is None or line is None or side not in ("OVER", "UNDER"):
         prop["projection_alignment"] = "unavailable"
