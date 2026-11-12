@@ -207,8 +207,13 @@ def main():
             "baseline_age_seasons":baseline_age,
         }
     if len(players)<250: raise RuntimeError(f"Validated player impact output too small: {len(players)}")
+    current_team_count=len({team for _,team in current if team in TEAM.values()})
+    if current_team_count<25:
+        raise RuntimeError(f"Current-season player table is incomplete: only {current_team_count} teams represented")
     payload={
       "schema_version":1,
+      "current_season_player_table_complete":True,
+      "current_season_team_count":current_team_count,
       "source":"Basketball-Reference per-game minutes + Advanced BPM",
       "method":"BPM is a box-score-derived proxy, not on/off. Estimated absence points = (shrunk BPM - replacement BPM) * MPG/48 * team pace/100; replacement BPM fixed at -2.0. Current BPM is shrunk toward a prior-season player baseline (15-game strength), or a two-year-old baseline (10-game strength) when last season is unavailable. Two-year-only BPM is shrunk 50% toward replacement level and minutes reduced 20%. Cross-team prior records are combined by games played.",
       "replacement_bpm":-2.0,
