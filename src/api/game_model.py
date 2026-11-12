@@ -503,12 +503,17 @@ def _load_player_impact_snapshot(season):
         if fetched.tzinfo is None: fetched=fetched.replace(tzinfo=timezone.utc)
         age=max(0.0,(datetime.now(timezone.utc)-fetched.astimezone(timezone.utc)).total_seconds())
         players=payload.get("players") or {}
+        current_team_count=int(payload.get("current_season_team_count") or 0)
+        current_table_complete=bool(payload.get("current_season_player_table_complete")) and current_team_count>=25
         valid=(payload.get("schema_version")==1 and payload.get("season")==season
-            and payload.get("player_count")==len(players) and len(players)>=250 and age<=36*3600)
+            and payload.get("player_count")==len(players) and len(players)>=250 and age<=36*3600
+            and current_table_complete)
         data={"available":bool(valid),"players":players if valid else {},
             "meta":{"source":payload.get("source"),"season":payload.get("season"),
             "fetched_at":payload.get("fetched_at"),"age_hours":round(age/3600,2),
             "player_count":len(players),"status":"fresh" if valid else "stale_or_invalid",
+            "current_season_player_table_complete":current_table_complete,
+            "current_season_team_count":current_team_count,
             "method":payload.get("method"),"replacement_bpm":payload.get("replacement_bpm",-2.0)}}
     except Exception as exc:
         data={"available":False,"players":{},"meta":{"status":"unavailable","error":type(exc).__name__}}
@@ -572,17 +577,36 @@ def _injury_adjustment(team,injuries,season,game_date,pace=100.0):
               "estimated_team_points":None,"impact_data_available":False,
               "impact_source":"availability probability not calibrated; game withheld"})
             continue
-        if not snapshot.get("available") or not record:
+        if not snapshot.get("available"):
             unpriced=True
             details.append({"player":name,"status":item.get("status"),"minutes":None,
               "estimated_team_points":None,"impact_data_available":False,
-              "impact_source":"fresh season-matched player impact record unavailable; game withheld"})
+              "impact_source":"fresh complete current-season player table unavailable; game withheld"})
+            continue
+        if not record:
+            meta=snapshot.get("meta") or {}
+            if meta.get("current_season_player_table_complete") and int(meta.get("current_season_team_count") or 0)>=25:
+                details.append({"player":name,"status":item.get("status"),"minutes":None,
+                  "games_current_season":0,"estimated_team_points":0.0,"impact_data_available":True,
+                  "impact_source":"no current-season player row in validated full-team table; zero incremental absence adjustment to current-season team ratings"})
+                continue
+            unpriced=True
+            details.append({"player":name,"status":item.get("status"),"minutes":None,
+              "estimated_team_points":None,"impact_data_available":False,
+              "impact_source":"player impact record unavailable and current-season table completeness unverified; game withheld"})
             continue
         try:
             mpg=float(record["minutes_per_game"]); bpm=float(record["bpm_shrunk"])
             gp=int(record.get("games_current_season") or 0)
             if not (math.isfinite(mpg) and math.isfinite(bpm) and 0<=mpg<=48 and -12<=bpm<=12):
                 raise ValueError("invalid player impact values")
+            if gp==0:
+                details.append({"player":name,"status":item.get("status"),
+                  "minutes":round(mpg,2),"games_current_season":0,
+                  "bpm_shrunk":round(bpm,3),"replacement_bpm":replacement_bpm,
+                  "estimated_team_points":0.0,"impact_data_available":True,
+                  "impact_source":"zero current-season appearances; no incremental absence adjustment to current-season team ratings"})
+                continue
             # A tiny early-season sample is not enough to price a rotation player.
             # Permit only a clearly low-minute role (<=12 MPG) after at least
             # three appearances; the snapshot's heavy early-season BPM shrinkage
