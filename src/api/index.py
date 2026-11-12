@@ -2246,11 +2246,17 @@ def _snapshot_daily_market_top5(market, props):
                 passed = False
                 reason = "Negative review failed safely: " + type(review_error).__name__
                 prop["negative_review"] = {"status": "review_failed", "reason": reason}
+            if passed and _projection_side_review(prop):
+                passed = False
+                reason = prop.get("projection_review_reason")
             if passed:
+                prop["selection_gate_status"] = "APPROVED"
                 selected.append(prop)
                 if len(selected) == 5:
                     break
             else:
+                prop["selection_gate_status"] = "HOLD"
+                prop["selection_gate_reason"] = reason
                 removed.append({
                     "player": prop.get("player"),
                     "side": prop.get("best_side"),
