@@ -77,5 +77,61 @@ class PlayerImpactTests(unittest.TestCase):
         self.assertFalse(result["players"][0]["impact_data_available"])
 
 
+    def test_three_game_low_minute_player_can_be_priced_conservatively(self):
+        snapshot = {
+            "available": True,
+            "players": {
+                "tobeawaka|CHI": {
+                    "minutes_per_game": 10.3,
+                    "bpm_shrunk": -0.84,
+                    "games_current_season": 4,
+                    "bpm_prior": None,
+                }
+            },
+            "meta": {"replacement_bpm": -2.0, "status": "fresh"},
+        }
+        injury = [{
+            "team": "CHI",
+            "player": "Awaka, Tobe",
+            "status": "Out",
+            "game_date": "11/11/2026",
+            "reason": "Injury/Illness",
+        }]
+        with patch.object(game_model, "_load_player_impact_snapshot", return_value=snapshot):
+            result = game_model._injury_adjustment(
+                "CHI", injury, "2026-27", "2026-11-11T19:00:00-05:00", 100.0
+            )
+        self.assertFalse(result["unpriced_injury"])
+        self.assertTrue(result["players"][0]["impact_data_available"])
+        self.assertLessEqual(abs(result["points"]), 0.5)
+
+    def test_four_game_high_minute_player_without_prior_remains_blocked(self):
+        snapshot = {
+            "available": True,
+            "players": {
+                "jamorant|POR": {
+                    "minutes_per_game": 25.8,
+                    "bpm_shrunk": 2.76,
+                    "games_current_season": 4,
+                    "bpm_prior": None,
+                }
+            },
+            "meta": {"replacement_bpm": -2.0, "status": "fresh"},
+        }
+        injury = [{
+            "team": "POR",
+            "player": "Morant, Ja",
+            "status": "Out",
+            "game_date": "11/11/2026",
+            "reason": "Injury/Illness",
+        }]
+        with patch.object(game_model, "_load_player_impact_snapshot", return_value=snapshot):
+            result = game_model._injury_adjustment(
+                "POR", injury, "2026-27", "2026-11-11T19:00:00-05:00", 100.0
+            )
+        self.assertTrue(result["unpriced_injury"])
+        self.assertFalse(result["players"][0]["impact_data_available"])
+
+
 if __name__ == "__main__":
     unittest.main()
