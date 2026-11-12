@@ -77,8 +77,8 @@ table{width:100%;border-collapse:collapse;min-width:800px;font-size:12px}th,td{p
  </div>
  <div id="board" class="cards"><div class="empty">Loading team ratings and DraftKings lines…</div></div>
 
- <div class="section">Daily locked player prop picks</div>
- <div class="hint">Only timestamped pregame selections that passed the daily eligibility gates appear here. Markets without qualified picks remain blank rather than forcing a play.</div>
+ <div class="section">Daily locked player prop candidates</div>
+ <div class="hint">Timestamped pregame candidates that passed data-quality and calibration gates are tracked here. They remain research-only until market-level validation is passed; markets without qualified candidates stay blank.</div>
  <div class="filters"><span id="propHistoryStatus" class="muted">Loading player prop results…</span></div>
  <div class="tablewrap">
   <table><thead><tr><th>Market</th><th>Player</th><th>Matchup</th><th>Side</th><th>Line</th><th>Odds</th><th>Model %</th><th>Projection</th><th>Actual</th><th>Result</th><th>Units</th></tr></thead>
@@ -180,12 +180,12 @@ async function loadDailyPropHistory(day){
   const losses=picks.filter(p=>p.outcome==='LOSS').length;
   const pushes=picks.filter(p=>p.outcome==='PUSH').length;
   const pending=picks.filter(p=>!p.outcome).length;
-  status.textContent=picks.length+' locked player props · '+wins+'W – '+losses+'L'+(pushes?' · '+pushes+' pushes':'')+' · '+pending+' pending';
+  status.textContent=picks.length+' locked prop candidates · '+wins+'W – '+losses+'L'+(pushes?' · '+pushes+' pushes':'')+' · '+pending+' pending';
   body.innerHTML=picks.length?picks.map(p=>{
    const result=p.outcome||'PENDING',cls=result==='WIN'?'win':result==='LOSS'?'loss':result==='PUSH'?'push':'';
    const profit=p.profit_units==null?'—':(p.profit_units>0?'+':'')+fmt(p.profit_units,2)+'u';
    return '<tr><td>'+esc(p.market)+'</td><td>'+esc(p.player)+'</td><td>'+esc(p.game||'')+'</td><td>'+esc(p.side)+'</td><td>'+fmt(p.line,1)+'</td><td>'+odds(p.odds)+'</td><td>'+fmt(p.probability_pct,1)+'%</td><td>'+fmt(p.projection,1)+'</td><td>'+fmt(p.actual_value,1)+'</td><td class="'+cls+'">'+result+'</td><td>'+profit+'</td></tr>';
-  }).join(''):'<tr><td colspan="11">No qualified, locked player prop picks were recorded for '+esc(day)+'. Research candidates are not counted as official picks.</td></tr>';
+  }).join(''):'<tr><td colspan="11">No qualified, locked player prop candidates were recorded for '+esc(day)+'. Research candidates are tracked for audit, not treated as official bets.</td></tr>';
  }catch(e){
   status.textContent='Player prop results unavailable: '+(e.message||e);
   body.innerHTML='<tr><td colspan="11">Could not load the player prop ledger.</td></tr>';
