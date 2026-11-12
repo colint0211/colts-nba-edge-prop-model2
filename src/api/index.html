@@ -54,12 +54,6 @@ table{width:100%;border-collapse:collapse;min-width:800px;font-size:12px}th,td{p
  </div>
 </header>
 <main>
- <div class="grid">
-  <div class="stat"><div class="statlabel">Settled model picks</div><div id="settled" class="num">—</div></div>
-  <div class="stat"><div class="statlabel">Model W – L</div><div id="record" class="num">—</div></div>
-  <div class="stat"><div class="statlabel">Win rate</div><div id="winrate" class="num">—</div></div>
-  <div class="stat"><div class="statlabel">Hypothetical units</div><div id="units" class="num">—</div></div>
- </div>
  <div class="section">Independent records</div>
  <div class="grid">
   <div class="stat"><div class="statlabel">Sides · W–L</div><div id="recSides" class="num">—</div><div id="recSidesSub" class="muted">Official sides ledger</div></div>
@@ -260,13 +254,6 @@ async function loadExperimentalTotalsHistory(day){
  }catch(e){el('totalsHistoryStatus').textContent='Totals record unavailable: '+(e.message||e);}
 }
 
-function renderMetrics(m){
- const a=m?.all_time||{};el('settled').textContent=a.settled??0;
- el('record').textContent=(a.wins??0)+' – '+(a.losses??0)+(a.pushes?' / '+a.pushes+'P':'');
- el('winrate').textContent=a.win_rate_pct==null?'—':fmt(a.win_rate_pct,1)+'%';
- el('units').textContent=(Number(a.net_units)>0?'+':'')+fmt(a.net_units??0,2)+'u';
- el('units').className='num '+(Number(a.net_units)>=0?'positive':'negative');
-}
 function adjustmentText(x){
  if(!x)return 'No situational data';
  const inj=(x.injuries||[]).map(p=>p.player+' · '+p.status+' · '+(p.impact_source||'impact unavailable')+' · '+signed(p.estimated_team_points||0)).join('; ');
@@ -324,7 +311,7 @@ async function loadBoard(refresh=false){
   el('updated').textContent='Updated '+new Date().toLocaleTimeString();
   el('slateDate').textContent='Slate: '+d.slate_date;
   el('historyDate').value=d.slate_date;
-  renderMetrics(d.metrics);renderGameRecordStats(d);if(section!=='props')renderBoard();renderSources(d.source_status);
+  renderGameRecordStats(d);if(section!=='props')renderBoard();renderSources(d.source_status);
   if(d.settlement?.settled)el('updated').textContent+=' · '+d.settlement.settled+' results settled';
   await loadHistory();
  }catch(e){
