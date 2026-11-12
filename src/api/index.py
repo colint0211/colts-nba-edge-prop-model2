@@ -117,7 +117,14 @@ def _load_balldontlie_games(allow_fetch=True):
         return data
 
     today = datetime.now(ZoneInfo("America/New_York")).date()
-    dates = [today.isoformat(), (today + timedelta(days=1)).isoformat()]
+    # The dashboard deliberately keeps the prior Eastern-time slate visible
+    # until 7:00 a.m. ET. Include yesterday so those frozen matchups still get
+    # a current FINAL/LIVE status after midnight instead of falling to UNKNOWN.
+    dates = [
+        (today - timedelta(days=1)).isoformat(),
+        today.isoformat(),
+        (today + timedelta(days=1)).isoformat(),
+    ]
     params = [("dates[]", day) for day in dates] + [("per_page", 100)]
     request = Request(
         "https://api.balldontlie.io/v1/games?" + urlencode(params),
