@@ -857,6 +857,31 @@ def _experimental_totals_history(slate_date):
     return out
 
 
+
+def _settle_experimental_totals():
+    with _connect() as conn:
+        rows=conn.execute("SELECT id,slate_date,home_team,away_team,selection,line,odds FROM nba_experimental_totals WHERE settled_at IS NULL ORDER BY id LIMIT 300").fetchall()
+    if not rows:
+        return {"checked":0,"settled":0}
+    schedule=_schedule(force=False)
+    settled=0
+    for pid,slate,home,away,selection,line,odds in rows:
+        try:
+            day=date.fromisoformat(str(slate)[:10])
+        except Exception:
+            continue
+        game=next((g for g in schedule if g.get("completed") and g.get("home")==home and g.get("away")==away and abs((datetime.fromisoformat(g["date"].replace("Z","+00:00")).date()-day).days)<=1),None)
+        if not game:
+            continue
+        actual=float(game["home_score"])+float(game["away_score"])
+        outcome="PUSH" if abs(actual-float(line))<1e-9 else ("WIN" if (actual>line if selection=="OVER" else actual<line) else "LOSS")
+        profit=0.0 if outcome=="PUSH" else (_payout(odds) if outcome=="WIN" else -1.0)
+        with _connect() as conn:
+            cur=conn.execute("UPDATE nba_experimental_totals SET actual_value=%s,outcome=%s,profit_units=%s,settled_at=NOW() WHERE id=%s AND settled_at IS NULL",(actual,outcome,profit,pid))
+            settled+=cur.rowcount
+    return {"checked":len(rows),"settled":settled}
+
+
 def _experimental_totals_metrics():
     with _connect() as conn:
         r=conn.execute("""SELECT COUNT(*),COUNT(*) FILTER(WHERE outcome='WIN'),
@@ -871,6 +896,8 @@ def build_board(force=False,preview_date=None):
     settlement={"checked":0,"settled":0}
     try: settlement=_settle_pending()
     except Exception: pass
+    try: experimental_settlement=_settle_experimental_totals()
+    except Exception: experimental_settlement={"checked":0,"settled":0}
     preview=bool(preview_date)
     slate_date=str(preview_date) if preview else _active_slate_date()
     try: date.fromisoformat(slate_date)
@@ -889,7 +916,7 @@ def build_board(force=False,preview_date=None):
               "sides":frozen["sides"]["picks"],"totals":frozen["totals"]["picks"],
               "experimental_totals":_experimental_totals_history(slate_date),
               "experimental_totals_metrics":_experimental_totals_metrics(),
-              "metrics":_metrics(),"settlement":settlement,
+              "metrics":_metrics(),"settlement":settlement,"experimental_settlement":experimental_settlement,
               "source_status":{"odds":"frozen DraftKings snapshot","team_ratings":"frozen pregame snapshot"}}
         # Legacy empty rows are not a valid pregame snapshot.
         legacy_empty_slate=(bool(frozen) and not any(item["picks"] for item in frozen.values()))
@@ -1044,7 +1071,7 @@ def build_board(force=False,preview_date=None):
     return {"slate_date":slate_date,"preview":preview,"frozen":not preview,
       "record_status":"PREVIEW" if preview else "LOCKED","sides":side_picks,"totals":total_picks,"experimental_totals":experimental_picks,
       "experimental_totals_metrics":_experimental_totals_metrics(),
-      "metrics":_metrics(),"settlement":settlement,"game_count":len(future_games),
+      "metrics":_metrics(),"settlement":settlement,"experimental_settlement":experimental_settlement,"game_count":len(future_games),
       "source_status":{"odds":"PropLine DraftKings ("+odds_source+")","team_ratings":ratings["source"],
         "season":ratings["season"],"team_rating_quality":ratings.get("data_quality"),"team_rating_fallback_used":ratings.get("fallback_used",False),"team_rating_fallback_reason":ratings.get("fallback_reason"),"team_count":len(ratings.get("teams") or {}),"injuries":injury_meta.get("status","unavailable"),
         "player_impact":"Basketball-Reference minutes + shrunk BPM replacement-level proxy (not on/off); only current-season contributors receive incremental OUT adjustments. Zero-appearance OUT players get zero incremental adjustment to avoid double-counting the current-season team baseline; questionable/doubtful/day-to-day remain blocked pending calibrated availability probabilities",
