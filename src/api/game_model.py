@@ -565,9 +565,9 @@ def _candidate(game,market,model):
           "projected_home":model["projected_home"],"projected_away":model["projected_away"],
           "projected_margin":model["projected_margin"],"projected_total":model["projected_total"],
           "projected_pace":model["projected_pace"],"home_adjustments":model["home_adjustments"],
-          "away_adjustments":model["away_adjustments"],"rating_source":model.get("rating_source","NBA Stats"),
+          "away_adjustments":model["away_adjustments"],"factor_model":model.get("factor_model",{}),"rating_source":model.get("rating_source","NBA Stats"),
           "data_quality":model.get("data_quality","advanced"),
-          "model_version":"sides-totals-efficiency-v1","sportsbook":"DraftKings"})
+          "model_version":"sides-totals-four-factors-v2","sportsbook":"DraftKings"})
     return candidates
 
 def _qualified(row):
