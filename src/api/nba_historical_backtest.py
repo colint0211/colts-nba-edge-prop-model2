@@ -128,9 +128,10 @@ def status():
     }
 
 
-def run():
+def run(persist=True):
     import duckdb
-    _init_db()
+    if persist:
+        _init_db()
     all_games = []
     files = {}
     with tempfile.TemporaryDirectory(prefix="nba-pbp-backtest-") as folder:
@@ -156,7 +157,7 @@ def run():
                 """).fetchall()
                 for row in rows:
                     all_games.append({
-                        "date": str(row[0]), "game_id": str(row[1]),
+                        "date": str(row[0]), "season": season, "game_id": str(row[1]),
                         "home": str(row[2]), "away": str(row[3]),
                         "home_score": float(row[4]), "away_score": float(row[5]),
                         "home_poss": float(row[6]), "away_poss": float(row[7]),
@@ -192,7 +193,7 @@ def run():
                 win_prob = 1.0 - _cdf(0.0, forecast["margin"], MARGIN_SD)
                 actual_win = 1.0 if actual_margin > 0 else 0.0
                 day_predictions.append({
-                    "date": day, "game_id": game["game_id"],
+                    "date": day, "season": game["season"], "game_id": game["game_id"],
                     "home": game["home"], "away": game["away"],
                     "projected_home": forecast["home"], "projected_away": forecast["away"],
                     "projected_margin": forecast["margin"], "projected_total": forecast["total"],
@@ -227,6 +228,41 @@ def run():
     totals = [x["actual_total"] for x in predictions]
     margin_bias = mean("projected_margin") - sum(margins) / len(margins)
     total_bias = mean("projected_total") - sum(totals) / len(totals)
+    calibration_bins = []
+    for lower in (0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9):
+        upper = lower + 0.1
+        bucket = [x for x in predictions
+                  if lower <= x["home_win_probability"] < upper
+                  or (upper >= 1.0 and x["home_win_probability"] == 1.0)]
+        if bucket:
+            calibration_bins.append({
+                "probability_range": f"{lower:.1f}-{upper:.1f}",
+                "games": len(bucket),
+                "mean_predicted_home_win_pct": round(
+                    100.0 * sum(x["home_win_probability"] for x in bucket) / len(bucket), 2),
+                "actual_home_win_pct": round(
+                    100.0 * sum(x["actual_margin"] > 0 for x in bucket) / len(bucket), 2),
+            })
+    def summarize(rows):
+        if not rows:
+            return None
+        n = len(rows)
+        return {
+            "games": n,
+            "margin_mae_points": round(sum(x["margin_abs_error"] for x in rows) / n, 3),
+            "total_mae_points": round(sum(x["total_abs_error"] for x in rows) / n, 3),
+            "margin_bias_points": round(sum(x["projected_margin"] - x["actual_margin"] for x in rows) / n, 3),
+            "total_bias_points": round(sum(x["projected_total"] - x["actual_total"] for x in rows) / n, 3),
+            "winner_accuracy_pct": round(100.0 * sum(
+                (x["projected_margin"] > 0) == (x["actual_margin"] > 0) for x in rows
+            ) / n, 2),
+            "winner_brier": round(sum(x["winner_brier"] for x in rows) / n, 5),
+        }
+
+    season_metrics = {
+        str(season): summarize([x for x in predictions if x["season"] == season])
+        for season in SEASONS
+    }
     results = {
         "method": "Rolling last-10 team offensive/defensive points per possession and pace; only prior completed dates; same-day results held out; league shrinkage 15%; home-court +2 points.",
         "files": files,
@@ -234,6 +270,9 @@ def run():
         "games_scored": len(predictions),
         "dates_scored": scored_dates,
         "date_range": {"first": predictions[0]["date"], "last": predictions[-1]["date"]},
+        "season_metrics": season_metrics,
+        "holdout_season": str(max(SEASONS)),
+        "holdout_metrics": season_metrics.get(str(max(SEASONS))),
         "metrics": {
             "margin_mae_points": round(mean("margin_abs_error"), 3),
             "total_mae_points": round(mean("total_abs_error"), 3),
@@ -244,6 +283,9 @@ def run():
             ) / len(predictions), 2),
             "winner_brier": round(mean("winner_brier"), 5),
             "baseline_winner_brier_50_50": 0.25,
+            "winner_brier_skill_vs_50_50": round(
+                1.0 - mean("winner_brier") / 0.25, 5),
+            "winner_probability_calibration_bins": calibration_bins,
         },
         "limitations": [
             "No historical DraftKings spreads or totals are present in this source; ROI, spread-cover calibration, total-line calibration and closing-line value are not measured.",
@@ -253,9 +295,13 @@ def run():
         ],
         "model_influence": "disabled_until_out_of_sample_results_reviewed",
     }
-    with _connect() as conn:
-        conn.execute("""
-          INSERT INTO nba_historical_backtests(source,seasons,status,results)
-          VALUES(%s,%s,%s,%s::jsonb)
-        """, (SOURCE, list(SEASONS), "complete", json.dumps(results, allow_nan=False)))
+    if persist:
+        with _connect() as conn:
+            conn.execute("""
+              INSERT INTO nba_historical_backtests(source,seasons,status,results)
+              VALUES(%s,%s,%s,%s::jsonb)
+            """, (SOURCE, list(SEASONS), "complete", json.dumps(results, allow_nan=False)))
+    else:
+        with open("backtest_results.json", "w", encoding="utf-8") as output:
+            json.dump({"success": True, **results}, output, indent=2, allow_nan=False)
     return {"success": True, **results}

@@ -15,6 +15,10 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 _ET = "America/New_York"
+# Latest formula-aligned walk-forward validation showed material total-projection
+# bias (+4.53 points on the untouched 2026-27 holdout). Keep totals out of the
+# official ledger until a new, independently validated calibration passes.
+_TOTALS_OFFICIAL_ENABLED = False
 _PROP_CACHE = {"at": 0.0, "events": None, "quota": {}}
 _TEAM_CACHE = {"at": 0.0, "data": None}
 _SCHEDULE_CACHE = {"at": 0.0, "data": None}
@@ -72,6 +76,17 @@ def initialize():
         );
         CREATE INDEX IF NOT EXISTS nba_game_predictions_slate ON nba_game_predictions(slate_date,market);
         CREATE INDEX IF NOT EXISTS nba_game_predictions_pending ON nba_game_predictions(settled_at) WHERE settled_at IS NULL;
+        CREATE TABLE IF NOT EXISTS nba_experimental_totals (
+          id BIGSERIAL PRIMARY KEY, fingerprint TEXT NOT NULL UNIQUE, slate_date TEXT NOT NULL,
+          event_id TEXT NOT NULL, matchup TEXT NOT NULL, home_team TEXT NOT NULL, away_team TEXT NOT NULL,
+          selection TEXT NOT NULL, line DOUBLE PRECISION NOT NULL, odds INTEGER NOT NULL,
+          model_probability DOUBLE PRECISION NOT NULL, market_probability DOUBLE PRECISION,
+          projected_total DOUBLE PRECISION, snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), settled_at TIMESTAMPTZ,
+          actual_value DOUBLE PRECISION, outcome TEXT, profit_units DOUBLE PRECISION
+        );
+        CREATE INDEX IF NOT EXISTS nba_experimental_totals_slate ON nba_experimental_totals(slate_date);
+        CREATE INDEX IF NOT EXISTS nba_experimental_totals_pending ON nba_experimental_totals(settled_at) WHERE settled_at IS NULL;
         CREATE TABLE IF NOT EXISTS nba_game_slates (
           market TEXT NOT NULL, slate_date TEXT NOT NULL, candidates JSONB NOT NULL DEFAULT '[]'::jsonb,
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY(market,slate_date)
@@ -208,32 +223,85 @@ def _parse_game_lines(events):
     return rows
 
 def _nba_stats(season,last_n=0):
-    params={
-      "LeagueID":"00","Season":season,"SeasonType":"Regular Season","MeasureType":"Advanced",
-      "PerMode":"PerGame","PlusMinus":"N","PaceAdjust":"N","Rank":"N","LastNGames":str(last_n),
-      "Month":"0","OpponentTeamID":"0","Location":"","Outcome":"","DateFrom":"","DateTo":"",
-      "SeasonSegment":"","VsConference":"","VsDivision":""
+    """Read a validated official NBA Stats snapshot, then try the live API.
+
+    GitHub Actions fetches a validated Basketball-Reference snapshot and
+    commits it to the preview branch. NBA Stats remains a final live attempt,
+    but is known to time out from hosted cloud egress.
+    """
+    snapshot_path=os.path.join(os.path.dirname(__file__),"..","..","data","nba_team_advanced.json")
+    try:
+        with open(snapshot_path,"r",encoding="utf-8") as handle:
+            snapshot=json.load(handle)
+        fetched=datetime.fromisoformat(str(snapshot.get("fetched_at","")).replace("Z","+00:00"))
+        age=(datetime.now(timezone.utc)-fetched.astimezone(timezone.utc)).total_seconds()
+        cached=snapshot.get("teams") or {}
+        if (snapshot.get("source")=="Basketball-Reference NBA team ratings and advanced stats"
+                and snapshot.get("season")==season and snapshot.get("team_count")==30
+                and len(cached)==30 and 0<=age<=86400):
+            required=set(_TEAM_NAMES)
+            if set(cached)==required:
+                return cached
+    except (OSError,ValueError,TypeError,KeyError):
+        pass
+
+    from nba_api.stats.endpoints import leaguedashteamstats
+    from nba_api.stats.library.http import NBAStatsHTTP
+    from curl_cffi import requests as curl_requests
+
+    headers={
+        "Host":"stats.nba.com",
+        "User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        "Accept":"application/json, text/plain, */*",
+        "Accept-Language":"en-US,en;q=0.9",
+        "Referer":"https://www.nba.com/",
+        "Origin":"https://www.nba.com",
+        "Connection":"keep-alive",
+        "x-nba-stats-origin":"stats",
+        "x-nba-stats-token":"true"
     }
-    url="https://stats.nba.com/stats/leaguedashteamstats?"+urlencode(params)
-    headers={"Referer":"https://www.nba.com/","Origin":"https://www.nba.com","x-nba-stats-origin":"stats","x-nba-stats-token":"true"}
-    payload,_=_json(url,headers,18)
-    sets=payload.get("resultSets") or payload.get("resultSet") or []
-    if isinstance(sets,dict): sets=[sets]
-    target=next((x for x in sets if isinstance(x,dict) and "headers" in x and "rowSet" in x),None)
-    if not target: raise RuntimeError("NBA Stats did not return team advanced ratings.")
-    headers=target["headers"]; rows=target["rowSet"]; out={}
-    for row in rows:
-        item=dict(zip(headers,row))
+    session=curl_requests.Session(impersonate="chrome120", http_version="v1")
+    NBAStatsHTTP.get_session=lambda self: session
+    endpoint=leaguedashteamstats.LeagueDashTeamStats(
+        season=season,
+        season_type_all_star="Regular Season",
+        measure_type_detailed_defense="Advanced",
+        per_mode_detailed="PerGame",
+        league_id_nullable="00",
+        last_n_games=last_n,
+        month=0,
+        opponent_team_id=0,
+        pace_adjust="N",
+        plus_minus="N",
+        rank="N",
+        timeout=45,
+        headers=headers
+    )
+    frames=endpoint.get_data_frames()
+    if not frames:
+        raise RuntimeError("nba_api returned no Advanced team stats data frame.")
+    rows=frames[0].to_dict(orient="records")
+    out={}
+    for item in rows:
         code=_canonical(item.get("TEAM_ABBREVIATION"))
         if not code: continue
+        try:
+            games=int(item.get("GP") or 0)
+            ortg=float(item.get("OFF_RATING"))
+            drtg=float(item.get("DEF_RATING"))
+            net=float(item.get("NET_RATING"))
+            pace=float(item.get("PACE"))
+        except (TypeError,ValueError):
+            continue
+        if not all(math.isfinite(v) for v in (ortg,drtg,net,pace)):
+            continue
         out[code]={
-          "team":code,"games":int(item.get("GP") or 0),
-          "ortg":float(item.get("OFF_RATING")),"drtg":float(item.get("DEF_RATING")),
-          "net":float(item.get("NET_RATING")),"pace":float(item.get("PACE")),
+          "team":code,"games":games,"ortg":ortg,"drtg":drtg,"net":net,"pace":pace,
           "efg":float(item.get("EFG_PCT") or 0),"tov":float(item.get("TM_TOV_PCT") or 0),
           "oreb":float(item.get("OREB_PCT") or 0),"ts":float(item.get("TS_PCT") or 0)
         }
-    if len(out)<28: raise RuntimeError("NBA Stats advanced team table is incomplete ("+str(len(out))+"/30).")
+    if len(out)!=30:
+        raise RuntimeError("nba_api Advanced team table incomplete ("+str(len(out))+"/30).")
     return out
 
 def _tank01_ratings(force=False):
@@ -289,44 +357,47 @@ def _tank01_ratings(force=False):
 
 
 def _team_ratings(force=False):
-    # The NBA Stats endpoint has repeatedly timed out from the Vercel runtime.
-    # Use it only when explicitly enabled; Tank01 is the authenticated fallback.
-    if os.getenv("USE_NBA_STATS_TEAM_RATINGS","").strip().lower() in ("1","true","yes"):
-        now=time.time()
-        if not force and _TEAM_CACHE["data"] and now-_TEAM_CACHE["at"]<21600:
-            return _TEAM_CACHE["data"]
+    """Prefer a validated Basketball-Reference team ratings snapshot."""
+    now=time.time()
+    if not force and _TEAM_CACHE["data"] and now-_TEAM_CACHE["at"]<21600:
+        return _TEAM_CACHE["data"]
+
+    nba_error=None
+    try:
         current_year=datetime.now(timezone.utc).year
         season_start=current_year if datetime.now(timezone.utc).month>=7 else current_year-1
         current=f"{season_start}-{str(season_start+1)[-2:]}"
-        previous=f"{season_start-1}-{str(season_start)[-2:]}"
         current_stats=_nba_stats(current,0)
-        prior_stats={}
-        try: prior_stats=_nba_stats(previous,0)
-        except Exception: pass
-        recent={}
-        try: recent=_nba_stats(current,10)
-        except Exception: pass
+        league={key:sum(row[key] for row in current_stats.values())/len(current_stats)
+                for key in ("ortg","drtg","pace","efg","tov","oreb","ts")}
         combined={}
         for team,cur in current_stats.items():
-            prior=prior_stats.get(team); games=cur["games"]
-            prior_weight=max(0.12,min(0.65,8.0/(games+8.0))) if prior else 0.0
-            row={}
-            for key in ("ortg","drtg","pace","efg","tov","oreb","ts"):
-                base=cur[key]*(1-prior_weight)+(prior[key]*prior_weight if prior else 0)
-                recent_row=recent.get(team)
-                if recent_row and recent_row.get("games",0)>=4:
-                    base=base*0.78+recent_row[key]*0.22
-                row[key]=base
-            row.update({"games":games,"net":row["ortg"]-row["drtg"],"prior_weight":prior_weight,
-                        "recent_sample":recent.get(team,{}).get("games",0),"source":"NBA Stats"})
+            games=cur["games"]
+            prior_weight=max(0.12,min(0.65,8.0/(games+8.0))) if games>0 else 0.65
+            row={key:cur[key]*(1-prior_weight)+league[key]*prior_weight
+                 for key in ("ortg","drtg","pace","efg","tov","oreb","ts")}
+            row.update({"games":games,"net":row["ortg"]-row["drtg"],
+                        "prior_weight":prior_weight,"recent_sample":0,
+                        "source":"Basketball-Reference current-season team ratings"})
             combined[team]=row
-        if len(combined)<28: raise RuntimeError("Insufficient NBA Stats team ratings.")
-        result={"teams":combined,"season":current,"prior_season":previous,
-          "source":"NBA Stats leaguedashteamstats advanced","data_quality":"advanced","fetched_at":datetime.now(timezone.utc).isoformat()}
+        if len(combined)!=30:
+            raise RuntimeError("Basketball-Reference team ratings incomplete ("+str(len(combined))+"/30).")
+        result={"teams":combined,"season":current,"prior_season":None,
+                "source":"Basketball-Reference NBA team ratings and advanced stats; current-season ratings conservatively shrunk toward league average",
+                "data_quality":"basketball_reference","fetched_at":datetime.now(timezone.utc).isoformat(),
+                "fallback_used":False,"primary_source":"Basketball-Reference"}
         _TEAM_CACHE.update({"at":now,"data":result})
         return result
-    return _tank01_ratings(force)
+    except Exception as exc:
+        nba_error=type(exc).__name__+": "+str(exc)[:180]
 
+    fallback=_tank01_ratings(force=True)
+    fallback=dict(fallback)
+    fallback["fallback_used"]=True
+    fallback["primary_source"]="Basketball-Reference team ratings and advanced stats"
+    fallback["fallback_reason"]=nba_error or "Basketball-Reference snapshot unavailable"
+    _TEAM_CACHE.update({"at":now,"data":fallback})
+    return fallback
 
 def _schedule(force=False):
     now=time.time()
@@ -394,11 +465,23 @@ def _situational(team,game_date,schedule,opponent,current_venue):
         if d<target: prior.append((d,g))
     prior.sort(key=lambda x:x[0],reverse=True)
     if not prior:
-        return {"rest_days":2,"travel_miles":0,"tz_change":0,"altitude_change":0}
+        return {"rest_days":2,"travel_miles":0,"tz_change":0,"altitude_change":0,
+                "is_back_to_back":False,"previous_opponent":None,"is_rematch":False,
+                "previous_game_margin":None,"previous_game_team_score":None,
+                "previous_game_opponent_score":None}
     last_date,last_game=prior[0]
     rest=max(0,(target-last_date).days-1)
     last_venue_code=team if last_game.get("home")==team else last_game.get("home")
     previous=_VENUES.get(last_venue_code)
+    previous_opponent=last_game.get("away") if last_game.get("home")==team else last_game.get("home")
+    team_score=last_game.get("home_score") if last_game.get("home")==team else last_game.get("away_score")
+    opponent_score=last_game.get("away_score") if last_game.get("home")==team else last_game.get("home_score")
+    try:
+        team_score=int(team_score) if team_score is not None else None
+        opponent_score=int(opponent_score) if opponent_score is not None else None
+    except (TypeError,ValueError):
+        team_score=opponent_score=None
+    previous_margin=(team_score-opponent_score) if team_score is not None and opponent_score is not None else None
     travel=_haversine(previous,current) if previous and current else 0.0
     tz_change=0.0
     if previous and current:
@@ -409,9 +492,62 @@ def _situational(team,game_date,schedule,opponent,current_venue):
         except Exception: pass
     home_venue=_VENUES.get(team)
     altitude_change=(current[3]-home_venue[3]) if current and home_venue else 0
-    return {"rest_days":rest,"travel_miles":round(travel),"tz_change":round(tz_change,1),"altitude_change":altitude_change}
+    return {"rest_days":rest,"travel_miles":round(travel),"tz_change":round(tz_change,1),"altitude_change":altitude_change,
+      "is_back_to_back":rest==0,"previous_opponent":previous_opponent,
+      "is_rematch":bool(opponent and previous_opponent==opponent),
+      "previous_game_margin":previous_margin,"previous_game_team_score":team_score,
+      "previous_game_opponent_score":opponent_score}
 
-def _injury_adjustment(team,injuries,season,game_date):
+_PLAYER_IMPACT_CACHE = {"at": 0.0, "data": None}
+_PLAYER_IMPACT_TTL = 1800
+
+def _player_name_key(value):
+    import re, unicodedata
+    raw=str(value or "").strip()
+    if "," in raw:
+        parts=[part.strip() for part in raw.split(",") if part.strip()]
+        suffixes={"jr","sr","ii","iii","iv","v"}
+        if len(parts)==2:
+            raw=parts[1]+" "+parts[0]
+        elif len(parts)==3 and parts[1].casefold().replace(".","") in suffixes:
+            raw=parts[2]+" "+parts[0]+" "+parts[1]
+        elif len(parts)>=2:
+            raw=" ".join(parts[1:]+parts[:1])
+    normalized=unicodedata.normalize("NFKD",raw.casefold()).encode("ascii","ignore").decode("ascii")
+    key=re.sub(r"[^a-z0-9]", "", normalized)
+    return re.sub(r"(jr|sr|ii|iii|iv|v)$","",key)
+
+def _load_player_impact_snapshot(season):
+    """Load a fresh, season-matched B-Ref minutes/BPM snapshot; fail closed."""
+    now=time.time()
+    cached=_PLAYER_IMPACT_CACHE.get("data")
+    if cached is not None and now-_PLAYER_IMPACT_CACHE.get("at",0.0)<_PLAYER_IMPACT_TTL:
+        return cached
+    path=os.path.join(os.path.dirname(__file__),"..","..","data","nba_player_impact.json")
+    try:
+        with open(path,"r",encoding="utf-8") as handle: payload=json.load(handle)
+        fetched=datetime.fromisoformat(str(payload.get("fetched_at","")).replace("Z","+00:00"))
+        if fetched.tzinfo is None: fetched=fetched.replace(tzinfo=timezone.utc)
+        age=max(0.0,(datetime.now(timezone.utc)-fetched.astimezone(timezone.utc)).total_seconds())
+        players=payload.get("players") or {}
+        current_team_count=int(payload.get("current_season_team_count") or 0)
+        current_table_complete=bool(payload.get("current_season_player_table_complete")) and current_team_count>=25
+        valid=(payload.get("schema_version")==1 and payload.get("season")==season
+            and payload.get("player_count")==len(players) and len(players)>=250 and age<=36*3600
+            and current_table_complete)
+        data={"available":bool(valid),"players":players if valid else {},
+            "meta":{"source":payload.get("source"),"season":payload.get("season"),
+            "fetched_at":payload.get("fetched_at"),"age_hours":round(age/3600,2),
+            "player_count":len(players),"status":"fresh" if valid else "stale_or_invalid",
+            "current_season_player_table_complete":current_table_complete,
+            "current_season_team_count":current_team_count,
+            "method":payload.get("method"),"replacement_bpm":payload.get("replacement_bpm",-2.0)}}
+    except Exception as exc:
+        data={"available":False,"players":{},"meta":{"status":"unavailable","error":type(exc).__name__}}
+    _PLAYER_IMPACT_CACHE.update({"at":now,"data":data})
+    return data
+
+def _injury_adjustment(team,injuries,season,game_date,pace=100.0):
     from zoneinfo import ZoneInfo
     try:
         target=datetime.fromisoformat(str(game_date).replace("Z","+00:00")).astimezone(ZoneInfo(_ET)).date()
@@ -419,42 +555,128 @@ def _injury_adjustment(team,injuries,season,game_date):
     relevant=[]
     for item in injuries:
         if item.get("team")!=team: continue
-        status=str(item.get("status") or "").lower()
+        status=str(item.get("status") or "").casefold()
         if status not in ("out","doubtful","questionable","day-to-day"): continue
-        reason=str(item.get("reason") or "").lower()
+        reason=str(item.get("reason") or "").casefold()
         if "g league" in reason or "two-way" in reason or "on assignment" in reason: continue
         raw_date=str(item.get("game_date") or "")
         try: report_date=datetime.strptime(raw_date,"%m/%d/%Y").date()
         except Exception: report_date=target
         if report_date==target: relevant.append(item)
-    details=[]
-    unpriced=False
+    snapshot=_load_player_impact_snapshot(season)
+    players=snapshot.get("players") or {}
+    replacement_bpm=float(snapshot.get("meta",{}).get("replacement_bpm",-2.0))
+    details=[]; unpriced=False; points=0.0
     for item in relevant:
-        status=str(item.get("status") or "").lower()
-        # Known OUT players are already reflected in the current-season team
-        # performance sample when they have been absent. Uncertain availability
-        # cannot be valued without licensed EPM/on-off, so block the game.
-        uncertain=status in ("doubtful","questionable","day-to-day")
-        unpriced=unpriced or uncertain
-        details.append({"player":item.get("player"),"status":item.get("status"),
-          "minutes":None,"estimated_team_points":0.0,
-          "impact_data_available":not uncertain,
-          "impact_source":"known OUT; team baseline" if status=="out" else "unpriced availability risk"})
-    return {"points":0.0,"players":details,"unpriced_injury":unpriced,
-      "source":"official injury report; uncertain rotation availability blocks game"}
- 
- 
-def _team_adjustment(team,opp,game_date,schedule,injuries,season,is_home):
+        status=str(item.get("status") or "").casefold()
+        name=str(item.get("player") or "")
+        name_key=_player_name_key(name)
+        record=players.get(name_key+"|"+team)
+        if record is None:
+            # Some official reports append a suffix (e.g. "Butler III")
+            # that Basketball-Reference omits. Permit only suffix-only
+            # normalization after the exact full-name lookup fails.
+            import re
+            base_key=re.sub(r"(jr|sr|ii|iii|iv|v)$","",name_key)
+            if base_key!=name_key:
+                record=players.get(base_key+"|"+team)
+                if record is None:
+                    name_key=base_key
+        # A verified player record from another team can be used only when the
+        # normalized player identity has exactly one snapshot record. This
+        # supports traded players with a prior-season baseline without guessing
+        # between multiple team-season rows.
+        if record is None:
+            # Prefer an official Basketball-Reference traded-player aggregate
+            # (TOT) when present; otherwise require a single cross-team match.
+            total_record=players.get(name_key+"|TOT")
+            if total_record is not None:
+                record=total_record
+            else:
+                matches=[value for key,value in players.items() if key.startswith(name_key+"|")]
+                if len(matches)==1:
+                    record=matches[0]
+        # Questionable/doubtful/day-to-day availability is probabilistic and
+        # is not priced as a full absence. Keep the game out until confirmed.
+        if status!="out":
+            unpriced=True
+            details.append({"player":name,"status":item.get("status"),"minutes":None,
+              "estimated_team_points":None,"impact_data_available":False,
+              "impact_source":"availability probability not calibrated; game withheld"})
+            continue
+        if not snapshot.get("available"):
+            unpriced=True
+            details.append({"player":name,"status":item.get("status"),"minutes":None,
+              "estimated_team_points":None,"impact_data_available":False,
+              "impact_source":"fresh complete current-season player table unavailable; game withheld"})
+            continue
+        if not record:
+            meta=snapshot.get("meta") or {}
+            if meta.get("current_season_player_table_complete") and int(meta.get("current_season_team_count") or 0)>=25:
+                details.append({"player":name,"status":item.get("status"),"minutes":None,
+                  "games_current_season":0,"estimated_team_points":0.0,"impact_data_available":True,
+                  "impact_source":"no current-season player row in validated full-team table; zero incremental absence adjustment to current-season team ratings"})
+                continue
+            unpriced=True
+            details.append({"player":name,"status":item.get("status"),"minutes":None,
+              "estimated_team_points":None,"impact_data_available":False,
+              "impact_source":"player impact record unavailable and current-season table completeness unverified; game withheld"})
+            continue
+        try:
+            mpg=float(record["minutes_per_game"]); bpm=float(record["bpm_shrunk"])
+            gp=int(record.get("games_current_season") or 0)
+            if not (math.isfinite(mpg) and math.isfinite(bpm) and 0<=mpg<=48 and -12<=bpm<=12):
+                raise ValueError("invalid player impact values")
+            if gp==0:
+                details.append({"player":name,"status":item.get("status"),
+                  "minutes":round(mpg,2),"games_current_season":0,
+                  "bpm_shrunk":round(bpm,3),"replacement_bpm":replacement_bpm,
+                  "estimated_team_points":0.0,"impact_data_available":True,
+                  "impact_source":"zero current-season appearances; no incremental absence adjustment to current-season team ratings"})
+                continue
+            # A tiny early-season sample is not enough to price a rotation player.
+            # Permit only a clearly low-minute role (<=12 MPG) after at least
+            # three appearances; the snapshot's heavy early-season BPM shrinkage
+            # plus the minute cap keeps this proxy contribution small. Higher-use
+            # players without a prior baseline remain a hard block.
+            if gp<5 and record.get("bpm_prior") is None and not (gp>=3 and mpg<=12.0):
+                raise ValueError("fewer than five current games and no same-team prior-season baseline; player is not a low-minute role")
+            raw=(bpm-replacement_bpm)*(mpg/48.0)*(float(pace)/100.0)
+            impact=max(-2.5,min(5.5,raw))
+            if not math.isfinite(impact): raise ValueError("non-finite impact")
+            points-=impact
+            details.append({"player":name,"status":item.get("status"),
+              "minutes":round(mpg,2),"games_current_season":gp,
+              "bpm_shrunk":round(bpm,3),"replacement_bpm":replacement_bpm,
+              "estimated_team_points":round(-impact,3),
+              "impact_data_available":True,
+              "impact_source":"Basketball-Reference minutes + shrunk BPM proxy (not on/off)",
+              "impact_method":"(BPM - replacement BPM) × MPG/48 × team pace/100"})
+        except (KeyError,TypeError,ValueError,OverflowError):
+            unpriced=True
+            details.append({"player":name,"status":item.get("status"),"minutes":None,
+              "estimated_team_points":None,"impact_data_available":False,
+              "impact_source":"invalid player impact record; game withheld"})
+    return {"points":round(points,3),"players":details,"unpriced_injury":unpriced,
+      "source":"official NBA injury report + Basketball-Reference minutes/BPM proxy",
+      "player_impact_meta":snapshot.get("meta")}
+
+def _team_adjustment(team,opp,game_date,schedule,injuries,season,is_home,pace=100.0):
     current_venue=team if is_home else opp
     sit=_situational(team,game_date,schedule,opp,current_venue)
-    inj=_injury_adjustment(team,injuries,season,game_date)
+    inj=_injury_adjustment(team,injuries,season,game_date,pace)
     rest=0.0
     if sit["rest_days"]==0: rest-=1.0
     elif sit["rest_days"]>=2: rest+=0.25
     travel_penalty=min(1.0,sit["travel_miles"]/2500.0)*0.65
     timezone_penalty=min(0.6,abs(sit["tz_change"])*0.15)
     elevation_penalty=max(0.0,sit["altitude_change"]/5000.0)*0.35
-    return {"rest_days":sit["rest_days"],"travel_miles":sit["travel_miles"],
+    return {"rest_days":sit["rest_days"],"is_back_to_back":sit["is_back_to_back"],
+      "previous_opponent":sit["previous_opponent"],"is_rematch":sit["is_rematch"],
+      "previous_game_margin":sit["previous_game_margin"],
+      "previous_game_team_score":sit["previous_game_team_score"],
+      "previous_game_opponent_score":sit["previous_game_opponent_score"],
+      "travel_miles":sit["travel_miles"],
       "timezone_change_hours":sit["tz_change"],"altitude_change_feet":sit["altitude_change"],
       "rest_adjustment":rest,"travel_adjustment":-travel_penalty-timezone_penalty,
       "injury_adjustment":inj["points"],"injuries":inj["players"],"unpriced_injury":inj.get("unpriced_injury",False),
@@ -467,8 +689,8 @@ def _score_game(game,ratings,schedule,injuries,season):
     pace=(h["pace"]+a["pace"])/2.0
     home_eff=(h["ortg"]+a["drtg"])/2.0
     away_eff=(a["ortg"]+h["drtg"])/2.0
-    home_adj=_team_adjustment(home,away,game.get("commence_time"),schedule,injuries,season,True)
-    away_adj=_team_adjustment(away,home,game.get("commence_time"),schedule,injuries,season,False)
+    home_adj=_team_adjustment(home,away,game.get("commence_time"),schedule,injuries,season,True,pace)
+    away_adj=_team_adjustment(away,home,game.get("commence_time"),schedule,injuries,season,False,pace)
     home_points=home_eff*pace/100.0+2.0+home_adj["total_adjustment"]
     away_points=away_eff*pace/100.0+away_adj["total_adjustment"]
     return {"projected_home":round(home_points,2),"projected_away":round(away_points,2),
@@ -481,7 +703,9 @@ def _score_game(game,ratings,schedule,injuries,season):
 def _candidate(game,market,model):
     candidates=[]
     if market=="sides":
-        mean=model["projected_margin"]; sd=13.5 if model.get("data_quality")=="derived_early_season" else 12.3
+        # Training-only residual SD from the 2024-25/2025-26 walk-forward fit.
+        # The 2026-27 holdout was not used to set this probability scale.
+        mean=model["projected_margin"]; sd=15.8 if model.get("data_quality")=="derived_early_season" else 14.789
         for team in (game["home"],game["away"]):
             quote=game["spreads"][team]; line=quote["line"]; odds=quote["odds"]
             team_mean=mean if team==game["home"] else -mean
@@ -604,11 +828,79 @@ def _settle_pending():
             settled+=cur.rowcount
     return {"checked":len(rows),"settled":settled}
 
+
+def _save_experimental_totals(rows, slate_date):
+    selected = sorted(rows or [], key=lambda r: (-(r.get("ev_pct") or -1e9), -(r.get("edge_pp") or -1e9)))[:5]
+    with _connect() as conn:
+        for row in selected:
+            identity = "|".join([str(slate_date), str(row.get("event_id")), str(row.get("selection")), str(row.get("line")), str(row.get("odds"))])
+            fingerprint = hashlib.sha256(identity.encode()).hexdigest()
+            conn.execute("""INSERT INTO nba_experimental_totals
+              (fingerprint,slate_date,event_id,matchup,home_team,away_team,selection,line,odds,model_probability,market_probability,projected_total,snapshot)
+              VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb) ON CONFLICT(fingerprint) DO NOTHING""",
+              (fingerprint,slate_date,str(row.get("event_id")),row.get("matchup"),row.get("home_team"),row.get("away_team"),
+               row.get("selection"),row.get("line"),row.get("odds"),row.get("model_probability"),row.get("market_probability"),
+               row.get("projected_total"),json.dumps(row,separators=(",",":"),allow_nan=False)))
+    return _experimental_totals_history(slate_date)
+
+
+def _experimental_totals_history(slate_date):
+    with _connect() as conn:
+        rows=conn.execute("SELECT id,selection,line,odds,model_probability,market_probability,projected_total,actual_value,outcome,profit_units,matchup,snapshot,created_at FROM nba_experimental_totals WHERE slate_date=%s ORDER BY id",(str(slate_date),)).fetchall()
+    out=[]
+    for r in rows:
+        snap=r[11] if isinstance(r[11],dict) else (json.loads(r[11]) if isinstance(r[11],str) else {})
+        out.append({"id":r[0],"selection":r[1],"line":r[2],"odds":r[3],"model_probability":r[4],
+          "market_probability":r[5],"projected_total":r[6],"actual_value":r[7],"outcome":r[8],
+          "profit_units":r[9],"matchup":r[10],"ev_pct":snap.get("ev_pct"),"edge_pp":snap.get("edge_pp"),
+          "created_at":r[12].isoformat() if r[12] else None,"experimental":True,
+          "projected_home":snap.get("projected_home"),"projected_away":snap.get("projected_away"),
+          "projected_pace":snap.get("projected_pace"),"home_adjustments":snap.get("home_adjustments"),
+          "away_adjustments":snap.get("away_adjustments"),"selection_name":snap.get("selection_name")})
+    return out
+
+
+
+def _settle_experimental_totals():
+    with _connect() as conn:
+        rows=conn.execute("SELECT id,slate_date,home_team,away_team,selection,line,odds FROM nba_experimental_totals WHERE settled_at IS NULL ORDER BY id LIMIT 300").fetchall()
+    if not rows:
+        return {"checked":0,"settled":0}
+    schedule=_schedule(force=False)
+    settled=0
+    for pid,slate,home,away,selection,line,odds in rows:
+        try:
+            day=date.fromisoformat(str(slate)[:10])
+        except Exception:
+            continue
+        game=next((g for g in schedule if g.get("completed") and g.get("home")==home and g.get("away")==away and abs((datetime.fromisoformat(g["date"].replace("Z","+00:00")).date()-day).days)<=1),None)
+        if not game:
+            continue
+        actual=float(game["home_score"])+float(game["away_score"])
+        outcome="PUSH" if abs(actual-float(line))<1e-9 else ("WIN" if (actual>line if selection=="OVER" else actual<line) else "LOSS")
+        profit=0.0 if outcome=="PUSH" else (_payout(odds) if outcome=="WIN" else -1.0)
+        with _connect() as conn:
+            cur=conn.execute("UPDATE nba_experimental_totals SET actual_value=%s,outcome=%s,profit_units=%s,settled_at=NOW() WHERE id=%s AND settled_at IS NULL",(actual,outcome,profit,pid))
+            settled+=cur.rowcount
+    return {"checked":len(rows),"settled":settled}
+
+
+def _experimental_totals_metrics():
+    with _connect() as conn:
+        r=conn.execute("""SELECT COUNT(*),COUNT(*) FILTER(WHERE outcome='WIN'),
+          COUNT(*) FILTER(WHERE outcome='LOSS'),COUNT(*) FILTER(WHERE outcome='PUSH'),
+          COALESCE(SUM(profit_units),0) FROM nba_experimental_totals WHERE settled_at IS NOT NULL""").fetchone()
+    n,w,l,p,u=r
+    return {"settled":n,"wins":w,"losses":l,"pushes":p,"win_rate_pct":round(w/(w+l)*100,1) if w+l else None,"net_units":round(float(u or 0),2)}
+
+
 def build_board(force=False,preview_date=None):
     initialize()
     settlement={"checked":0,"settled":0}
     try: settlement=_settle_pending()
     except Exception: pass
+    try: experimental_settlement=_settle_experimental_totals()
+    except Exception: experimental_settlement={"checked":0,"settled":0}
     preview=bool(preview_date)
     slate_date=str(preview_date) if preview else _active_slate_date()
     try: date.fromisoformat(slate_date)
@@ -622,12 +914,19 @@ def build_board(force=False,preview_date=None):
                 if item:
                     data=item[0] if isinstance(item[0],list) else json.loads(item[0] or "[]")
                     frozen[market]={"picks":data,"saved_at":item[1].isoformat() if item[1] else None}
-        if len(frozen)==2:
-            return {"slate_date":slate_date,"frozen":True,"sides":frozen["sides"]["picks"],"totals":frozen["totals"]["picks"],
-              "metrics":_metrics(),"settlement":settlement,"source_status":{"odds":"frozen DraftKings snapshot","team_ratings":"frozen pregame snapshot"}}
+        if len(frozen)==2 and (frozen["sides"]["picks"] or frozen["totals"]["picks"]):
+            return {"slate_date":slate_date,"frozen":True,"record_status":"LOCKED",
+              "sides":frozen["sides"]["picks"],"totals":frozen["totals"]["picks"],
+              "experimental_totals":_experimental_totals_history(slate_date),
+              "experimental_totals_metrics":_experimental_totals_metrics(),
+              "metrics":_metrics(),"settlement":settlement,"experimental_settlement":experimental_settlement,
+              "source_status":{"odds":"frozen DraftKings snapshot","team_ratings":"frozen pregame snapshot"}}
+        # Legacy empty rows are not a valid pregame snapshot.
+        legacy_empty_slate=(bool(frozen) and not any(item["picks"] for item in frozen.values()))
     events,odds_source,quota=_fetch_lines(force)
     games=_parse_game_lines(events)
-    if not games: raise RuntimeError("PropLine returned no upcoming NBA games with both DraftKings spread and full-game total quotes.")
+    # An empty odds response is classified against the official schedule below;
+    # it must not abort before we can distinguish waiting, missed, and no-game states.
     from zoneinfo import ZoneInfo
     now=datetime.now(timezone.utc)
     future_games=[]
@@ -647,27 +946,36 @@ def build_board(force=False,preview_date=None):
         schedule_probe=_schedule(force=False)
         if not schedule_probe:
             raise RuntimeError("Recent ESPN schedule unavailable; refusing to freeze an empty slate.")
-        has_scheduled_game=False
+        scheduled_on_date=[]
         for item in schedule_probe:
             try:
                 game_day=datetime.fromisoformat(item["date"].replace("Z","+00:00")).astimezone(ZoneInfo(_ET)).date().isoformat()
-                game_start=datetime.fromisoformat(item["date"].replace("Z","+00:00"))
-                if game_day==slate_date and game_start>now and not item.get("completed"):
-                    has_scheduled_game=True; break
+                if game_day==slate_date:
+                    scheduled_on_date.append(item)
             except Exception: continue
-        if has_scheduled_game:
-            return {"slate_date":slate_date,"frozen":False,"sides":[],"totals":[],
+        future_scheduled=[g for g in scheduled_on_date if not g.get("completed") and
+          datetime.fromisoformat(g["date"].replace("Z","+00:00"))>now]
+        if future_scheduled:
+            return {"slate_date":slate_date,"frozen":False,"record_status":"WAITING_FOR_LINES","sides":[],"totals":[],
               "metrics":_metrics(),"settlement":settlement,"game_count":0,
               "source_status":{"odds":"DraftKings lines not posted yet for scheduled games","team_ratings":"waiting for complete odds",
                 "injuries":"waiting for odds","prop_line_quota":quota},
-              "model_policy":"Games are scheduled for this date, but DraftKings spread/total lines are not available yet. The board will retry and will not freeze an empty slate."}
-        side_picks,side_saved=_save_slate([],"sides",slate_date)
-        total_picks,total_saved=_save_slate([],"totals",slate_date)
-        return {"slate_date":slate_date,"frozen":True,"sides":side_picks,"totals":total_picks,
+              "model_policy":"Games are scheduled for this date, but DraftKings spread/total lines are not available yet. The board will retry; no empty slate is saved."}
+        if scheduled_on_date:
+            return {"slate_date":slate_date,"frozen":False,"record_status":"MISSED_PREGAME_WINDOW","sides":[],"totals":[],
+              "metrics":_metrics(),"settlement":settlement,"game_count":0,
+              "source_status":{"odds":"No usable pregame DraftKings lines remain for this slate date","team_ratings":"not locked",
+                "injuries":"not locked","prop_line_quota":quota},
+              "model_policy":"MISSED PREGAME WINDOW: games on this date have already started or finished. No picks were recorded, and no postgame data will be used to recreate them."}
+        return {"slate_date":slate_date,"frozen":False,"record_status":"NO_GAMES","sides":[],"totals":[],
           "metrics":_metrics(),"settlement":settlement,"game_count":0,
-          "source_status":{"odds":"PropLine DraftKings ("+odds_source+")","team_ratings":"not needed; no remaining games on this slate date",
-            "injuries":"not needed","prop_line_quota":quota,"saved_sides":side_saved,"saved_totals":total_saved},
-          "model_policy":"No upcoming games remain on the active Eastern slate date. No picks were forced."}
+          "source_status":{"odds":"No games or DraftKings lines found for this date","team_ratings":"not needed",
+            "injuries":"not needed","prop_line_quota":quota},
+          "model_policy":"NO GAMES: no NBA games were found on this slate date. Nothing was saved."}
+    if not preview and legacy_empty_slate:
+        # Clear only the invalid empty placeholders so a valid pregame run can save.
+        with _connect() as conn:
+            conn.execute("DELETE FROM nba_game_slates WHERE slate_date=%s AND market IN ('sides','totals') AND candidates='[]'::jsonb",(slate_date,))
     ratings=_team_ratings(force)
     schedule=_schedule(force)
     try:
@@ -692,20 +1000,25 @@ def build_board(force=False,preview_date=None):
                 if _qualified(candidate): base_sides.append(candidate)
                 elif ratings.get("data_quality")=="derived_early_season" and (candidate.get("edge_pp",0)>12 or candidate.get("ev_pct",0)>20):
                     unavailable.append({"event_id":game.get("event_id"),"reason":"extreme early-season model/market gap withheld pending calibration"})
-            for candidate in _candidate(game,"totals",model):
-                if _qualified(candidate): base_totals.append(candidate)
-                elif ratings.get("data_quality")=="derived_early_season" and (candidate.get("edge_pp",0)>12 or candidate.get("ev_pct",0)>20):
-                    unavailable.append({"event_id":game.get("event_id"),"reason":"extreme early-season model/market gap withheld pending calibration"})
+            if _TOTALS_OFFICIAL_ENABLED:
+                for candidate in _candidate(game,"totals",model):
+                    if _qualified(candidate): base_totals.append(candidate)
+                    elif ratings.get("data_quality")=="derived_early_season" and (candidate.get("edge_pp",0)>12 or candidate.get("ev_pct",0)>20):
+                        unavailable.append({"event_id":game.get("event_id"),"reason":"extreme early-season model/market gap withheld pending calibration"})
+            else:
+                unavailable.append({"event_id":game.get("event_id"),"reason":"game totals disabled: latest untouched holdout shows material projection bias; no totals are eligible for official picks"})
         except Exception as exc:
             unavailable.append({"event_id":game.get("event_id"),"reason":type(exc).__name__})
     base_sides.sort(key=lambda x:(-x["ev_pct"],-x["edge_pp"]))
     base_totals.sort(key=lambda x:(-x["ev_pct"],-x["edge_pp"]))
-    review_ids={x["event_id"] for x in base_sides[:10]+base_totals[:10]}
-    review_games=[game_by_id[event_id] for event_id in review_ids if event_id in game_by_id]
+    # Injury adjustments can reorder the entire board. Review every game
+    # before final ranking so a high-impact absence outside the initial top
+    # ten cannot be missed.
+    review_games=list(future_games)
 
     def review_game(game):
-        home=_injury_adjustment(game["home"],injuries,ratings["season"],game["commence_time"])
-        away=_injury_adjustment(game["away"],injuries,ratings["season"],game["commence_time"])
+        home=_injury_adjustment(game["home"],injuries,ratings["season"],game["commence_time"],ratings["teams"][game["home"]]["pace"])
+        away=_injury_adjustment(game["away"],injuries,ratings["season"],game["commence_time"],ratings["teams"][game["away"]]["pace"])
         return game["event_id"],home,away
 
     reviewed={}
@@ -714,12 +1027,12 @@ def build_board(force=False,preview_date=None):
             for event_id,home_injury,away_injury in pool.map(review_game,review_games):
                 reviewed[event_id]=(home_injury,away_injury)
 
-    sides=[]; totals=[]
+    sides=[]; totals=[]; experimental_totals=[]
     for event_id,(home_injury,away_injury) in reviewed.items():
         game=game_by_id[event_id]
         model=dict(base_models[event_id])
         if home_injury.get("unpriced_injury") or away_injury.get("unpriced_injury"):
-            unavailable.append({"event_id":event_id,"reason":"questionable/doubtful/day-to-day rotation availability cannot be valued reliably; no pick"})
+            unavailable.append({"event_id":event_id,"reason":"official report lists an unavailable player whose absence impact or availability probability is not validated; no pick"})
             continue
         home_adjustments=dict(model["home_adjustments"])
         away_adjustments=dict(model["away_adjustments"])
@@ -734,11 +1047,14 @@ def build_board(force=False,preview_date=None):
         model["home_adjustments"]=home_adjustments; model["away_adjustments"]=away_adjustments
         for candidate in _candidate(game,"sides",model):
             if _qualified(candidate): sides.append(candidate)
-        for candidate in _candidate(game,"totals",model):
-            if _qualified(candidate): totals.append(candidate)
+        experimental_totals.extend(_candidate(game,"totals",model))
+        if _TOTALS_OFFICIAL_ENABLED:
+            for candidate in _candidate(game,"totals",model):
+                if _qualified(candidate): totals.append(candidate)
 
     sides.sort(key=lambda x:(-x["ev_pct"],-x["edge_pp"]))
     totals.sort(key=lambda x:(-x["ev_pct"],-x["edge_pp"]))
+    experimental_totals.sort(key=lambda x:(-x["ev_pct"],-x["edge_pp"]))
     unique_unavailable=[]; seen_unavailable=set()
     for item in unavailable:
         key=(str(item.get("event_id") or ""),str(item.get("reason") or ""))
@@ -750,17 +1066,28 @@ def build_board(force=False,preview_date=None):
         unique_unavailable.append(row)
     if preview:
         side_picks=sides[:5]; total_picks=totals[:5]; side_saved=0; total_saved=0
+        experimental_picks=experimental_totals[:10]
     else:
         side_picks,side_saved=_save_slate(sides,"sides",slate_date)
         total_picks,total_saved=_save_slate(totals,"totals",slate_date)
-    return {"slate_date":slate_date,"preview":preview,"frozen":not preview,"sides":side_picks,"totals":total_picks,
-      "metrics":_metrics(),"settlement":settlement,"game_count":len(future_games),
+        experimental_picks=_save_experimental_totals(experimental_totals,slate_date)
+    return {"slate_date":slate_date,"preview":preview,"frozen":not preview,
+      "record_status":"PREVIEW" if preview else "LOCKED","sides":side_picks,"totals":total_picks,"experimental_totals":experimental_picks,
+      "experimental_totals_metrics":_experimental_totals_metrics(),
+      "metrics":_metrics(),"settlement":settlement,"experimental_settlement":experimental_settlement,"game_count":len(future_games),
       "source_status":{"odds":"PropLine DraftKings ("+odds_source+")","team_ratings":ratings["source"],
-        "season":ratings["season"],"injuries":injury_meta.get("status","unavailable"),
-        "player_impact":"True EPM/on-off not integrated; uncertain rotation availability blocks the game; known OUT players are disclosed but not individually valued",
-        "reviewed_games":len(review_games),"prop_line_quota":quota,"saved_sides":side_saved,"saved_totals":total_saved,
+        "season":ratings["season"],"team_rating_quality":ratings.get("data_quality"),"team_rating_fallback_used":ratings.get("fallback_used",False),"team_rating_fallback_reason":ratings.get("fallback_reason"),"team_count":len(ratings.get("teams") or {}),"injuries":injury_meta.get("status","unavailable"),
+        "player_impact":"Basketball-Reference minutes + shrunk BPM replacement-level proxy (not on/off); only current-season contributors receive incremental OUT adjustments. Zero-appearance OUT players get zero incremental adjustment to avoid double-counting the current-season team baseline; questionable/doubtful/day-to-day remain blocked pending calibrated availability probabilities",
+        "player_impact_snapshot":_load_player_impact_snapshot(ratings["season"]).get("meta"),
+        "totals_validation":{"official_picks_enabled":_TOTALS_OFFICIAL_ENABLED,"status":"disabled_pending_holdout_bias_recalibration","holdout_total_bias_points":4.529},
+        "reviewed_games":len(review_games),
+        "injury_impact_audit":[{"event_id":event_id,"matchup":game_by_id[event_id]["matchup"],
+          "home":{"team":game_by_id[event_id]["home"],"points":home.get("points"),"unpriced":home.get("unpriced_injury"),"players":home.get("players",[])},
+          "away":{"team":game_by_id[event_id]["away"],"points":away.get("points"),"unpriced":away.get("unpriced_injury"),"players":away.get("players",[])}}
+          for event_id,(home,away) in reviewed.items()],
+        "prop_line_quota":quota,"saved_sides":side_saved,"saved_totals":total_saved,
         "unavailable_games":unique_unavailable[:10]},
-      "model_policy":"Team-efficiency ratings projection with explicit early-season uncertainty. Not yet a historically fitted regression. Market odds are used only for EV and no-vig comparison, never as the model probability.",
+      "model_policy":"Team-efficiency ratings projection with explicit early-season uncertainty. Side spread probabilities use a 14.789-point margin residual SD fitted on 2024-25/2025-26 training seasons only (15.8 for derived early-season ratings); 2026-27 remained untouched. This validates winner-probability scale, not ATS cover calibration: historical DraftKings closing lines, spread-cover calibration, ROI and CLV are unavailable. Market odds are used only for EV and no-vig comparison, never as the model probability. Official game totals are disabled because the untouched 2026-27 holdout showed +4.53 points of total bias; sides remain preview candidates subject to injury and edge gates.",
       "thresholds":{"minimum_edge_pp":4.0 if ratings.get("data_quality")=="derived_early_season" else 2.5,
         "maximum_edge_pp":12.0 if ratings.get("data_quality")=="derived_early_season" else None,
         "minimum_ev_pct":2.0 if ratings.get("data_quality")=="derived_early_season" else 1.5,

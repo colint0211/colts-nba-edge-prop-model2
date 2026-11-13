@@ -7,6 +7,14 @@
     {
       "path": "/api/away-ats/collect",
       "schedule": "0 13 * * *"
+    },
+    {
+      "path": "/api/cron/freeze-daily",
+      "schedule": "5 11 * * *"
+    },
+    {
+      "path": "/api/cron/freeze-daily",
+      "schedule": "5 12 * * *"
     }
   ],
   "git": {

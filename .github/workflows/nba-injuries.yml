@@ -4,8 +4,9 @@ on:
   schedule:
     - cron: "*/15 * * * *"
   workflow_dispatch:
+  # Scheduled runs execute from the default branch; this push path keeps the preview feed refreshable without merging.
   push:
-    branches: [main]
+    branches: [main, feature/nba-stats-off-def-primary]
     paths:
       - "scripts/update_nba_injuries.py"
       - ".github/workflows/nba-injuries.yml"

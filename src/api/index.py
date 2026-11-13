@@ -117,7 +117,14 @@ def _load_balldontlie_games(allow_fetch=True):
         return data
 
     today = datetime.now(ZoneInfo("America/New_York")).date()
-    dates = [today.isoformat(), (today + timedelta(days=1)).isoformat()]
+    # The dashboard deliberately keeps the prior Eastern-time slate visible
+    # until 7:00 a.m. ET. Include yesterday so those frozen matchups still get
+    # a current FINAL/LIVE status after midnight instead of falling to UNKNOWN.
+    dates = [
+        (today - timedelta(days=1)).isoformat(),
+        today.isoformat(),
+        (today + timedelta(days=1)).isoformat(),
+    ]
     params = [("dates[]", day) for day in dates] + [("per_page", 100)]
     request = Request(
         "https://api.balldontlie.io/v1/games?" + urlencode(params),
@@ -204,12 +211,23 @@ def _apply_balldontlie_game(prop, feed):
             break
     if not match:
         return
+    raw_status = str(match.get("status") or "").strip().lower()
+    if any(token in raw_status for token in ("final", "completed", "game over")):
+        game_state = "FINAL"
+    elif any(token in raw_status for token in ("qtr", "quarter", "half", "overtime", "in progress", "live")):
+        game_state = "LIVE"
+    else:
+        # Scheduled tip-time strings are pregame; missing/unknown statuses fail closed.
+        game_state = "PRE_GAME" if raw_status and any(ch.isdigit() for ch in raw_status) else "UNKNOWN"
     prop["balldontlie_game"] = {
         "source": "BALLDONTLIE",
         "game_id": match.get("id"),
         "date": match.get("date"),
         "datetime": match.get("datetime"),
         "status": match.get("status"),
+        "game_state": game_state,
+        "pregame_eligible": game_state == "PRE_GAME",
+        "official_play_eligible": game_state == "PRE_GAME" and prop.get("calibration_applied") is True,
         "period": match.get("period"),
         "clock": match.get("time"),
         "home_team": match.get("home_team"),
@@ -1753,7 +1771,7 @@ def _propline_fetch_events():
 
     params = urlencode({
         "markets": ",".join(_PROPLINE_MARKETS.values()),
-        "bookmakers": "draftkings,fanduel",
+        "bookmakers": "draftkings",
         "includeLinks": "true",
         "max_age": 300,
     })
@@ -1824,7 +1842,7 @@ def _propline_market_props(events, market):
             if not isinstance(bookmaker, dict):
                 continue
             bookmaker_key = str(bookmaker.get("key") or "").lower()
-            if bookmaker_key not in ("draftkings", "fanduel"):
+            if bookmaker_key != "draftkings":
                 continue
             for market_row in bookmaker.get("markets") or []:
                 if not isinstance(market_row, dict) or market_row.get("key") != market_key:
@@ -2115,6 +2133,121 @@ def _post_selection_negative_review(prop, market, injury_feed):
     return True, "Passed post-selection negative review"
 
 
+def _projection_side_review(prop):
+    """Fail closed when the displayed mean points opposite to the selected side."""
+    if not isinstance(prop, dict):
+        return False
+    try:
+        projection = float(prop.get("projection"))
+        if not math.isfinite(projection):
+            projection = None
+    except (TypeError, ValueError, OverflowError):
+        projection = None
+    try:
+        line = float(prop.get("line"))
+        if not math.isfinite(line):
+            line = None
+    except (TypeError, ValueError, OverflowError):
+        line = None
+    side = str(prop.get("best_side") or "").strip().upper()
+    if projection is None or line is None or side not in ("OVER", "UNDER"):
+        prop["projection_alignment"] = "unavailable"
+        prop["projection_review_required"] = True
+        prop["projection_review_reason"] = "Projection, line, or selected side is missing."
+        return True
+    if abs(projection - line) < 1e-9:
+        prop["projection_alignment"] = "at_line"
+        prop["projection_review_required"] = False
+        prop["projection_review_reason"] = "Projection is effectively on the betting line."
+        return False
+    aligned = (projection > line and side == "OVER") or (projection < line and side == "UNDER")
+    prop["projection_alignment"] = "aligned" if aligned else "conflict"
+    prop["projection_review_required"] = not aligned
+    prop["projection_review_reason"] = (
+        "Projection direction supports the selected side." if aligned else
+        f"Projection {projection:.2f} is on the opposite side of line {line:.2f} from selected {side}; hold for review."
+    )
+    return not aligned
+
+
+def _apply_projection_side_guard(prop):
+    """Make projection direction authoritative, then price that side with its own odds."""
+    if not isinstance(prop, dict):
+        return prop
+    try:
+        projection = float(prop.get("projection"))
+        line = float(prop.get("line"))
+    except (TypeError, ValueError, OverflowError):
+        projection = line = None
+    if projection is None or line is None or not math.isfinite(projection) or not math.isfinite(line):
+        prop["best_side"] = None
+        prop["best_odds"] = None
+        prop["best_probability"] = None
+        prop["expected_value_pct"] = None
+        prop["expected_profit_per_100"] = None
+        prop["edge_pp"] = None
+        prop["recommendation"] = "PASS"
+        prop["projection_alignment"] = "unavailable"
+        prop["projection_review_required"] = False
+        prop["projection_review_reason"] = "Projection or betting line is unavailable; no side selected."
+        return prop
+
+    if abs(projection - line) < 1e-9:
+        desired_side = None
+    else:
+        desired_side = "OVER" if projection > line else "UNDER"
+
+    prop["model_side_before_projection_guard"] = prop.get("best_side")
+    prop["projection_direction"] = desired_side or "AT_LINE"
+    prop["best_side"] = desired_side
+    prop["projection_alignment"] = "aligned" if desired_side else "at_line"
+    prop["projection_review_required"] = False
+
+    if desired_side:
+        prefix = desired_side.lower()
+        probability = prop.get(prefix + "_probability")
+        odds = prop.get(prefix + "_odds")
+        opposite_probability = prop.get(("under" if desired_side == "OVER" else "over") + "_probability")
+        try:
+            probability = float(probability) / (100.0 if float(probability) > 1 else 1.0)
+            opposite_probability = float(opposite_probability) / (100.0 if float(opposite_probability) > 1 else 1.0)
+            odds = float(odds)
+            ev = _odds_profit(probability, opposite_probability, odds)
+        except (TypeError, ValueError, OverflowError):
+            ev = None
+        if ev is not None and math.isfinite(ev):
+            prop["best_probability"] = round(probability * 100, 2)
+            prop["best_odds"] = odds
+            prop["expected_value_pct"] = round(ev * 100, 2)
+            prop["expected_profit_per_100"] = round(ev * 100, 2)
+            edge = prop.get(prefix + "_edge_pp")
+            prop["edge_pp"] = edge
+            prop["recommendation"] = "VALUE CANDIDATE" if ev > 0.05 else ("LEAN / VERIFY" if ev > 0 else "PASS")
+            prop["selection_gate_status"] = "PASS" if ev > 0 else "REJECT"
+            prop["selection_gate_reason"] = "Projection direction selected " + desired_side + "; EV recalculated using that side's probability and odds."
+        else:
+            prop["best_probability"] = None
+            prop["best_odds"] = None
+            prop["expected_value_pct"] = None
+            prop["expected_profit_per_100"] = None
+            prop["edge_pp"] = None
+            prop["recommendation"] = "PASS"
+            prop["selection_gate_status"] = "REJECT"
+            prop["selection_gate_reason"] = "Projection direction is " + desired_side + " but its probability or price is unavailable; no bet rating."
+    else:
+        prop["best_probability"] = None
+        prop["best_odds"] = None
+        prop["expected_value_pct"] = None
+        prop["expected_profit_per_100"] = None
+        prop["edge_pp"] = None
+        prop["recommendation"] = "PASS"
+        prop["selection_gate_status"] = "REJECT"
+        prop["selection_gate_reason"] = "Projection is on the betting line; no directional side."
+
+    prop["projection_review_reason"] = prop.get("selection_gate_reason")
+    return prop
+
+
 def _snapshot_daily_market_top5(market, props):
     """Select initial Top 5, then run targeted negative review and promote replacements."""
     try:
@@ -2147,6 +2280,8 @@ def _snapshot_daily_market_top5(market, props):
             key=lambda item: float(item.get("expected_value_pct") if item.get("expected_value_pct") is not None else -1e9),
             reverse=True,
         )
+        for item in ordered:
+            _apply_projection_side_guard(item)
         if not ordered:
             return []
         frozen = prediction_ledger.freeze_daily_slate(market, slate_date, ordered)
@@ -2154,7 +2289,17 @@ def _snapshot_daily_market_top5(market, props):
         injury_feed = _load_official_injury_feed()
         eligible = []
         for prop in candidates:
+            _apply_projection_side_guard(prop)
+            if prop.get("projection_review_required"):
+                prop["selection_gate_status"] = "HOLD"
+                prop["selection_gate_reason"] = prop.get("projection_review_reason")
+                continue
+            prop["selection_gate_status"] = "ELIGIBLE_FOR_REVIEW"
             if prop.get("injury_blocked") or prop.get("injury_flag"):
+                continue
+            # Official props require empirical calibration and verified pregame status.
+            game = prop.get("balldontlie_game") or {}
+            if prop.get("calibration_applied") is not True or game.get("game_state") != "PRE_GAME":
                 continue
             if prop.get("recommendation") not in ("VALUE CANDIDATE", "LEAN / VERIFY"):
                 continue
@@ -2190,11 +2335,17 @@ def _snapshot_daily_market_top5(market, props):
                 passed = False
                 reason = "Negative review failed safely: " + type(review_error).__name__
                 prop["negative_review"] = {"status": "review_failed", "reason": reason}
+            if passed and _projection_side_review(prop):
+                passed = False
+                reason = prop.get("projection_review_reason")
             if passed:
+                prop["selection_gate_status"] = "APPROVED"
                 selected.append(prop)
                 if len(selected) == 5:
                     break
             else:
+                prop["selection_gate_status"] = "HOLD"
+                prop["selection_gate_reason"] = reason
                 removed.append({
                     "player": prop.get("player"),
                     "side": prop.get("best_side"),
@@ -2240,7 +2391,16 @@ def _revalidate_frozen_market_candidates(market, candidates, injury_feed):
     )
     eligible = []
     for p in ordered:
+        # Keep frozen historical candidates for audit, but never re-promote an
+        # uncalibrated or non-pregame candidate as an official play.
+        game = p.get("balldontlie_game") or {}
+        if p.get("calibration_applied") is not True or game.get("game_state") != "PRE_GAME":
+            continue
         if p.get("recommendation") not in ("VALUE CANDIDATE", "LEAN / VERIFY"):
+            continue
+        if _projection_side_review(p):
+            p["selection_gate_status"] = "HOLD"
+            p["selection_gate_reason"] = p.get("projection_review_reason")
             continue
         # Mixed current/prior-season samples must undergo the workload review.
         try:
@@ -2265,8 +2425,15 @@ def _revalidate_frozen_market_candidates(market, candidates, injury_feed):
             passed=False; reason="Negative review failed safely: "+type(exc).__name__
             p["negative_review"]={"status":"review_failed","reason":reason}
         p["post_selection_reviewed"]=True
+        if passed and _projection_side_review(p):
+            passed=False
+            reason=p.get("projection_review_reason")
         if passed and p.get("best_side") in ("OVER","UNDER") and float(p.get("expected_value_pct") or 0)>0:
+            p["selection_gate_status"]="APPROVED"
             selected.append(p)
+        else:
+            p["selection_gate_status"]="HOLD"
+            p["selection_gate_reason"]=reason
             if len(selected)==5: break
     selected_keys={(_norm_player_name(p.get("player")),str(p.get("game") or "").casefold()) for p in selected}
     for p in ordered:
@@ -2296,13 +2463,16 @@ def proprietary_market_board(market: str = "rebounds"):
         frozen_slate = None
     if frozen_slate and frozen_slate.get("candidates"):
         frozen_props = [dict(p) for p in (frozen_slate.get("candidates") or []) if isinstance(p, dict)]
-        # Re-run today's targeted injury/workload gate even for an already-frozen
-        # snapshot. The original source lines remain intact; unsafe picks are
-        # removed from the actionable Top 5 and replaced from the same snapshot.
-        frozen_props = _revalidate_frozen_market_candidates(market, frozen_props, injury_feed)
+        # Enrich the frozen snapshot with current injury and verified game state
+        # BEFORE revalidation. Otherwise every candidate appears UNKNOWN and the
+        # pregame gate can never evaluate a legitimately scheduled matchup.
         for prop in frozen_props:
+            _apply_projection_side_guard(prop)
             _apply_official_injury(prop, injury_feed)
             _apply_balldontlie_game(prop, bdl_games)
+        # Keep original candidate lines/snapshot intact; only the separate daily
+        # Top 5 ledger is refreshed when a candidate still clears every gate.
+        frozen_props = _revalidate_frozen_market_candidates(market, frozen_props, injury_feed)
         return JSONResponse({
             "market": market,
             "source": "Frozen Eastern-time daily slate · original PropLine/DraftKings snapshot",
@@ -2322,6 +2492,7 @@ def proprietary_market_board(market: str = "rebounds"):
     if cached_board and now - cached_board[0] < _BP_BOARD_TTL_SECONDS:
         cached_result = _json_safe(cached_board[1])
         for cached_prop in cached_result.get("props") or []:
+            _apply_projection_side_guard(cached_prop)
             _apply_balldontlie_game(cached_prop, bdl_games)
         cached_result["injury_feed"] = injury_feed.get("meta", {})
         cached_result["balldontlie"] = {key: value for key, value in bdl_games.items() if key != "games"}
@@ -2427,6 +2598,7 @@ def proprietary_market_board(market: str = "rebounds"):
             # Injury and return-to-play review is deliberately deferred until
             # after this market's provisional Top 5 has been ranked.
             _apply_balldontlie_game(market_prop, bdl_games)
+            _apply_projection_side_guard(market_prop)
             output.append(market_prop)
         except Exception as exc:
             failures.append(name + ": " + type(exc).__name__ + ": " + str(exc)[:180])
@@ -3477,11 +3649,28 @@ def get_daily_top5(slate_date: str, market: str = "all"):
         return JSONResponse({
             "predictions": prediction_ledger.list_daily_top_five(slate_date, market),
             "all_time": prediction_ledger.daily_top_five_metrics(),
+            "record_groups": prediction_ledger.freeze_daily_record_groups(slate_date),
             "settlement": settlement_status,
         })
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Daily Top 5 history is temporarily unavailable.") from exc
 
+
+@app.get("/api/model/record-groups")
+def model_record_groups(slate_date: str):
+    try:
+        prediction_ledger.initialize()
+        freeze_status = prediction_ledger.freeze_daily_record_groups(slate_date)
+        names = ("top5_ev_player_props", "all_five_player_props_combined")
+        groups = {}
+        for name in names:
+            groups[name] = {
+                "predictions": prediction_ledger.list_daily_record_group(slate_date, name),
+                "metrics": prediction_ledger.daily_record_group_metrics(name),
+            }
+        return JSONResponse({"slate_date": slate_date, "freeze": freeze_status, "groups": groups})
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Player-prop record groups unavailable: " + type(exc).__name__)
 
 @app.get("/api/model/ledger")
 def model_ledger(status: str = "unsettled", market: str = "all", limit: int = 100):
@@ -3608,6 +3797,14 @@ def game_sides_totals_history(slate_date: str):
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Game-model history is temporarily unavailable: " + type(exc).__name__)
 
+
+@app.get("/api/game-experimental-totals-history")
+def game_experimental_totals_history(slate_date: str):
+    try:
+        game_model.initialize()
+        return JSONResponse({"slate_date": slate_date, "predictions": game_model._experimental_totals_history(slate_date), "metrics": game_model._experimental_totals_metrics()})
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Experimental totals history unavailable: " + type(exc).__name__)
 
 @app.get("/api/game-metrics")
 def game_sides_totals_metrics():
@@ -3813,6 +4010,7 @@ async def api_proxy(path: str, request: FastRequest):
                             prop["reason"] = "Local points model could not verify player history: " + type(model_error).__name__
                     for prop in props:
                         _apply_balldontlie_game(prop, bdl_games)
+                        _apply_projection_side_guard(prop)
                     board_payload["injury_feed"] = injury_feed.get("meta", {})
                     board_payload["balldontlie"] = {key: value for key, value in bdl_games.items() if key != "games"}
                     board_payload["props"] = props
