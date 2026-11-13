@@ -11,9 +11,11 @@ on:
       - src/api/nba_historical_ats_backtest.py
       - src/api/nba_free_ats_backtest.py
       - src/api/game_model.py
+      - src/api/index.py
       - tests/test_game_model_player_impact.py
       - tests/test_historical_ats_backtest.py
       - tests/test_free_ats_backtest.py
+      - tests/test_propline_draftkings_only.py
       - .github/workflows/nba-historical-backtest.yml
       - requirements.txt
       - pyproject.toml
