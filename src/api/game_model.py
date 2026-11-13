@@ -230,10 +230,14 @@ def _nba_stats(season,last_n=0):
           "team":code,"games":int(item.get("GP") or 0),
           "ortg":float(item.get("OFF_RATING")),"drtg":float(item.get("DEF_RATING")),
           "net":float(item.get("NET_RATING")),"pace":float(item.get("PACE")),
-          "efg":float(item.get("EFG_PCT") or 0),"tov":float(item.get("TM_TOV_PCT") or 0),
-          "oreb":float(item.get("OREB_PCT") or 0),"fta_rate":float(item.get("FTA_RATE") or 0),
-          "fg3a_rate":float(item.get("FG3A_RATE") or 0),"fg3_pct":float(item.get("FG3_PCT") or 0),
-          "fg2_pct":float(item.get("FG2_PCT") or 0),"ts":float(item.get("TS_PCT") or 0)
+          "efg":float(item["EFG_PCT"]) if item.get("EFG_PCT") is not None else None,
+          "tov":float(item["TM_TOV_PCT"]) if item.get("TM_TOV_PCT") is not None else None,
+          "oreb":float(item["OREB_PCT"]) if item.get("OREB_PCT") is not None else None,
+          "fta_rate":float(item["FTA_RATE"]) if item.get("FTA_RATE") is not None else None,
+          "fg3a_rate":float(item["FG3A_RATE"]) if item.get("FG3A_RATE") is not None else None,
+          "fg3_pct":float(item["FG3_PCT"]) if item.get("FG3_PCT") is not None else None,
+          "fg2_pct":float(item["FG2_PCT"]) if item.get("FG2_PCT") is not None else None,
+          "ts":float(item["TS_PCT"]) if item.get("TS_PCT") is not None else None
         }
     if len(out)<28: raise RuntimeError("NBA Stats advanced team table is incomplete ("+str(len(out))+"/30).")
     return out
@@ -273,9 +277,9 @@ def _tank01_ratings(force=False):
           "pace":(oposs+dposs)/2.0,"efg":(fgm+0.5*tpm)/ofga if ofga else 0,
           "tov":otov/oposs if oposs else 0,"oreb":(oreb/(oreb+dreb) if oreb is not None and dreb is not None and oreb+dreb>0 else None),
           "fta_rate":ofta/ofga if ofga else 0,
-          "fg3a_rate":fg3a/ofga if ofga and fg3a else 0,
-          "fg3_pct":fg3m/fg3a if fg3a else 0,
-          "fg2_pct":(fgm-fg3m)/(ofga-fg3a) if ofga>fg3a else 0,
+          "fg3a_rate":fg3a/ofga if ofga and fg3a>0 else None,
+          "fg3_pct":fg3m/fg3a if fg3a>0 else None,
+          "fg2_pct":(fgm-fg3m)/(ofga-fg3a) if ofga>fg3a else None,
           "ts":points/(2*(ofga+0.44*ofta)) if ofga+0.44*ofta else 0}
     if len(raw)<28:
         raise RuntimeError("Tank01 team efficiency fallback is incomplete ("+str(len(raw))+"/30).")
