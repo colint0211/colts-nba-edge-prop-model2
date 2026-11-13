@@ -1,6 +1,7 @@
 name: Refresh NBA player role and impact proxy
 
 on:
+# Scheduled workflows run from the default branch; this preview-branch push trigger keeps the free B-Ref refresh runnable before promotion.
   workflow_dispatch:
   schedule:
     - cron: "41 */6 * * *"
