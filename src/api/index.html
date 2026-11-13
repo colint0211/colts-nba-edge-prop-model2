@@ -148,7 +148,7 @@ function liveTicker(p){
  if(game?.state==='pre')return '<div class="ticker wait"><span class="ticker-state">TIP-OFF PENDING</span><span class="ticker-detail">'+fmt(actual,1)+' '+label+' · '+esc(game.status||'Scheduled')+'</span></div>';
  let tracking='';
  if(side==='OVER'){const needed=Math.max(0,Math.floor(line)+1-actual);tracking=actual>line?'TRACKING OVER':needed+' MORE TO CLEAR';}
- else if(side==='UNDER')tracking=actual<line?'TRACKING UNDER':actual===line?'ON THE LINE':'CURRENTLY MISS · ABOVE THE LINE';
+ else if(side==='UNDER')tracking=actual<line?'TRACKING UNDER':actual===line?'ON THE LINE':'MISS';
  else tracking='LIVE';
  const period=Number(game?.period||0),periodText=period>4?(period-4)+'OT':period?'Q'+period:'';
  const clock=[periodText,game?.clock].filter(Boolean).join(' ');
