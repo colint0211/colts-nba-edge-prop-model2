@@ -231,7 +231,9 @@ def _nba_stats(season,last_n=0):
           "ortg":float(item.get("OFF_RATING")),"drtg":float(item.get("DEF_RATING")),
           "net":float(item.get("NET_RATING")),"pace":float(item.get("PACE")),
           "efg":float(item.get("EFG_PCT") or 0),"tov":float(item.get("TM_TOV_PCT") or 0),
-          "oreb":float(item.get("OREB_PCT") or 0),"ts":float(item.get("TS_PCT") or 0)
+          "oreb":float(item.get("OREB_PCT") or 0),"fta_rate":float(item.get("FTA_RATE") or 0),
+          "fg3a_rate":float(item.get("FG3A_RATE") or 0),"fg3_pct":float(item.get("FG3_PCT") or 0),
+          "fg2_pct":float(item.get("FG2_PCT") or 0),"ts":float(item.get("TS_PCT") or 0)
         }
     if len(out)<28: raise RuntimeError("NBA Stats advanced team table is incomplete ("+str(len(out))+"/30).")
     return out
@@ -256,32 +258,42 @@ def _tank01_ratings(force=False):
         try: games=min(int(float(off.get("gamesPlayed"))),int(float(deff.get("gamesPlayed"))))
         except (TypeError,ValueError): games=0
         if games<1: continue
-        ofga,ofta,otov,oreb=total(off,"fga"),total(off,"fta"),total(off,"TOV"),total(off,"reb")
-        dfga,dfta,dtov,dreb=total(deff,"fga"),total(deff,"fta"),total(deff,"TOV"),total(deff,"reb")
-        oposs=ofga-0.25*oreb+otov+0.44*ofta
-        dposs=dfga-0.25*dreb+dtov+0.44*dfta
+        ofga,ofta,otov=total(off,"fga"),total(off,"fta"),total(off,"TOV")
+        oreb=total(off,"oreb") if (off.get("oreb") or {}).get("Total") is not None else None
+        fg3a,fg3m,fgm=total(off,"tptfga"),total(off,"tptfgm"),total(off,"fgm")
+        dfga,dfta,dtov=total(deff,"fga"),total(deff,"fta"),total(deff,"TOV")
+        dreb=total(deff,"dreb") if (deff.get("dreb") or {}).get("Total") is not None else None
+        oposs=ofga-0.25*(oreb or 0.0)+otov+0.44*ofta
+        dposs=dfga-0.25*(dreb or 0.0)+dtov+0.44*dfta
         points=total(off,"pts") or float(team.get("ppg") or 0)
         allowed=total(deff,"pts") or float(team.get("oppg") or 0)
         if oposs<=0 or dposs<=0 or points<=0 or allowed<=0: continue
         fgm=total(off,"fgm"); tpm=total(off,"tptfgm")
         raw[code]={"games":games,"ortg":points/oposs*100.0,"drtg":allowed/dposs*100.0,
           "pace":(oposs+dposs)/2.0,"efg":(fgm+0.5*tpm)/ofga if ofga else 0,
-          "tov":otov/oposs if oposs else 0,"oreb":0.25,
+          "tov":otov/oposs if oposs else 0,"oreb":(oreb/(oreb+dreb) if oreb is not None and dreb is not None and oreb+dreb>0 else None),
+          "fta_rate":ofta/ofga if ofga else 0,
+          "fg3a_rate":fg3a/ofga if ofga and fg3a else 0,
+          "fg3_pct":fg3m/fg3a if fg3a else 0,
+          "fg2_pct":(fgm-fg3m)/(ofga-fg3a) if ofga>fg3a else 0,
           "ts":points/(2*(ofga+0.44*ofta)) if ofga+0.44*ofta else 0}
     if len(raw)<28:
         raise RuntimeError("Tank01 team efficiency fallback is incomplete ("+str(len(raw))+"/30).")
-    league={key:sum(row[key] for row in raw.values())/len(raw) for key in ("ortg","drtg","pace","efg","tov","oreb","ts")}
+    league={}
+    for key in ("ortg","drtg","pace","efg","tov","oreb","fta_rate","fg3a_rate","fg3_pct","fg2_pct","ts"):
+        values=[row[key] for row in raw.values() if row.get(key) is not None]
+        league[key]=sum(values)/len(values) if values else None
     combined={}
     for code,row in raw.items():
         weight=max(0.18,min(0.60,6.0/(row["games"]+6.0)))
-        combined[code]={key:row[key]*(1-weight)+league[key]*weight for key in league}
+        combined[code]={key:(row[key]*(1-weight)+league[key]*weight if row.get(key) is not None and league.get(key) is not None else None) for key in league}
         combined[code].update({"games":row["games"],"net":combined[code]["ortg"]-combined[code]["drtg"],
           "prior_weight":weight,"recent_sample":row["games"],"source":"Tank01 estimated possessions"})
     current_year=datetime.now(timezone.utc).year
     season_start=current_year if datetime.now(timezone.utc).month>=7 else current_year-1
     season=f"{season_start}-{str(season_start+1)[-2:]}"
     result={"teams":combined,"season":season,"prior_season":None,
-      "source":"Tank01 current-season box-score averages; ORtg/DRtg/pace derived using estimated possessions (25% OREB proxy), shrunk toward league mean",
+      "source":"Tank01 current-season box-score averages; Four Factors enabled only when actual offensive and defensive rebound splits are supplied; no rebound proxy substituted",
       "data_quality":"derived_early_season","fetched_at":datetime.now(timezone.utc).isoformat(),
       "rate_limit_remaining":headers.get("x-ratelimit-requests-remaining")}
     _TEAM_CACHE.update({"at":now,"data":result})
@@ -311,7 +323,7 @@ def _team_ratings(force=False):
             prior=prior_stats.get(team); games=cur["games"]
             prior_weight=max(0.12,min(0.65,8.0/(games+8.0))) if prior else 0.0
             row={}
-            for key in ("ortg","drtg","pace","efg","tov","oreb","ts"):
+            for key in ("ortg","drtg","pace","efg","tov","oreb","fta_rate","fg3a_rate","fg3_pct","fg2_pct","ts"):
                 base=cur[key]*(1-prior_weight)+(prior[key]*prior_weight if prior else 0)
                 recent_row=recent.get(team)
                 if recent_row and recent_row.get("games",0)>=4:
@@ -460,6 +472,28 @@ def _team_adjustment(team,opp,game_date,schedule,injuries,season,is_home):
       "injury_adjustment":inj["points"],"injuries":inj["players"],"unpriced_injury":inj.get("unpriced_injury",False),
       "total_adjustment":rest-travel_penalty-timezone_penalty-elevation_penalty+inj["points"]}
 
+def _four_factor_efficiency_adjustment(team):
+    """Oliver-weighted offensive factor residual, in points per 100 possessions."""
+    required=("efg","tov","oreb","fta_rate")
+    if not all(team.get(k) is not None for k in required):
+        return None
+    score=(0.40*((team["efg"]-0.535)/0.04)
+          -0.25*((team["tov"]-0.13)/0.025)
+          +0.20*((team["oreb"]-0.25)/0.05)
+          +0.15*((team["fta_rate"]-0.22)/0.06))
+    return max(-1.5,min(1.5,0.45*score))
+
+
+def _shot_profile_efficiency_adjustment(team):
+    """Use 3P share/accuracy and 2P efficiency; not mislabeled as true midrange data."""
+    if not all(team.get(k) is not None for k in ("fg3a_rate","fg3_pct","fg2_pct")):
+        return 0.0
+    volume=(team["fg3a_rate"]-0.38)/0.12
+    accuracy=(team["fg3_pct"]-0.36)/0.06
+    two_point=(team["fg2_pct"]-0.53)/0.07
+    return max(-0.8,min(0.8,0.25*volume*accuracy+0.20*two_point))
+
+
 def _score_game(game,ratings,schedule,injuries,season):
     home,away=game["home"],game["away"]
     h=ratings["teams"].get(home); a=ratings["teams"].get(away)
@@ -467,6 +501,12 @@ def _score_game(game,ratings,schedule,injuries,season):
     pace=(h["pace"]+a["pace"])/2.0
     home_eff=(h["ortg"]+a["drtg"])/2.0
     away_eff=(a["ortg"]+h["drtg"])/2.0
+    home_ff=_four_factor_efficiency_adjustment(h)
+    away_ff=_four_factor_efficiency_adjustment(a)
+    if home_ff is not None: home_eff+=home_ff
+    if away_ff is not None: away_eff+=away_ff
+    home_eff+=_shot_profile_efficiency_adjustment(h)
+    away_eff+=_shot_profile_efficiency_adjustment(a)
     home_adj=_team_adjustment(home,away,game.get("commence_time"),schedule,injuries,season,True)
     away_adj=_team_adjustment(away,home,game.get("commence_time"),schedule,injuries,season,False)
     home_points=home_eff*pace/100.0+2.0+home_adj["total_adjustment"]
@@ -474,6 +514,9 @@ def _score_game(game,ratings,schedule,injuries,season):
     return {"projected_home":round(home_points,2),"projected_away":round(away_points,2),
       "projected_margin":round(home_points-away_points,2),"projected_total":round(home_points+away_points,2),
       "projected_pace":round(pace,2),"home_adjustments":home_adj,"away_adjustments":away_adj,
+      "factor_model":{"four_factors_applied":home_ff is not None and away_ff is not None,
+        "shot_profile_applied":all(h.get(k) is not None and a.get(k) is not None for k in ("fg3a_rate","fg3_pct","fg2_pct")),
+        "method":"Oliver-weighted eFG/TOV/OREB/free-throw rate plus 3P volume/accuracy and 2P efficiency residual; conservative capped ORtg adjustment"},
       "injury_uncertainty":bool(home_adj.get("unpriced_injury") or away_adj.get("unpriced_injury")),
       "rating_source":ratings.get("source"),"data_quality":ratings.get("data_quality","advanced"),
       "ratings":{"home":h,"away":a}}
