@@ -38,7 +38,7 @@ details{margin-top:10px;color:var(--muted);font-size:12px}summary{cursor:pointer
 table{width:100%;border-collapse:collapse;min-width:800px;font-size:12px}th,td{padding:10px;text-align:left;border-bottom:1px solid #243850;white-space:nowrap}th{color:var(--muted);background:#0b1727}tr:last-child td{border-bottom:0}
 .win{color:var(--green);font-weight:900}.loss{color:var(--red);font-weight:900}.push{color:var(--gold);font-weight:900}
 .source{font-size:11px;color:var(--muted);margin-top:20px;line-height:1.6}
-.ticker{margin-top:9px;padding:9px 11px;border:1px solid #29415d;border-radius:10px;background:#091625;display:flex;gap:8px;justify-content:space-between;align-items:center;flex-wrap:wrap;font-size:12px}.ticker-state{font-weight:900;letter-spacing:.25px}.ticker-detail{color:var(--muted);font-size:11px}.ticker.live .ticker-state{color:var(--gold)}.ticker.final .ticker-state.hit{color:var(--green)}.ticker.final .ticker-state.miss{color:var(--red)}.ticker.final .ticker-state.push{color:var(--gold)}.ticker.wait .ticker-state{color:var(--muted)}
+.ticker{margin-top:9px;padding:9px 11px;border:1px solid #29415d;border-radius:10px;background:#091625;display:flex;gap:8px;justify-content:space-between;align-items:center;flex-wrap:wrap;font-size:12px}.ticker-state{font-weight:900;letter-spacing:.25px}.ticker-detail{color:var(--muted);font-size:11px}.ticker.live .ticker-state{color:var(--gold)}.ticker.live .ticker-state.miss{color:var(--red)}.ticker.final .ticker-state.hit{color:var(--green)}.ticker.final .ticker-state.miss{color:var(--red)}.ticker.final .ticker-state.push{color:var(--gold)}.ticker.wait .ticker-state{color:var(--muted)}
 @media(max-width:760px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.cards{grid-template-columns:1fr}.num{font-size:22px}}
 </style>
 </head>
@@ -128,6 +128,7 @@ const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 const LIVE_STAT_FIELDS={points:'points',rebounds:'rebounds',assists:'assists',steals:'steals',threes:'three_points_made'};
 const LIVE_STAT_LABELS={points:'PTS',rebounds:'REB',assists:'AST',steals:'STL',threes:'3PM'};
 function liveNameKey(s){return String(s||'').toLowerCase().replace(/[^a-z0-9]/g,'');}
+function gradeProp(side,actual,line){if(Math.abs(Number(actual)-Number(line))<1e-9)return 'PUSH';if(side==='OVER')return Number(actual)>Number(line)?'HIT':'MISS';if(side==='UNDER')return Number(actual)<Number(line)?'HIT':'MISS';return null;}
 function liveTicker(p){
  const marketName=String(p.market||'').toLowerCase(),field=LIVE_STAT_FIELDS[marketName],label=LIVE_STAT_LABELS[marketName]||marketName.toUpperCase();
  const key=liveNameKey(p.player),byName=liveStatsData?.players_by_name||{},byId=liveStatsData?.players_by_id||{};
@@ -140,18 +141,18 @@ function liveTicker(p){
   return '<div class="ticker wait"><span class="ticker-state">'+status+'</span><span class="ticker-detail">No live stat received yet</span></div>';
  }
  if(game?.state==='post'){
-  const result=Math.abs(actual-line)<1e-9?'PUSH':((side==='OVER'&&actual>line)||(side==='UNDER'&&actual<line))?'HIT':'MISS';
+  const result=gradeProp(side,actual,line)||'PENDING';
   const cls=result==='HIT'?'hit':result==='MISS'?'miss':'push';
   return '<div class="ticker final"><span class="ticker-state '+cls+'">FINAL · '+result+'</span><span class="ticker-detail">'+fmt(actual,1)+' '+label+' vs '+fmt(line,1)+' · '+esc(game.status||'Game complete')+'</span></div>';
  }
  if(game?.state==='pre')return '<div class="ticker wait"><span class="ticker-state">TIP-OFF PENDING</span><span class="ticker-detail">'+fmt(actual,1)+' '+label+' · '+esc(game.status||'Scheduled')+'</span></div>';
  let tracking='';
  if(side==='OVER'){const needed=Math.max(0,Math.floor(line)+1-actual);tracking=actual>line?'TRACKING OVER':needed+' MORE TO CLEAR';}
- else if(side==='UNDER')tracking=actual<line?'TRACKING UNDER':actual===line?'ON THE LINE':'ABOVE THE LINE';
+ else if(side==='UNDER')tracking=actual<line?'TRACKING UNDER':actual===line?'ON THE LINE':'CURRENTLY MISS · ABOVE THE LINE';
  else tracking='LIVE';
  const period=Number(game?.period||0),periodText=period>4?(period-4)+'OT':period?'Q'+period:'';
  const clock=[periodText,game?.clock].filter(Boolean).join(' ');
- return '<div class="ticker live"><span class="ticker-state">'+esc(tracking)+'</span><span class="ticker-detail">'+fmt(actual,1)+' '+label+' / '+fmt(line,1)+' · '+esc(clock||game?.status||'Live')+'</span></div>';
+ return '<div class="ticker live"><span class="ticker-state '+(side==='UNDER'&&actual>line?'miss':'')+'">'+esc(tracking)+'</span><span class="ticker-detail">'+fmt(actual,1)+' '+label+' / '+fmt(line,1)+' · '+esc(clock||game?.status||'Live')+'</span></div>';
 }
 function renderDailyPropRows(){
  const body=el('propHistoryRows');if(!body)return;
