@@ -1205,7 +1205,54 @@ def _projected_minutes(valid_minutes):
     # erase the player's established rotation baseline.
     return 0.55 * recent5 + 0.30 * recent10 + 0.15 * established
 
-def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, market="", matchup_adjustment=None):
+def _team_factor_prop_adjustment(player_team, game, market):
+    """Use cached team pace/Four-Factor/shot-profile context to adjust player volume conservatively."""
+    try:
+        codes=_team_codes_from_game(game)
+        team=_canonical_team_code(player_team)
+        if not team or team not in codes or len(codes)!=2:
+            return {"available":False,"reason":"Player team could not be verified against the matchup."}
+        ratings=game_model._team_ratings()
+        rows=ratings.get("teams") or {}
+        own=rows.get(team)
+        opponent=rows.get(next(code for code in codes if code!=team))
+        if not own or not opponent:
+            return {"available":False,"reason":"Verified team efficiency rows unavailable."}
+        league_pace=sum(float(row.get("pace") or 0) for row in rows.values())/max(1,len(rows))
+        if league_pace<=0 or not own.get("pace"):
+            return {"available":False,"reason":"Team pace baseline unavailable."}
+        pace_ratio=float(own["pace"])/league_pace
+        factor_keys=("efg","tov","oreb","fta_rate")
+        four_factors=all(own.get(k) is not None for k in factor_keys)
+        ff_score=0.0
+        if four_factors:
+            ff_score=(0.40*((own["efg"]-0.535)/0.04)
+                     -0.25*((own["tov"]-0.13)/0.025)
+                     +0.20*((own["oreb"]-0.25)/0.05)
+                     +0.15*((own["fta_rate"]-0.22)/0.06))
+        shot_keys=("fg3a_rate","fg3_pct","fg2_pct")
+        shot_profile=all(own.get(k) is not None for k in shot_keys)
+        shot_score=0.0
+        if shot_profile:
+            shot_score=0.25*((own["fg3a_rate"]-0.38)/0.12)*((own["fg3_pct"]-0.36)/0.06)+0.20*((own["fg2_pct"]-0.53)/0.07)
+        # The player-history baseline already embeds team context. Apply only a
+        # small residual correction, and never synthesize missing OREB/shot data.
+        multiplier=1.0+0.20*(pace_ratio-1.0)
+        if four_factors and market in ("points","assists","threes"):
+            multiplier+=0.012*max(-2.0,min(2.0,ff_score))
+        if shot_profile and market in ("points","threes"):
+            multiplier+=0.008*max(-1.5,min(1.5,shot_score))
+        multiplier=max(0.94,min(1.06,multiplier))
+        return {"available":True,"factor":round(multiplier,4),"pace_ratio":round(pace_ratio,4),
+          "four_factors_available":four_factors,"four_factor_score":round(ff_score,3) if four_factors else None,
+          "shot_profile_available":shot_profile,"shot_profile_score":round(shot_score,3) if shot_profile else None,
+          "team":team,"opponent":next(code for code in codes if code!=team),
+          "source":ratings.get("source"),"method":"team pace residual + Oliver-weighted eFG/TOV/OREB/FTr + 3P share/accuracy and 2P efficiency; capped +/-6%"}
+    except Exception as exc:
+        return {"available":False,"reason":"Team context unavailable: "+type(exc).__name__}
+
+
+def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, market="", matchup_adjustment=None, team_context_adjustment=None):
     """Project count stats with an overdispersed count model; never truncate the upper tail at the observed maximum."""
     clean = [float(v) for v in values if v is not None and math.isfinite(float(v)) and float(v) >= 0]
     if len(clean) < 4:
@@ -1244,6 +1291,16 @@ def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, ma
                 target_mean *= matchup_factor
         except (TypeError, ValueError):
             matchup_factor = 1.0
+
+    team_context_factor = 1.0
+    if isinstance(team_context_adjustment, dict) and team_context_adjustment.get("available"):
+        try:
+            candidate=float(team_context_adjustment.get("factor",1.0))
+            if math.isfinite(candidate):
+                team_context_factor=max(0.94,min(1.06,candidate))
+                target_mean*=team_context_factor
+        except (TypeError,ValueError):
+            team_context_factor=1.0
 
     target_mean = max(0.05, target_mean)
     distribution = [max(0.0, v * (target_mean / long_mean)) if long_mean > 0 else v for v in clean]
@@ -1307,13 +1364,15 @@ def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, ma
         "expected_value_pct": round(best[0]*100, 2) if best else None,
         "edge_pp": None,
         "recommendation": "VALUE CANDIDATE" if best and best[0] > 0.05 else ("LEAN / VERIFY" if best and best[0] > 0 else "PASS"),
-        "model_components": ["recency-weighted history", "10-game form signal", "minutes adjustment" if valid_minutes else "minutes unavailable; no adjustment", "defense-vs-position matchup adjustment" if isinstance(matchup_adjustment, dict) and matchup_adjustment.get("available", True) else "defense-vs-position unavailable; no adjustment", "20% empirical history + 80% negative-binomial count distribution"],
+        "model_components": ["recency-weighted history", "10-game form signal", "minutes adjustment" if valid_minutes else "minutes unavailable; no adjustment", "defense-vs-position matchup adjustment" if isinstance(matchup_adjustment, dict) and matchup_adjustment.get("available", True) else "defense-vs-position unavailable; no adjustment", "team pace + Four Factors + shot-profile adjustment" if isinstance(team_context_adjustment, dict) and team_context_adjustment.get("available") else "team factor context unavailable; no adjustment", "20% empirical history + 80% negative-binomial count distribution"],
         "model_method": "recency-weighted count-rate projection with Gamma-Poisson overdispersion; provisional pending out-of-sample calibration",
         "sample_size": n, "long_run_mean": round(long_mean, 2), "recent5_mean": round(recent5_mean, 2),
         "recent10_mean": round(recent10_mean, 2), "weighted_mean": round(weighted_mean, 2),
         "distribution_std_dev": round(std_dev, 2), "minute_adjustment_factor": round(minute_factor, 3),
         "minutes_sample_size": len(valid_minutes),
         "matchup_adjustment_pct": round((matchup_factor - 1.0) * 100, 2),
+        "team_context_adjustment_pct": round((team_context_factor - 1.0) * 100, 2),
+        "team_factor_context": team_context_adjustment,
         "defense_vs_position": matchup_adjustment,
         "baseline_minutes": round(baseline_min, 1) if baseline_min is not None else None,
         "minutes_method": "55% recent-5 median / 30% recent-10 median / 15% recent-20 median; adjustment capped at +/-15%",
@@ -2356,10 +2415,12 @@ def proprietary_market_board(market: str = "rebounds"):
             team_for_dvp = resolved_team
             event_matchup = raw.get("game") or ""
             matchup_adjustment = _dvp_matchup_adjustment(athlete_id, team_for_dvp, event_matchup, market, name)
+            team_context_adjustment = _team_factor_prop_adjustment(team_for_dvp, event_matchup, market)
             model = _simulate_market(
                 values, line, None, None, _norm_player_name(name) + market,
                 minutes=player_minutes, market=market,
                 matchup_adjustment=matchup_adjustment,
+                team_context_adjustment=team_context_adjustment,
             )
             if not model:
                 failures.append(name + ": fewer than five valid game logs")
@@ -3549,7 +3610,8 @@ async def model_recalculate(request: FastRequest):
         field, label = ("points", "PTS") if market == "points" else STAT_FIELDS[market]
         values, sample_label, minutes = _player_history(athlete_id, field, label)
         matchup_adjustment = _dvp_matchup_adjustment(athlete_id, payload.get("team"), payload.get("game"), market, player)
-        model = _simulate_market(values, line, None, None, _norm_player_name(player) + market + "custom", minutes=minutes, market=market, matchup_adjustment=matchup_adjustment)
+        team_context_adjustment = _team_factor_prop_adjustment(payload.get("team"), payload.get("game"), market)
+        model = _simulate_market(values, line, None, None, _norm_player_name(player) + market + "custom", minutes=minutes, market=market, matchup_adjustment=matchup_adjustment, team_context_adjustment=team_context_adjustment)
         if not model:
             raise HTTPException(status_code=422, detail="Not enough verified game-log history to recalculate this player.")
         over_raw, under_raw = _american_probability(over_odds), _american_probability(under_odds)
@@ -3729,11 +3791,13 @@ async def api_proxy(path: str, request: FastRequest):
                         try:
                             values, sample_label, player_minutes = _player_history(athlete_id, "points", "PTS")
                             matchup_adjustment = _dvp_matchup_adjustment(athlete_id, roster_team, prop.get("game"), "points", prop.get("player"))
+                            team_context_adjustment = _team_factor_prop_adjustment(roster_team, prop.get("game"), "points")
                             model = _simulate_market(
                                 values, float(prop["line"]), prop.get("over_odds"),
                                 prop.get("under_odds"),
                                 _norm_player_name(prop.get("player")) + "points",
-                                minutes=player_minutes, market="points", matchup_adjustment=matchup_adjustment
+                                minutes=player_minutes, market="points", matchup_adjustment=matchup_adjustment,
+                                team_context_adjustment=team_context_adjustment
                             )
                             if not model:
                                 # Never leave an upstream projection/probability on a row
