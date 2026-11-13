@@ -1,6 +1,7 @@
-name: Refresh official NBA team ratings
+name: Refresh Basketball-Reference NBA team ratings (preview)
 
 on:
+# The schedule runs from the default branch; the preview-branch push trigger below enables free refreshes before promotion.
   workflow_dispatch:
   schedule:
     - cron: "17 */6 * * *"
