@@ -1771,7 +1771,7 @@ def _propline_fetch_events():
 
     params = urlencode({
         "markets": ",".join(_PROPLINE_MARKETS.values()),
-        "bookmakers": "draftkings,fanduel",
+        "bookmakers": "draftkings",
         "includeLinks": "true",
         "max_age": 300,
     })
@@ -1842,7 +1842,7 @@ def _propline_market_props(events, market):
             if not isinstance(bookmaker, dict):
                 continue
             bookmaker_key = str(bookmaker.get("key") or "").lower()
-            if bookmaker_key not in ("draftkings", "fanduel"):
+            if bookmaker_key != "draftkings":
                 continue
             for market_row in bookmaker.get("markets") or []:
                 if not isinstance(market_row, dict) or market_row.get("key") != market_key:
