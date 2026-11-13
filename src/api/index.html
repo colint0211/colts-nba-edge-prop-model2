@@ -38,6 +38,7 @@ details{margin-top:10px;color:var(--muted);font-size:12px}summary{cursor:pointer
 table{width:100%;border-collapse:collapse;min-width:800px;font-size:12px}th,td{padding:10px;text-align:left;border-bottom:1px solid #243850;white-space:nowrap}th{color:var(--muted);background:#0b1727}tr:last-child td{border-bottom:0}
 .win{color:var(--green);font-weight:900}.loss{color:var(--red);font-weight:900}.push{color:var(--gold);font-weight:900}
 .source{font-size:11px;color:var(--muted);margin-top:20px;line-height:1.6}
+.ticker{margin-top:9px;padding:9px 11px;border:1px solid #29415d;border-radius:10px;background:#091625;display:flex;gap:8px;justify-content:space-between;align-items:center;flex-wrap:wrap;font-size:12px}.ticker-state{font-weight:900;letter-spacing:.25px}.ticker-detail{color:var(--muted);font-size:11px}.ticker.live .ticker-state{color:var(--gold)}.ticker.final .ticker-state.hit{color:var(--green)}.ticker.final .ticker-state.miss{color:var(--red)}.ticker.final .ticker-state.push{color:var(--gold)}.ticker.wait .ticker-state{color:var(--muted)}
 @media(max-width:760px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.cards{grid-template-columns:1fr}.num{font-size:22px}}
 </style>
 </head>
@@ -82,18 +83,18 @@ table{width:100%;border-collapse:collapse;min-width:800px;font-size:12px}th,td{p
  <div class="hint">Timestamped pregame candidates that passed data-quality and calibration gates are tracked here. They remain research-only until market-level validation is passed; markets without qualified candidates stay blank.</div>
  <div class="filters"><span id="propHistoryStatus" class="muted">Loading player prop results…</span></div>
  <div class="tablewrap">
-  <table><thead><tr><th>Market</th><th>Player</th><th>Matchup</th><th>Side</th><th>Line</th><th>Odds</th><th>Model %</th><th>Projection</th><th>Actual</th><th>Result</th><th>Units</th></tr></thead>
-  <tbody id="propHistoryRows"><tr><td colspan="11">Loading…</td></tr></tbody></table>
+  <table><thead><tr><th>Market</th><th>Player</th><th>Matchup</th><th>Side</th><th>Line</th><th>Odds</th><th>Model %</th><th>Projection</th><th>Live ticker</th><th>Actual</th><th>Result</th><th>Units</th></tr></thead>
+  <tbody id="propHistoryRows"><tr><td colspan="12">Loading…</td></tr></tbody></table>
  </div>
  <div class="section">Top 5 EV player props · separate record</div>
  <div class="hint">Five highest-EV picks selected across points, rebounds, assists, steals and threes. Settled independently from the market Top 5 sets.</div>
  <div class="filters"><span id="topEvStatus" class="muted">Loading…</span></div>
- <div class="tablewrap"><table><thead><tr><th>Market</th><th>Player</th><th>Matchup</th><th>Side</th><th>Line</th><th>Odds</th><th>Model %</th><th>EV</th><th>Actual</th><th>Result</th><th>Units</th></tr></thead><tbody id="topEvRows"><tr><td colspan="11">Loading…</td></tr></tbody></table></div>
+ <div class="tablewrap"><table><thead><tr><th>Market</th><th>Player</th><th>Matchup</th><th>Side</th><th>Line</th><th>Odds</th><th>Model %</th><th>EV</th><th>Live ticker</th><th>Actual</th><th>Result</th><th>Units</th></tr></thead><tbody id="topEvRows"><tr><td colspan="12">Loading…</td></tr></tbody></table></div>
 
  <div class="section">All 5 player props combined · separate record</div>
  <div class="hint">The five locked candidates from each of the five prop markets, up to 25 picks total. This record does not change the Top 5 EV record.</div>
  <div class="filters"><span id="allPropsStatus" class="muted">Loading…</span></div>
- <div class="tablewrap"><table><thead><tr><th>Market</th><th>Player</th><th>Matchup</th><th>Side</th><th>Line</th><th>Odds</th><th>Model %</th><th>EV</th><th>Actual</th><th>Result</th><th>Units</th></tr></thead><tbody id="allPropsRows"><tr><td colspan="11">Loading…</td></tr></tbody></table></div>
+ <div class="tablewrap"><table><thead><tr><th>Market</th><th>Player</th><th>Matchup</th><th>Side</th><th>Line</th><th>Odds</th><th>Model %</th><th>EV</th><th>Live ticker</th><th>Actual</th><th>Result</th><th>Units</th></tr></thead><tbody id="allPropsRows"><tr><td colspan="12">Loading…</td></tr></tbody></table></div>
 
  <div class="section">Experimental totals · separate record</div>
  <div class="hint">Totals probabilities and EV are tracked separately from official sides. The total model remains experimental because its untouched holdout showed material projection bias.</div>
@@ -118,11 +119,60 @@ table{width:100%;border-collapse:collapse;min-width:800px;font-size:12px}th,td{p
 </main>
 <script>
 let boardData=null,market='sides',section='sides',propMarket='rebounds',propBoards={},historyRows=[];
+let liveStatsData=null,dailyPropRows=[],topEvPropRows=[],allPropRows=[],liveTickerBusy=false;
 const el=id=>document.getElementById(id);
 const fmt=(n,d=1)=>n==null||!Number.isFinite(Number(n))?'—':Number(n).toFixed(d);
 const signed=n=>n==null?'—':(Number(n)>0?'+':'')+fmt(n,1);
 const odds=n=>n==null?'—':(Number(n)>0?'+':'')+n;
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const LIVE_STAT_FIELDS={points:'points',rebounds:'rebounds',assists:'assists',steals:'steals',threes:'three_points_made'};
+const LIVE_STAT_LABELS={points:'PTS',rebounds:'REB',assists:'AST',steals:'STL',threes:'3PM'};
+function liveNameKey(s){return String(s||'').toLowerCase().replace(/[^a-z0-9]/g,'');}
+function liveTicker(p){
+ const marketName=String(p.market||'').toLowerCase(),field=LIVE_STAT_FIELDS[marketName],label=LIVE_STAT_LABELS[marketName]||marketName.toUpperCase();
+ const key=liveNameKey(p.player),byName=liveStatsData?.players_by_name||{},byId=liveStatsData?.players_by_id||{};
+ const player=byName[key]||(p.athlete_id?byId[String(p.athlete_id)]:null);
+ const game=player?.game_id?(liveStatsData?.games||[]).find(g=>String(g.id||g.event_id)===String(player.game_id)):null;
+ const raw=player&&field?player[field]:null,actual=raw==null?null:Number(raw),line=Number(p.line),side=String(p.side||p.best_side||'').toUpperCase();
+ if(p.outcome){const result=p.outcome==='WIN'?'HIT':p.outcome==='LOSS'?'MISS':p.outcome;const cls=result==='HIT'?'hit':result==='MISS'?'miss':'push';return '<div class="ticker final"><span class="ticker-state '+cls+'">FINAL · '+result+'</span><span class="ticker-detail">'+(p.actual_value==null?'':fmt(p.actual_value,1)+' '+label)+' · official settlement</span></div>';}
+ if(!player||!Number.isFinite(actual)){
+  const status=game?.state==='in'?'LIVE · waiting for player box score':game?.state==='post'?'FINAL · waiting for verified settlement':game?.state==='pre'?'TIP-OFF PENDING':'Waiting for live game feed';
+  return '<div class="ticker wait"><span class="ticker-state">'+status+'</span><span class="ticker-detail">No live stat received yet</span></div>';
+ }
+ if(game?.state==='post'){
+  const result=Math.abs(actual-line)<1e-9?'PUSH':((side==='OVER'&&actual>line)||(side==='UNDER'&&actual<line))?'HIT':'MISS';
+  const cls=result==='HIT'?'hit':result==='MISS'?'miss':'push';
+  return '<div class="ticker final"><span class="ticker-state '+cls+'">FINAL · '+result+'</span><span class="ticker-detail">'+fmt(actual,1)+' '+label+' vs '+fmt(line,1)+' · '+esc(game.status||'Game complete')+'</span></div>';
+ }
+ if(game?.state==='pre')return '<div class="ticker wait"><span class="ticker-state">TIP-OFF PENDING</span><span class="ticker-detail">'+fmt(actual,1)+' '+label+' · '+esc(game.status||'Scheduled')+'</span></div>';
+ let tracking='';
+ if(side==='OVER'){const needed=Math.max(0,Math.floor(line)+1-actual);tracking=actual>line?'TRACKING OVER':needed+' MORE TO CLEAR';}
+ else if(side==='UNDER')tracking=actual<line?'TRACKING UNDER':actual===line?'ON THE LINE':'ABOVE THE LINE';
+ else tracking='LIVE';
+ const period=Number(game?.period||0),periodText=period>4?(period-4)+'OT':period?'Q'+period:'';
+ const clock=[periodText,game?.clock].filter(Boolean).join(' ');
+ return '<div class="ticker live"><span class="ticker-state">'+esc(tracking)+'</span><span class="ticker-detail">'+fmt(actual,1)+' '+label+' / '+fmt(line,1)+' · '+esc(clock||game?.status||'Live')+'</span></div>';
+}
+function renderDailyPropRows(){
+ const body=el('propHistoryRows');if(!body)return;
+ body.innerHTML=dailyPropRows.length?dailyPropRows.map(p=>{
+  const result=p.outcome?(p.outcome==='WIN'?'HIT':p.outcome==='LOSS'?'MISS':p.outcome):'PENDING';
+  const cls=result==='HIT'?'win':result==='MISS'?'loss':result==='PUSH'?'push':'';
+  const profit=p.profit_units==null?'—':(p.profit_units>0?'+':'')+fmt(p.profit_units,2)+'u';
+  return '<tr><td>'+esc(p.market)+'</td><td>'+esc(p.player)+'</td><td>'+esc(p.game||'')+'</td><td>'+esc(p.side)+'</td><td>'+fmt(p.line,1)+'</td><td>'+odds(p.odds)+'</td><td>'+fmt(p.probability_pct,1)+'%</td><td>'+fmt(p.projection,1)+'</td><td>'+liveTicker(p)+'</td><td>'+fmt(p.actual_value,1)+'</td><td class="'+cls+'">'+result+'</td><td>'+profit+'</td></tr>';
+ }).join(''):'<tr><td colspan="12">No qualified, locked player prop candidates were recorded for this date. Research candidates are tracked for audit, not treated as official bets.</td></tr>';
+}
+async function refreshLivePropStats(){
+ if(liveTickerBusy)return;liveTickerBusy=true;
+ try{
+  const r=await fetch('/api/live-stats?t='+Date.now(),{cache:'no-store'});if(!r.ok)throw Error('Live stats unavailable');
+  liveStatsData=await r.json();renderDailyPropRows();
+  if(topEvPropRows.length)el('topEvRows').innerHTML=renderPropGroupRows(topEvPropRows);
+  if(allPropRows.length)el('allPropsRows').innerHTML=renderPropGroupRows(allPropRows);
+  if(section==='props'&&propBoards[propMarket])renderPropBoard(propMarket);
+ }catch(e){/* Keep the last verified ticker values visible during a temporary feed outage. */}
+ finally{liveTickerBusy=false;}
+}
 function setSection(next){
  section=next;
  ['props','sides','totals'].forEach(x=>el('nav-'+x).classList.toggle('active',section===x));
@@ -178,7 +228,7 @@ function renderPropBoard(m){
    '<div class="metrics"><div class="mini"><div class="mini-label">Projection</div><div class="mini-value">'+fmt(p.projection??p.projected_value,1)+'</div></div>'+
    '<div class="mini"><div class="mini-label">Model probability</div><div class="mini-value">'+prob+'</div></div>'+
    '<div class="mini"><div class="mini-label">Estimated EV · unvalidated</div><div class="mini-value gold">'+evText+'</div></div></div>'+
-   '<div class="bottom"><span>Odds: O '+odds(p.over_odds)+' / U '+odds(p.under_odds)+'</span><span>'+esc(stateText)+'</span><span>Sample: '+(p.games_used??'—')+' games</span></div>'+
+   '<div class="bottom"><span>Odds: O '+odds(p.over_odds)+' / U '+odds(p.under_odds)+'</span><span>'+esc(stateText)+'</span><span>Sample: '+(p.games_used??'—')+' games</span></div>'+liveTicker({...p,market:m})+
    '<div class="source">'+(held?'HOLD — '+esc(p.projection_review_reason||'Projection and selected side conflict. No side or EV is published.')+' ':'RESEARCH ONLY — ')+esc(calibratedText)+'. Model has not beaten the no-vig market benchmark in this market. Do not treat this as an official bet.</div>'+
    (p.probability_note?'<details><summary>Model notes</summary><p>'+esc(p.probability_note)+'</p></details>':'')+
    '</article>';
@@ -186,25 +236,21 @@ function renderPropBoard(m){
  if(d.unavailable?.length)el('updated').textContent+=' · '+d.unavailable.length+' player data issues';
 }
 async function loadDailyPropHistory(day){
- const status=el('propHistoryStatus'),body=el('propHistoryRows');
+ const status=el('propHistoryStatus');
  if(!day){status.textContent='Choose a slate date to view player prop results.';return;}
  try{
   const r=await fetch('/api/model/daily-top5?slate_date='+encodeURIComponent(day)+'&t='+Date.now(),{cache:'no-store'});
   const d=await r.json();if(!r.ok)throw Error(d.detail||'Player prop history unavailable');
-  const picks=d.predictions||[];
-  const wins=picks.filter(p=>p.outcome==='WIN').length;
-  const losses=picks.filter(p=>p.outcome==='LOSS').length;
-  const pushes=picks.filter(p=>p.outcome==='PUSH').length;
-  const pending=picks.filter(p=>!p.outcome).length;
-  status.textContent=picks.length+' locked prop candidates · '+wins+'W – '+losses+'L'+(pushes?' · '+pushes+' pushes':'')+' · '+pending+' pending';
-  body.innerHTML=picks.length?picks.map(p=>{
-   const result=p.outcome||'PENDING',cls=result==='WIN'?'win':result==='LOSS'?'loss':result==='PUSH'?'push':'';
-   const profit=p.profit_units==null?'—':(p.profit_units>0?'+':'')+fmt(p.profit_units,2)+'u';
-   return '<tr><td>'+esc(p.market)+'</td><td>'+esc(p.player)+'</td><td>'+esc(p.game||'')+'</td><td>'+esc(p.side)+'</td><td>'+fmt(p.line,1)+'</td><td>'+odds(p.odds)+'</td><td>'+fmt(p.probability_pct,1)+'%</td><td>'+fmt(p.projection,1)+'</td><td>'+fmt(p.actual_value,1)+'</td><td class="'+cls+'">'+result+'</td><td>'+profit+'</td></tr>';
-  }).join(''):'<tr><td colspan="11">No qualified, locked player prop candidates were recorded for '+esc(day)+'. Research candidates are tracked for audit, not treated as official bets.</td></tr>';
+  dailyPropRows=d.predictions||[];
+  const wins=dailyPropRows.filter(p=>p.outcome==='WIN').length;
+  const losses=dailyPropRows.filter(p=>p.outcome==='LOSS').length;
+  const pushes=dailyPropRows.filter(p=>p.outcome==='PUSH').length;
+  const pending=dailyPropRows.filter(p=>!p.outcome).length;
+  status.textContent=dailyPropRows.length+' locked prop candidates · '+wins+' HIT – '+losses+' MISS'+(pushes?' · '+pushes+' PUSH':'')+' · '+pending+' pending';
+  renderDailyPropRows();
  }catch(e){
   status.textContent='Player prop results unavailable: '+(e.message||e);
-  body.innerHTML='<tr><td colspan="11">Could not load the player prop ledger.</td></tr>';
+  el('propHistoryRows').innerHTML='<tr><td colspan="12">Could not load the player prop ledger.</td></tr>';
  }
 }
 
@@ -219,10 +265,11 @@ function renderGameRecordStats(d){
 }
 function renderPropGroupRows(rows){
  return (rows||[]).length?rows.map(p=>{
-  const result=p.outcome||'PENDING',cls=result==='WIN'?'win':result==='LOSS'?'loss':result==='PUSH'?'push':'';
+  const result=p.outcome?(p.outcome==='WIN'?'HIT':p.outcome==='LOSS'?'MISS':p.outcome):'PENDING';
+  const cls=result==='HIT'?'win':result==='MISS'?'loss':result==='PUSH'?'push':'';
   const profit=p.profit_units==null?'—':(p.profit_units>0?'+':'')+fmt(p.profit_units,2)+'u';
-  return '<tr><td>'+esc(p.market)+'</td><td>'+esc(p.player)+'</td><td>'+esc(p.game||'')+'</td><td>'+esc(p.side)+'</td><td>'+fmt(p.line,1)+'</td><td>'+odds(p.odds)+'</td><td>'+fmt(p.probability_pct,1)+'%</td><td>'+fmt(p.expected_value_pct,1)+'%</td><td>'+fmt(p.actual_value,1)+'</td><td class="'+cls+'">'+result+'</td><td>'+profit+'</td></tr>';
- }).join(''):'<tr><td colspan="11">No picks have been frozen in this record for this slate date.</td></tr>';
+  return '<tr><td>'+esc(p.market)+'</td><td>'+esc(p.player)+'</td><td>'+esc(p.game||'')+'</td><td>'+esc(p.side)+'</td><td>'+fmt(p.line,1)+'</td><td>'+odds(p.odds)+'</td><td>'+fmt(p.probability_pct,1)+'%</td><td>'+fmt(p.expected_value_pct,1)+'%</td><td>'+liveTicker(p)+'</td><td>'+fmt(p.actual_value,1)+'</td><td class="'+cls+'">'+result+'</td><td>'+profit+'</td></tr>';
+ }).join(''):'<tr><td colspan="12">No picks have been frozen in this record for this slate date.</td></tr>';
 }
 async function loadRecordGroups(day){
  try{
@@ -232,7 +279,7 @@ async function loadRecordGroups(day){
   const tm=top.metrics||{},am=all.metrics||{};
   recordSummary('recTopEv','recTopEvSub',tm);
   recordSummary('recAllProps','recAllPropsSub',am);
-  const topRows=top.predictions||[],allRows=all.predictions||[];
+  const topRows=top.predictions||[],allRows=all.predictions||[];topEvPropRows=topRows;allPropRows=allRows;
   el('topEvStatus').textContent=topRows.length+' saved picks · '+(tm.wins??0)+'W – '+(tm.losses??0)+'L · '+(tm.settled??0)+' settled';
   el('allPropsStatus').textContent=allRows.length+' saved picks · '+(am.wins??0)+'W – '+(am.losses??0)+'L · '+(am.settled??0)+' settled';
   el('topEvRows').innerHTML=renderPropGroupRows(topRows);
@@ -332,6 +379,7 @@ async function loadHistory(){
   await loadDailyPropHistory(day);
   await loadRecordGroups(day);
   await loadExperimentalTotalsHistory(day);
+   await refreshLivePropStats();
   const wins=historyRows.filter(x=>x.outcome==='WIN').length,losses=historyRows.filter(x=>x.outcome==='LOSS').length;
   const pending=historyRows.filter(x=>!x.outcome).length;
   el('historyStatus').textContent=historyRows.length+' model picks · '+wins+' wins · '+losses+' losses · '+pending+' pending';
@@ -344,6 +392,8 @@ async function loadHistory(){
 el('historyDate').addEventListener('change',loadHistory);
 loadBoard();
 setInterval(()=>loadBoard(false),60000);
+setInterval(()=>refreshLivePropStats(),15000);
+setInterval(()=>{const day=el('historyDate').value;if(day)loadDailyPropHistory(day);},60000);
 </script>
 </body>
 </html>
