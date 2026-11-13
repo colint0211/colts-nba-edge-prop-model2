@@ -79,7 +79,8 @@ table{width:100%;border-collapse:collapse;min-width:800px;font-size:12px}th,td{p
  </div>
  <div id="board" class="cards"><div class="empty">Loading team ratings and DraftKings lines…</div></div>
 
- <div class="section">Daily locked player prop candidates</div>
+ <div id="propHistoryPanel">
+  <div class="section">Daily locked player prop candidates</div>
  <div class="hint">Timestamped pregame candidates that passed data-quality and calibration gates are tracked here. They remain research-only until market-level validation is passed; markets without qualified candidates stay blank.</div>
  <div class="filters"><span id="propHistoryStatus" class="muted">Loading player prop results…</span></div>
  <div class="tablewrap">
@@ -96,7 +97,9 @@ table{width:100%;border-collapse:collapse;min-width:800px;font-size:12px}th,td{p
  <div class="filters"><span id="allPropsStatus" class="muted">Loading…</span></div>
  <div class="tablewrap"><table><thead><tr><th>Market</th><th>Player</th><th>Matchup</th><th>Side</th><th>Line</th><th>Odds</th><th>Model %</th><th>EV</th><th>Live ticker</th><th>Actual</th><th>Result</th><th>Units</th></tr></thead><tbody id="allPropsRows"><tr><td colspan="12">Loading…</td></tr></tbody></table></div>
 
- <div class="section">Experimental totals · separate record</div>
+ </div>
+
+  <div class="section">Experimental totals · separate record</div>
  <div class="hint">Totals probabilities and EV are tracked separately from official sides. The total model remains experimental because its untouched holdout showed material projection bias.</div>
  <div class="filters"><span id="totalsHistoryStatus" class="muted">Loading…</span></div>
  <div class="tablewrap"><table><thead><tr><th>Matchup</th><th>Selection</th><th>Line</th><th>Odds</th><th>Model %</th><th>No-vig %</th><th>EV</th><th>Projection</th><th>Actual</th><th>Result</th><th>Units</th></tr></thead><tbody id="totalsHistoryRows"><tr><td colspan="11">Loading…</td></tr></tbody></table></div>
@@ -178,6 +181,7 @@ function setSection(next){
  section=next;
  ['props','sides','totals'].forEach(x=>el('nav-'+x).classList.toggle('active',section===x));
  el('propMarkets').style.display=section==='props'?'flex':'none';
+  el('propHistoryPanel').style.display=section==='props'?'block':'none';
  el('boardTitle').textContent=section==='props'?'Player prop candidates':section==='sides'?'Point spread candidates':'Game total candidates';
  el('boardHint').textContent=section==='props'?'Proprietary player projections ranked by verified DraftKings lines and two-sided prices. Five markets are shown separately; totals are experimental and not official picks.':'Sides and totals are evaluated independently from sportsbook prices.';
  if(section==='props'){loadPropBoard(propMarket);return;}
