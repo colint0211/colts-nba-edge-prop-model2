@@ -2527,6 +2527,46 @@ def proprietary_market_board(market: str = "rebounds"):
 
 
 
+@app.get("/api/cron/freeze-daily/{market_name}")
+def cron_freeze_daily_market(market_name: str, request: FastRequest):
+    """Freeze one market per invocation so five markets cannot exceed one function timeout."""
+    secret = os.getenv("CRON_SECRET", "")
+    if not secret or not secrets.compare_digest(request.headers.get("authorization", ""), "Bearer " + secret):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    market_name = market_name.lower().strip()
+    if market_name not in ("points", "rebounds", "assists", "steals", "threes"):
+        raise HTTPException(status_code=400, detail="Unsupported NBA market.")
+    now_et = datetime.now(ZoneInfo("America/New_York"))
+    if now_et.hour != 7:
+        return JSONResponse({
+            "status": "outside_freeze_window",
+            "market": market_name,
+            "eastern_time": now_et.isoformat(),
+            "required_window": "07:00-07:59 America/New_York",
+        })
+    try:
+        response = proprietary_market_board(market_name)
+        payload = json.loads(response.body.decode("utf-8"))
+        props = payload.get("props") or []
+        selected_count = sum(1 for prop in props if isinstance(prop, dict) and prop.get("selection_rank"))
+        frozen = bool(payload.get("daily_frozen"))
+        return JSONResponse({
+            "status": "completed" if frozen else "not_frozen",
+            "market": market_name,
+            "slate_date": now_et.date().isoformat(),
+            "timezone": "America/New_York",
+            "frozen": frozen,
+            "candidate_count": len(props),
+            "selected_count": selected_count,
+            "source": payload.get("prop_line_cache_source"),
+            "unavailable": payload.get("unavailable") or [],
+        }, status_code=200 if frozen else 503)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Could not freeze " + market_name + " slate: " + type(exc).__name__) from exc
+
+
 @app.get("/api/cron/freeze-daily")
 def cron_freeze_daily(request: FastRequest):
     """Capture all five market boards at 7 a.m. Eastern."""
