@@ -1254,6 +1254,32 @@ def _team_factor_prop_adjustment(player_team, game, market):
         return {"available":False,"reason":"Team context unavailable: "+type(exc).__name__}
 
 
+def _apply_directional_play_grade(model):
+    """Grade the matchup in the direction of the selected side after odds are blended."""
+    if not isinstance(model, dict):
+        return model
+    defense = model.get("defense_vs_position") or {}
+    discrepancy_pct = defense.get("player_vs_allowed_pct")
+    side = str(model.get("best_side") or "").upper()
+    if discrepancy_pct is None or side not in ("OVER", "UNDER"):
+        model["matchup_grade"] = None
+        model["play_grade"] = None
+        return model
+    try:
+        directional = float(discrepancy_pct) * (1.0 if side == "OVER" else -1.0)
+        matchup_grade = max(0.0, min(100.0, 50.0 + directional * 2.5))
+        form_grade = float(model.get("form_grade") if model.get("form_grade") is not None else 50.0)
+        minutes_grade = float(model.get("minutes_grade") if model.get("minutes_grade") is not None else 50.0)
+        pace_grade = float(model.get("pace_grade") if model.get("pace_grade") is not None else 50.0)
+        model["directional_discrepancy_pct"] = round(directional, 2)
+        model["matchup_grade"] = round(matchup_grade, 1)
+        model["play_grade"] = round(0.50 * matchup_grade + 0.25 * form_grade + 0.15 * minutes_grade + 0.10 * pace_grade, 1)
+    except (TypeError, ValueError, OverflowError):
+        model["matchup_grade"] = None
+        model["play_grade"] = None
+    return model
+
+
 def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, market="", matchup_adjustment=None, team_context_adjustment=None):
     """Project count stats with an overdispersed count model; never truncate the upper tail at the observed maximum."""
     clean = [float(v) for v in values if v is not None and math.isfinite(float(v)) and float(v) >= 0]
@@ -2461,6 +2487,7 @@ def proprietary_market_board(market: str = "rebounds"):
             model = _apply_historical_calibration(model, market)
             if quote:
                 model = _score_blended_market(model, quote)
+                model = _apply_directional_play_grade(model)
             else:
                 model["recommendation"] = "PASS"
                 model["expected_value_pct"] = None
@@ -3695,6 +3722,7 @@ async def model_recalculate(request: FastRequest):
                  "over_odds": over_odds, "under_odds": under_odds, "books_used": ["User-entered sportsbook"],
                  "over_book": "User-entered", "under_book": "User-entered"}
         model = _score_blended_market(model, quote)
+        model = _apply_directional_play_grade(model)
         model.update({"player": player, "team": str(payload.get("team") or ""), "game": str(payload.get("game") or ""),
                       "market": market, "line": line, "over_odds": over_odds, "under_odds": under_odds,
                       "athlete_id": athlete_id, "sample_label": sample_label, "games_used": len(values),
