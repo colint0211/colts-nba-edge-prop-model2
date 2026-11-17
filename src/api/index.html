@@ -295,24 +295,56 @@ function positionDisplayName(position){
   return names[p]||String(position||'').trim()||'this position';
 }
 function reasoning(p){
-  const gap=Number(p.projection)-Number(p.line),rows=[];
-  rows.push('<div><b>Projection vs line:</b> '+(Number.isFinite(gap)?(gap>=0?'+':'')+num(gap,2)+' points '+(gap>=0?'above':'below')+' the line':'Unavailable')+'.</div>');
-  rows.push('<div><b>Recent scoring:</b> '+(p.recent5_avg==null?'Not supplied':num(p.recent5_avg,1)+' PPG')+'.</div>');
+  const market=String(p.market||'points').toLowerCase();
+  const labels={points:{name:'points',unit:'PPG'},rebounds:{name:'rebounds',unit:'RPG'},threes:{name:'3-pointers made',unit:'3PM'}};
+  const meta=labels[market]||{name:market,unit:'per game'};
+  const fmt=(v,d=2)=>v==null||!Number.isFinite(Number(v))?'not available':num(v,d);
+  const rows=[];
+  const projection=Number(p.projection),line=Number(p.line);
+  const gap=projection-line;
+  const side=String(p.best_side||'').toUpperCase();
+  rows.push('<div><b>Model vs sportsbook line:</b> Our projection is '+fmt(p.projection)+' '+esc(meta.unit)+' against a line of '+fmt(p.line,1)+'. The projection is '+(Number.isFinite(gap)?(gap>0?fmt(gap)+' above':gap<0?fmt(Math.abs(gap))+' below':'level with')+' the line':'not comparable with the available line')+'.</div>');
+
   const dvp=p.defense_vs_position;
-  if(String(p.market||'points').toLowerCase()==='points'&&dvp&&dvp.allowed_per_game!=null){
-    const playerPosition=dvp.position_name||positionDisplayName(dvp.position);
-    const adjustment=Number(dvp.adjustment_pct||0);
-    const impact=adjustment>0?'boosts':adjustment<0?'reduces':'does not change';
-    const adjustmentText=(adjustment>0?'+':'')+num(adjustment,2)+'%';
-    const leagueText=dvp.league_position_average==null?'':' (position league average '+num(dvp.league_position_average,1)+' PPG)';
-    const seasonText=dvp.source_season?' DVP baseline: '+esc(dvp.source_season)+'.':'';
-    rows.push('<div><b>Positional defense:</b> '+esc(dvp.opponent_name||dvp.opponent||"Opponent")+' allows '+num(dvp.allowed_per_game,1)+' PPG to '+esc(playerPosition)+leagueText+'. This '+impact+' the points projection by '+adjustmentText+'.'+seasonText+'</div>');
+  if(dvp&&dvp.available!==false&&dvp.allowed_per_game!=null){
+    const playerAvg=Number(dvp.player_average),allowed=Number(dvp.allowed_per_game);
+    const diff=Number(dvp.player_vs_allowed_difference);
+    const opponent=esc(dvp.opponent_name||dvp.opponent||'opponent');
+    const position=esc(dvp.position_name||positionDisplayName(dvp.position));
+    const allowedVsLeague=Number(dvp.league_relative_ratio);
+    const leagueText=Number.isFinite(allowedVsLeague)?' ('+(allowedVsLeague>1?'allows '+fmt((allowedVsLeague-1)*100,1)+'% more':allowedVsLeague<1?'allows '+fmt((1-allowedVsLeague)*100,1)+'% less':'league average')+' than the position baseline)':'';
+    rows.push('<div><b>Position matchup:</b> '+esc(p.player||'This player')+' averages '+fmt(playerAvg)+' '+esc(meta.unit)+'. '+opponent+' allows '+fmt(allowed)+' '+esc(meta.unit)+' to '+position+leagueText+'. That is a '+(Number.isFinite(diff)?(diff>0?'+':'')+fmt(diff)+' '+esc(meta.unit)+' difference versus this player’s average':'difference that could not be calculated')+'.</div>');
+    if(side==='OVER'||side==='UNDER'){
+      const favorable=Number.isFinite(diff)&&(side==='OVER'?diff>0:diff<0);
+      rows.push('<div><b>Does the matchup support '+side+'?</b> '+(favorable?'Yes. The positional allowance points in the same direction as the selected side.':'No / not clearly. The positional allowance does not support the selected side, so the projection must overcome that matchup signal.')+' The matchup changes the projection by '+(Number(dvp.adjustment_pct)>0?'+':'')+fmt(dvp.adjustment_pct,2)+'%.</div>');
+    }
+    if(dvp.source_season)rows.push('<div><b>Defense data:</b> '+esc(dvp.source_season)+'. Position resolved by '+esc(dvp.position_source||'the available roster data')+'; '+esc(dvp.position_confidence||'unrated')+' confidence.</div>');
+  }else{
+    rows.push('<div><b>Position matchup:</b> No verified opponent-by-position allowance is available for this player. The model does not invent one or apply a positional adjustment.</div>');
   }
-  rows.push('<div><b>Sample:</b> '+(p.games_used??'—')+' games used ('+esc(p.sample_label||'sample period unavailable')+').</div>');
-  rows.push('<div><b>Reliability:</b> '+esc(p.confidence||'not supplied')+' confidence. Probabilities are not calibrated until outcomes are tested.</div>');
+
+  const long=Number(p.long_run_mean),r5=Number(p.recent5_mean),r10=Number(p.recent10_mean);
+  if(Number.isFinite(long)||Number.isFinite(r5)||Number.isFinite(r10)){
+    rows.push('<div><b>Player form:</b> Full model sample '+fmt(p.long_run_mean)+' '+esc(meta.unit)+'; last 10 games '+fmt(p.recent10_mean)+'; last 5 games '+fmt(p.recent5_mean)+'. '+(Number.isFinite(r5)&&Number.isFinite(long)?(r5>long?'Recent five-game form is above':r5<long?'Recent five-game form is below':'Recent five-game form matches')+' the full-sample average.':'Recent-form comparison is unavailable.')+'</div>');
+  }else{
+    rows.push('<div><b>Player form:</b> Recent and full-sample averages were not supplied by the feed.</div>');
+  }
+
+  const projectedMinutes=Number(p.projected_minutes),baselineMinutes=Number(p.baseline_minutes);
+  if(Number.isFinite(projectedMinutes)||Number.isFinite(baselineMinutes)){
+    rows.push('<div><b>Playing time:</b> Projected '+fmt(p.projected_minutes,1)+' minutes versus a recent baseline of '+fmt(p.baseline_minutes,1)+' minutes. Minute adjustment: '+(Number(p.minute_adjustment_factor)>1?'+':'')+fmt((Number(p.minute_adjustment_factor)-1)*100,1)+'%.</div>');
+  }
+  const context=p.team_factor_context||{};
+  if(context.pace_ratio!=null&&Number.isFinite(Number(context.pace_ratio))){
+    const pacePct=(Number(context.pace_ratio)-1)*100;
+    rows.push('<div><b>Game environment:</b> Pace is '+(pacePct>0?fmt(pacePct,1)+'% faster':pacePct<0?fmt(Math.abs(pacePct),1)+'% slower':'near league average')+' than baseline. Team-context projection adjustment: '+(Number(p.team_context_adjustment_pct)>0?'+':'')+fmt(p.team_context_adjustment_pct,1)+'%.</div>');
+  }else{
+    rows.push('<div><b>Game environment:</b> No verified pace ratio was available; no pace claim is used in this explanation.</div>');
+  }
+  rows.push('<div><b>Sample and reliability:</b> '+(p.games_used??p.sample_size??'—')+' games used. '+esc(p.confidence||'Provisional')+' confidence. Model probabilities remain provisional until enough settled picks are available for calibration.</div>');
   if(isFallback(p))rows.push('<div class="reason-warning"><b>Fallback safeguard:</b> This projection uses previous-season data. It is shown for context only and is excluded from Top 5 EV.</div>');
   if(p.reason)rows.push('<div><b>Model note:</b> '+esc(p.reason)+'.</div>');
-  return '<details class="reasoning"><summary>Why this projection? Data &amp; confidence</summary><div class="reasoning-body">'+rows.join('')+'</div></details>';
+  return '<details class="reasoning" open><summary>Why this play? Player production, positional defense &amp; game context</summary><div class="reasoning-body">'+rows.join('')+'</div></details>';
 }
 function livePace(p){
   const st=playerLive(p)||{},g=gameFor(p)||{};
@@ -434,7 +466,7 @@ function card(p,i){
   '<div class="scorebox"><div><div class="score-label">Live game score</div><div class="score">'+esc(score)+'</div></div><div class="game-status">'+liveText+'</div></div>'+
   '<div class="statline"><div class="mini"><div class="mini-label">Live '+esc(({points:'points',rebounds:'rebounds',assists:'assists',steals:'steals',threes:'3-pointers made'})[p.market]||'stat')+' / prop line</div><div class="mini-value">'+(pts==null?'—':pts)+' <span>/ '+num(p.line)+' '+esc(({points:'pts',rebounds:'reb',assists:'ast',steals:'stl',threes:'3PM'})[p.market]||'stat')+'</span></div><div class="progress"><span style="width:'+progress+'%"></span></div></div><div class="mini"><div class="mini-label">Pre-game model projection</div><div class="mini-value">'+num(p.projection)+' <span>'+esc(({points:'pts',rebounds:'reb',assists:'ast',steals:'stl',threes:'3PM'})[p.market]||'stat')+'</span></div><div class="mini-label">'+num(p.best_probability)+'% best-side probability</div></div></div>'+sideValueHtml(p)+paceHtml+
   '<div class="card-bottom"><span>Pick: <b>'+esc(p.best_side||'—')+'</b> · '+num(p.edge_pp)+' pp edge</span><span class="ev">'+(p.expected_profit_per_100==null?'—':'$'+num(p.expected_profit_per_100,2)+' EV')+'</span></div>'+
-  '<div class="card-bottom"><span>Odds O '+esc(p.over_odds??'—')+' / U '+esc(p.under_odds??'—')+'</span><span>'+gradeHtml+'</span></div>'+injurySummary(p)+balldontlieSummary(p)+dvpSummary(p)+lineEditor(p)+reasoning(p)+'</article>';
+  '<div class="card-bottom"><span>Odds O '+esc(p.over_odds??'—')+' / U '+esc(p.under_odds??'—')+'</span><span>'+gradeHtml+'</span></div>'+injurySummary(p)+balldontlieSummary(p)+lineEditor(p)+reasoning(p)+reasoning(p)+'</article>';
 }
 function bpNorm(p,m){
   const pr=p.projection||{},participant=p.participant||{},playerObj=participant.player||{},event=p.event||{},over=p.over||{},under=p.under||{};
