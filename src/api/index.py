@@ -2286,6 +2286,8 @@ def _snapshot_daily_market_top5(market, props):
                 continue
             if not math.isfinite(ev) or ev <= 0 or sample < 8 or minutes < 12:
                 continue
+            if prop.get("play_grade") is None:
+                continue
             if prop.get("best_side") not in ("OVER", "UNDER") or prop.get("best_odds") is None:
                 continue
             eligible.append(prop)
@@ -2368,6 +2370,8 @@ def _revalidate_frozen_market_candidates(market, candidates, injury_feed):
         except (TypeError,ValueError,OverflowError):
             continue
         if not math.isfinite(ev) or ev <= 0 or sample < 8 or minutes < 12:
+            continue
+        if p.get("play_grade") is None:
             continue
         if p.get("best_side") not in ("OVER","UNDER") or p.get("best_odds") is None:
             continue
