@@ -677,7 +677,7 @@ def _dvp_matchup_adjustment(athlete_id,player_team,game,market,player_name=None)
    return unavailable("The positional-defense league average is invalid.",player_team=team_code,opponent=opponent,position=espn_position,stat=market)
   ratio=allowed/league_average
   # Player-specific discrepancy is calculated later, where the player's average is known.
-  factor=1.0)
+  factor=1.0
   position_names={"PG":"Point Guard","SG":"Shooting Guard","SF":"Small Forward","PF":"Power Forward","C":"Center","G":"Guard (PG/SG blended)","F":"Forward (SF/PF blended)"}
   stat_labels={"points":"points","rebounds":"rebounds","assists":"assists","steals":"steals","threes":"3-pointers made"}
   stat_units={"points":"PPG","rebounds":"RPG","assists":"APG","steals":"SPG","threes":"3PM"}
