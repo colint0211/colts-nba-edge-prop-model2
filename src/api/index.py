@@ -1152,13 +1152,14 @@ def _player_history(athlete_id, field, label):
     ]
     if any(row.get("date") for row in history_stats):
         history_stats.sort(key=lambda row: row.get("date") or "")
-    history_stats = history_stats[-25:]
+    # Retain the full regular-season sample so the matchup comparison uses true season PPG/RPG/3PM, not only the last 25 games.
+    history_stats = history_stats[-82:]
 
     # Minutes are used only when verified by event ID or exact game date.
     paired = [(a, b) for a, b in paired if math.isfinite(a["value"]) and math.isfinite(b["value"]) and 0 < b["value"] <= 60]
     if any(a.get("date") for a, _ in paired):
         paired.sort(key=lambda item: item[0].get("date") or "")
-    paired = paired[-25:]
+    paired = paired[-82:]
     values = [row["value"] for row in history_stats]
     minutes = [b["value"] for _, b in paired]
     sample_label = "2026-27 + 2025-26 limited fallback" if used_prior else "2026-27 regular season"
