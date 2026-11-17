@@ -2327,7 +2327,7 @@ def _revalidate_frozen_market_candidates(market, candidates, injury_feed):
     """Re-run the post-selection risk gate against today's immutable source snapshot."""
     ordered = sorted(
         [dict(p) for p in candidates if isinstance(p, dict)],
-        key=lambda p: float(p.get("expected_value_pct") if p.get("expected_value_pct") is not None else -1e9),
+        key=lambda p: (float(p.get("play_grade") if p.get("play_grade") is not None else -1.0), float(p.get("expected_value_pct") if p.get("expected_value_pct") is not None else -1e9)),
         reverse=True,
     )
     eligible = []
