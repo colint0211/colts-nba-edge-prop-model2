@@ -591,7 +591,7 @@ function render(){
   const a=bpCache[market];
   if(a&&a.error){el('count').textContent='Model unavailable';el('cards').innerHTML='<div class="empty">'+esc(a.error)+'</div>';return}
   if(!Array.isArray(a)){el('count').textContent='Loading';el('cards').innerHTML='<div class="empty">Loading proprietary '+esc(bpMarketLabel(market))+' model…</div>';return}
-  list=a.slice().sort((x,y)=>Number(y.expected_profit_per_100??-999)-Number(x.expected_profit_per_100??-999));
+  list=a.slice().sort((x,y)=>Number(y.play_grade??-1)-Number(x.play_grade??-1)||Number(y.expected_profit_per_100??-999)-Number(x.expected_profit_per_100??-999));
   if(q)list=list.filter(p=>(p.player+' '+p.team+' '+p.game).toLowerCase().includes(q));
   list=list.slice(0,5);
   el('count').textContent=list.length+' model projections';
