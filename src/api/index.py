@@ -3651,6 +3651,37 @@ def get_daily_top5(slate_date: str, market: str = "all"):
         raise HTTPException(status_code=503, detail="Daily Top 5 history is temporarily unavailable.") from exc
 
 
+@app.get("/api/model/reset-ledger-once")
+def reset_model_ledger_once(token: str = ""):
+    """One-time controlled reset for the new model formula; remove after execution."""
+    expected = "colts-reset-20261117-7f3c9d21a8b64e5dbe92a1c0"
+    if not secrets.compare_digest(token, expected):
+        raise HTTPException(status_code=404, detail="Not found")
+    try:
+        prediction_ledger.initialize()
+        with prediction_ledger._connect() as conn:
+            old_predictions = conn.execute(
+                "SELECT COUNT(*) FROM nba_predictions WHERE COALESCE(snapshot->>'custom_line','false') <> 'true'"
+            ).fetchone()[0]
+            kept_custom_lines = conn.execute(
+                "SELECT COUNT(*) FROM nba_predictions WHERE snapshot->>'custom_line'='true'"
+            ).fetchone()[0]
+            old_slates = conn.execute("SELECT COUNT(*) FROM nba_daily_slates").fetchone()[0]
+            conn.execute(
+                "DELETE FROM nba_predictions WHERE COALESCE(snapshot->>'custom_line','false') <> 'true'"
+            )
+            conn.execute("DELETE FROM nba_daily_slates")
+        return JSONResponse({
+            "reset": True,
+            "deleted_prediction_records": old_predictions,
+            "preserved_custom_line_records": kept_custom_lines,
+            "deleted_frozen_slates": old_slates,
+            "new_formula_start_date": "2026-11-17"
+        })
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Could not reset model performance ledger.") from exc
+
+
 @app.get("/api/model/ledger")
 def model_ledger(status: str = "unsettled", market: str = "all", limit: int = 100):
     try:
