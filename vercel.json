@@ -25,22 +25,6 @@
       "schedule": "0 12 * * *"
     },
     {
-      "path": "/api/cron/freeze-daily/assists",
-      "schedule": "0 11 * * *"
-    },
-    {
-      "path": "/api/cron/freeze-daily/assists",
-      "schedule": "0 12 * * *"
-    },
-    {
-      "path": "/api/cron/freeze-daily/steals",
-      "schedule": "0 11 * * *"
-    },
-    {
-      "path": "/api/cron/freeze-daily/steals",
-      "schedule": "0 12 * * *"
-    },
-    {
       "path": "/api/cron/freeze-daily/threes",
       "schedule": "0 11 * * *"
     },
