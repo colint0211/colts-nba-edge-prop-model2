@@ -39,6 +39,7 @@ LIVE_UPSTREAM = "https://colts-nba-edge-prop-model-3xj6ghyhl-colin-82ad.vercel.a
 app = FastAPI()
 app.include_router(away_ats_router)
 BP_MARKETS = {"points": 156, "rebounds": 157, "assists": 151, "steals": 160, "threes": 162}
+ACTIVE_PROP_MARKETS = ("points", "rebounds", "threes")
 @app.get("/", response_class=HTMLResponse)
 async def home():
     return HTMLResponse(HTML)
@@ -675,7 +676,8 @@ def _dvp_matchup_adjustment(athlete_id,player_team,game,market,player_name=None)
   if league_average<=0:
    return unavailable("The positional-defense league average is invalid.",player_team=team_code,opponent=opponent,position=espn_position,stat=market)
   ratio=allowed/league_average
-  factor=max(0.92,min(1.08,1.0+(ratio-1.0)*0.30))
+  # Player-specific discrepancy is calculated later, where the player's average is known.
+  factor=1.0)
   position_names={"PG":"Point Guard","SG":"Shooting Guard","SF":"Small Forward","PF":"Power Forward","C":"Center","G":"Guard (PG/SG blended)","F":"Forward (SF/PF blended)"}
   stat_labels={"points":"points","rebounds":"rebounds","assists":"assists","steals":"steals","threes":"3-pointers made"}
   stat_units={"points":"PPG","rebounds":"RPG","assists":"APG","steals":"SPG","threes":"3PM"}
@@ -687,9 +689,9 @@ def _dvp_matchup_adjustment(athlete_id,player_team,game,market,player_name=None)
    "blend_weights":blend_weights,"opponent":opponent,"opponent_name":_TEAM_NAMES.get(opponent,opponent),
    "stat":market,"stat_label":stat_labels[market],"stat_unit":stat_units[market],
    "allowed_per_game":round(allowed,2),"league_position_average":round(league_average,2),
-   "league_relative_ratio":round(ratio,3),"adjustment_pct":round((factor-1.0)*100,2),"factor":round(factor,4),
+   "league_relative_ratio":round(ratio,3),"adjustment_pct":0.0,"factor":1.0,
    "source":"NBA House individual-position "+stat+" allowed table","source_season":season,
-   "method":position_method+" "+stat_labels[market]+" allowed per game vs matching-position league average; 30% dampening; adjustment capped at +/-8%"}
+   "method":position_method+" "+stat_labels[market]+" allowed per game compared directly with this player's average; player-specific discrepancy drives matchup grade"}
  except Exception as exc:
   return unavailable("Positional-defense calculation failed: "+type(exc).__name__+".")
 
@@ -1283,13 +1285,23 @@ def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, ma
         target_mean *= minute_factor
 
     matchup_factor = 1.0
+    positional_discrepancy = None
+    directional_discrepancy_pct = 0.0
+    matchup_grade = 50.0
     if isinstance(matchup_adjustment, dict) and matchup_adjustment.get("available", True):
         try:
-            candidate = float(matchup_adjustment.get("factor", 1.0))
-            if math.isfinite(candidate):
-                matchup_factor = max(0.92, min(1.08, candidate))
+            allowed = float(matchup_adjustment.get("allowed_per_game"))
+            if math.isfinite(allowed) and long_mean > 0:
+                positional_discrepancy = allowed - long_mean
+                discrepancy_pct = positional_discrepancy / long_mean * 100.0
+                # Larger favorable gaps produce higher grades. Projection impact is damped and capped.
+                matchup_factor = max(0.92, min(1.08, 1.0 + discrepancy_pct / 100.0 * 0.25))
                 target_mean *= matchup_factor
-        except (TypeError, ValueError):
+                matchup_adjustment["player_average"] = round(long_mean, 2)
+                matchup_adjustment["player_vs_allowed_difference"] = round(positional_discrepancy, 2)
+                matchup_adjustment["player_vs_allowed_pct"] = round(discrepancy_pct, 2)
+                matchup_adjustment["adjustment_pct"] = round((matchup_factor - 1.0) * 100.0, 2)
+        except (TypeError, ValueError, OverflowError):
             matchup_factor = 1.0
 
     team_context_factor = 1.0
@@ -1353,6 +1365,20 @@ def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, ma
     best = max([(v, side, prob, price) for v, side, prob, price in [
         (over_ev, "OVER", over_p, over_odds), (under_ev, "UNDER", under_p, under_odds)
     ] if v is not None], key=lambda x: x[0], default=None)
+    selected_side = best[1] if best else None
+    if positional_discrepancy is not None and long_mean > 0:
+        directional_discrepancy_pct = (positional_discrepancy / long_mean * 100.0) * (1.0 if selected_side == "OVER" else -1.0 if selected_side == "UNDER" else 0.0)
+        matchup_grade = max(0.0, min(100.0, 50.0 + directional_discrepancy_pct * 2.5))
+    form_grade = max(0.0, min(100.0, 50.0 + ((recent5_mean - long_mean) / max(long_mean, 0.1)) * 250.0))
+    minutes_grade = max(0.0, min(100.0, 50.0 + (minute_factor - 1.0) * 250.0))
+    pace_ratio = (team_context_adjustment or {}).get("pace_ratio") if isinstance(team_context_adjustment, dict) else None
+    try:
+        pace_grade = max(0.0, min(100.0, 50.0 + (float(pace_ratio) - 1.0) * 250.0)) if pace_ratio is not None else 50.0
+    except (TypeError, ValueError, OverflowError):
+        pace_grade = 50.0
+    play_grade = 0.50 * matchup_grade + 0.25 * form_grade + 0.15 * minutes_grade + 0.10 * pace_grade
+    if positional_discrepancy is None:
+        play_grade = None
     return {
         "projection": round(target_mean, 2),
         "projected_minutes": round(projected_min, 1) if projected_min is not None else None,
@@ -1371,6 +1397,13 @@ def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, ma
         "distribution_std_dev": round(std_dev, 2), "minute_adjustment_factor": round(minute_factor, 3),
         "minutes_sample_size": len(valid_minutes),
         "matchup_adjustment_pct": round((matchup_factor - 1.0) * 100, 2),
+        "matchup_grade": round(matchup_grade, 1) if positional_discrepancy is not None else None,
+        "form_grade": round(form_grade, 1),
+        "minutes_grade": round(minutes_grade, 1),
+        "pace_grade": round(pace_grade, 1),
+        "play_grade": round(play_grade, 1) if play_grade is not None else None,
+        "positional_discrepancy": round(positional_discrepancy, 2) if positional_discrepancy is not None else None,
+        "directional_discrepancy_pct": round(directional_discrepancy_pct, 2) if positional_discrepancy is not None else None,
         "team_context_adjustment_pct": round((team_context_factor - 1.0) * 100, 2),
         "team_factor_context": team_context_adjustment,
         "defense_vs_position": matchup_adjustment,
@@ -2203,7 +2236,7 @@ def _snapshot_daily_market_top5(market, props):
             prediction_ledger.save_predictions(calibration_rows, market)
         ordered = sorted(
             [dict(p, market=market) for p in (props or []) if isinstance(p, dict)],
-            key=lambda item: float(item.get("expected_value_pct") if item.get("expected_value_pct") is not None else -1e9),
+            key=lambda item: (float(item.get("play_grade") if item.get("play_grade") is not None else -1.0), float(item.get("expected_value_pct") if item.get("expected_value_pct") is not None else -1e9)),
             reverse=True,
         )
         if not ordered:
@@ -2230,7 +2263,7 @@ def _snapshot_daily_market_top5(market, props):
             if prop.get("best_side") not in ("OVER", "UNDER") or prop.get("best_odds") is None:
                 continue
             eligible.append(prop)
-        eligible.sort(key=lambda item: float(item.get("expected_value_pct") or 0), reverse=True)
+        eligible.sort(key=lambda item: (float(item.get("play_grade") if item.get("play_grade") is not None else -1.0), float(item.get("expected_value_pct") or 0)), reverse=True)
 
         # The expensive injury/workload lookups happen only for provisional picks
         # and, if one is removed, the next best candidate needed to fill the slot.
@@ -2341,8 +2374,8 @@ def _revalidate_frozen_market_candidates(market, candidates, injury_feed):
 @app.get("/api/proprietary-market-board")
 def proprietary_market_board(market: str = "rebounds"):
     market = market.lower().strip()
-    if market not in STAT_FIELDS:
-        raise HTTPException(status_code=400, detail="Use points, rebounds, assists, steals, or threes.")
+    if market not in ACTIVE_PROP_MARKETS:
+        raise HTTPException(status_code=404, detail="Active model markets are points, rebounds, and threes.")
     now = time.time()
     cached_board = _BP_BOARD_CACHE.get(market)
     injury_feed = _load_official_injury_feed()
@@ -2529,7 +2562,9 @@ def proprietary_market_board(market: str = "rebounds"):
 
 @app.get("/api/cron/freeze-daily/{market_name}")
 def cron_freeze_daily_market(market_name: str, request: FastRequest):
-    """Freeze one market per invocation so five markets cannot exceed one function timeout."""
+    """Freeze one active market per invocation so market jobs stay within timeout."""
+    if market_name not in ACTIVE_PROP_MARKETS:
+        raise HTTPException(status_code=404, detail="Only points, rebounds, and threes are active freeze markets.")
     secret = os.getenv("CRON_SECRET", "")
     if not secret or not secrets.compare_digest(request.headers.get("authorization", ""), "Bearer " + secret):
         raise HTTPException(status_code=401, detail="Unauthorized")
