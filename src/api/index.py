@@ -2371,7 +2371,11 @@ def _revalidate_frozen_market_candidates(market, candidates, injury_feed):
     """Re-run the post-selection risk gate against today's immutable source snapshot."""
     ordered = sorted(
         [dict(p) for p in candidates if isinstance(p, dict)],
-        key=lambda p: (float(p.get("play_grade") if p.get("play_grade") is not None else -1.0), float(p.get("expected_value_pct") if p.get("expected_value_pct") is not None else -1e9)),
+        key=lambda p: (
+            float(p.get("expected_value_pct") or 0),
+            float(p.get("edge_pp") or 0),
+            float(p.get("play_grade") if p.get("play_grade") is not None else -1.0),
+        ),
         reverse=True,
     )
     eligible = []
@@ -2383,9 +2387,9 @@ def _revalidate_frozen_market_candidates(market, candidates, injury_feed):
             ev=float(p.get("expected_value_pct"))
             sample=int(p.get("sample_size") or p.get("games_used") or 0)
             minutes=float(p.get("projected_minutes"))
+            edge=float(p.get("edge_pp") or 0.0)
         except (TypeError,ValueError,OverflowError):
             continue
-        edge = float(p.get("edge_pp") or 0.0)
         if not math.isfinite(ev) or ev < 2.0 or edge < 2.0 or sample < 10 or minutes < 15:
             continue
         if p.get("play_grade") is None:
