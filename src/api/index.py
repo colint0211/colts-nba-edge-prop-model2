@@ -3676,7 +3676,10 @@ def model_record_groups(slate_date: str):
 def audit_daily_slate_snapshots(slate_date: str):
     """Read saved slate timestamps and counts without odds retrieval or settlement."""
     try:
-        return JSONResponse(prediction_ledger.audit_daily_slates(slate_date))
+        result = prediction_ledger.audit_daily_slates(slate_date)
+        game_model.initialize()
+        result["markets"].update(game_model.audit_game_slates(slate_date))
+        return JSONResponse(result)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
