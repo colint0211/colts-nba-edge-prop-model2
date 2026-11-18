@@ -698,7 +698,7 @@ def _dvp_matchup_adjustment(athlete_id,player_team,game,market,player_name=None)
    "league_relative_ratio":round(ratio,3),"sample_games":sample_games,
    "sample_reliability":round(sample_games/(sample_games+8.0),3) if sample_games is not None and sample_games>0 else 0.35,
    "adjustment_pct":0.0,"factor":1.0,
-   "source":"NBA House/Tank01 current-season individual-position allowance","source_season":season,
+   "source":"Tank01 current-season positional allowance" if str(season).startswith("Tank01 current season") else "NBA House previous-season positional allowance","source_season":season,
    "method":position_method+" "+stat_labels[market]+" allowance normalized to league positional average; sample-shrunk matchup factor; player average shown for context only"}
  except Exception as exc:
   return unavailable("Positional-defense calculation failed: "+type(exc).__name__+".")
