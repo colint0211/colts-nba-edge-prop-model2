@@ -4030,3 +4030,62 @@ async def api_proxy(path: str, request: FastRequest):
         return Response(content=e.read(), status_code=e.code, media_type=e.headers.get("content-type", "application/json"))
     except (URLError, TimeoutError) as e:
         raise HTTPException(status_code=502, detail="Upstream API unavailable") from e
+
+@app.get("/api/model/backtest/archive-check")
+def backtest_archive_check():
+    """Check whether the connected PropLine key can export historical resolved NBA props."""
+    api_key = os.getenv("PROPLINE_API_KEY", "").strip()
+    if not api_key:
+        raise HTTPException(status_code=503, detail="PROPLINE_API_KEY is missing.")
+    from datetime import datetime, timezone
+    from urllib.parse import urlencode
+    import csv
+    import io
+
+    since = "2026-10-21T00:00:00Z"
+    until = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    markets = {
+        "points": "player_points",
+        "rebounds": "player_rebounds",
+        "threes": "player_threes",
+    }
+    results = {}
+    for label, market_key in markets.items():
+        params = urlencode({
+            "sport": "basketball_nba",
+            "market": market_key,
+            "bookmaker": "draftkings",
+            "since": since,
+            "until": until,
+            "apiKey": api_key,
+        })
+        request = Request(
+            "https://api.prop-line.com/v1/exports/resolved-props?" + params,
+            headers={"User-Agent": "ColtsNBAEdge/1.0", "Accept": "text/csv"},
+        )
+        try:
+            with urlopen(request, timeout=20) as response:
+                body = response.read().decode("utf-8-sig", "replace")
+                archive_start = response.headers.get("X-PropLine-Archive-Starts")
+                window_start = response.headers.get("X-PropLine-Export-Window-Start")
+            reader = csv.DictReader(io.StringIO(body))
+            count = sum(1 for _ in reader)
+            results[label] = {
+                "http_status": 200,
+                "rows": count,
+                "columns": reader.fieldnames or [],
+                "archive_starts": archive_start,
+                "effective_window_start": window_start,
+            }
+        except HTTPError as exc:
+            detail = exc.read().decode("utf-8", "replace")[:500]
+            results[label] = {"http_status": exc.code, "error": detail}
+        except Exception as exc:
+            results[label] = {"error": type(exc).__name__ + ": " + str(exc)[:250]}
+    return {
+        "status": "archive_access_check",
+        "date_range": {"since": since, "until": until},
+        "bookmaker": "draftkings",
+        "results": results,
+        "note": "No model weights or production predictions are changed by this diagnostic.",
+    }
