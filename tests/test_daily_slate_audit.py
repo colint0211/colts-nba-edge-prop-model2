@@ -1,7 +1,8 @@
 import unittest
 from unittest.mock import patch
 
-from datetime import datetime, timezone\nfrom src.api import game_model, prediction_ledger
+from datetime import datetime, timezone
+from src.api import game_model, prediction_ledger
 
 
 class DailySlateAuditTests(unittest.TestCase):
