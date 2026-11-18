@@ -1774,27 +1774,35 @@ def _apply_historical_calibration(model, market):
     return model
 
 def _score_blended_market(model, market_quote):
-    """Keep the proprietary probability independent; use the book only to price and measure edge."""
+    """Price a conservative probability blend until the proprietary model proves calibration."""
     model_over = max(0.0, min(1.0, model["over_probability"] / 100.0))
     model_under = max(0.0, min(1.0, model["under_probability"] / 100.0))
     model_push = max(0.0, min(0.25, model.get("push_probability", 0.0) / 100.0))
     model_mass = max(1e-9, model_over + model_under)
     model_over_cond = model_over / model_mass
     model_under_cond = model_under / model_mass
-    market_over = market_quote["over_probability"]
-    market_under = market_quote["under_probability"]
+    market_over = float(market_quote["over_probability"])
+    market_under = float(market_quote["under_probability"])
     market_mass = max(1e-9, market_over + market_under)
     market_over_cond = market_over / market_mass
     market_under_cond = market_under / market_mass
 
-    # No fixed 50/50 opinion pool: the proprietary model must stand on its own.
-    # Sportsbook prices are used only for expected value and market-relative edge.
-    over = model_over
-    under = model_under
+    # The model was recently reset and has not earned independent probability
+    # authority yet. Shrink its conditional probabilities 35% toward the
+    # two-sided no-vig market prior until the historical calibration gate is met.
+    # Once calibrated, retain a smaller 15% market prior rather than overreacting
+    # to a short-lived model edge. This changes betting probabilities, not projections.
+    calibrated = bool(model.get("calibration_applied"))
+    market_weight = 0.15 if calibrated else 0.35
+    blended_over_cond = _log_pool(model_over_cond, market_over_cond, weight=market_weight)
+    blended_under_cond = 1.0 - blended_over_cond
+    over = blended_over_cond * model_mass
+    under = blended_under_cond * model_mass
+
     choices = []
     for side, prob, conditional_prob, market_prob, loss, odds in (
-        ("OVER", over, model_over_cond, market_over_cond, under, market_quote["over_odds"]),
-        ("UNDER", under, model_under_cond, market_under_cond, over, market_quote["under_odds"]),
+        ("OVER", over, blended_over_cond, market_over_cond, under, market_quote["over_odds"]),
+        ("UNDER", under, blended_under_cond, market_under_cond, over, market_quote["under_odds"]),
     ):
         ev = _odds_profit(prob, loss, odds)
         if ev is not None:
@@ -1802,17 +1810,19 @@ def _score_blended_market(model, market_quote):
     best = max(choices, key=lambda x: x[0], default=None)
     over_ev = next((item[0] for item in choices if item[1] == "OVER"), None)
     under_ev = next((item[0] for item in choices if item[1] == "UNDER"), None)
-    over_edge = (model_over_cond - market_over_cond) * 100
-    under_edge = (model_under_cond - market_under_cond) * 100
+    over_edge = (blended_over_cond - market_over_cond) * 100
+    under_edge = (blended_under_cond - market_under_cond) * 100
     model.update({
         "over_ev_pct": round(over_ev * 100, 2) if over_ev is not None else None,
         "under_ev_pct": round(under_ev * 100, 2) if under_ev is not None else None,
         "over_edge_pp": round(over_edge, 2),
         "under_edge_pp": round(under_edge, 2),
         "selection_reason": (
-            "Selected " + best[1] + " because it has the higher expected value at the listed odds; "
+            "Selected " + best[1] + " using the risk-adjusted probability at the available two-sided price; "
             "the projection is an average, not the selected betting side."
         ) if best else "No side has a calculable expected value at the listed odds.",
+        "proprietary_over_probability": round(model_over * 100, 2),
+        "proprietary_under_probability": round(model_under * 100, 2),
         "model_over_probability": round(model_over * 100, 2),
         "model_under_probability": round(model_under * 100, 2),
         "market_over_probability": round(market_over_cond * 100, 2),
@@ -1828,13 +1838,13 @@ def _score_blended_market(model, market_quote):
         "recommendation": "VALUE CANDIDATE" if best and best[0] > 0.05 else ("LEAN / VERIFY" if best and best[0] > 0 else "PASS"),
         "kelly_fraction_pct": round(max(0.0, (best[2] * _american_payout(best[3]) - best[4]) /
             max(1e-9, _american_payout(best[3]) * (best[2] + best[4]))) * 100, 2) if best else None,
-        "blend_method": "No probability blend; independent proprietary probability priced against DraftKings/FanDuel odds",
-        "market_weight": 0.0,
+        "blend_method": "Geometric probability shrinkage toward the two-sided no-vig market prior",
+        "market_weight": round(market_weight * 100, 1),
         "market_books": market_quote["books_used"],
         "best_over_book": market_quote["over_book"],
         "best_under_book": market_quote["under_book"],
         "calibration_status": model.get("calibration_status", "collecting data"),
-        "calibration_applied": bool(model.get("calibration_applied", False)),
+        "calibration_applied": calibrated,
     })
     return model
 
@@ -2285,14 +2295,19 @@ def _snapshot_daily_market_top5(market, props):
                 minutes = float(prop.get("projected_minutes"))
             except (TypeError, ValueError, OverflowError):
                 continue
-            if not math.isfinite(ev) or ev <= 0 or sample < 8 or minutes < 12:
+            edge = float(prop.get("edge_pp") or 0.0)
+            if not math.isfinite(ev) or ev < 2.0 or edge < 2.0 or sample < 10 or minutes < 15:
                 continue
             if prop.get("play_grade") is None:
                 continue
             if prop.get("best_side") not in ("OVER", "UNDER") or prop.get("best_odds") is None:
                 continue
             eligible.append(prop)
-        eligible.sort(key=lambda item: (float(item.get("play_grade") if item.get("play_grade") is not None else -1.0), float(item.get("expected_value_pct") or 0)), reverse=True)
+        eligible.sort(key=lambda item: (
+            float(item.get("expected_value_pct") or 0),
+            float(item.get("edge_pp") or 0),
+            float(item.get("play_grade") if item.get("play_grade") is not None else -1.0),
+        ), reverse=True)
 
         # The expensive injury/workload lookups happen only for provisional picks
         # and, if one is removed, the next best candidate needed to fill the slot.
@@ -2370,7 +2385,8 @@ def _revalidate_frozen_market_candidates(market, candidates, injury_feed):
             minutes=float(p.get("projected_minutes"))
         except (TypeError,ValueError,OverflowError):
             continue
-        if not math.isfinite(ev) or ev <= 0 or sample < 8 or minutes < 12:
+        edge = float(p.get("edge_pp") or 0.0)
+        if not math.isfinite(ev) or ev < 2.0 or edge < 2.0 or sample < 10 or minutes < 15:
             continue
         if p.get("play_grade") is None:
             continue
@@ -2601,8 +2617,8 @@ def cron_freeze_daily_market(market_name: str, request: FastRequest):
     if not secret or not secrets.compare_digest(request.headers.get("authorization", ""), "Bearer " + secret):
         raise HTTPException(status_code=401, detail="Unauthorized")
     market_name = market_name.lower().strip()
-    if market_name not in ("points", "rebounds", "assists", "steals", "threes"):
-        raise HTTPException(status_code=400, detail="Unsupported NBA market.")
+    if market_name not in ACTIVE_PROP_MARKETS:
+        raise HTTPException(status_code=400, detail="Only points, rebounds, and threes are active markets.")
     now_et = datetime.now(ZoneInfo("America/New_York"))
     if now_et.hour != 7:
         return JSONResponse({
@@ -2644,7 +2660,7 @@ def cron_freeze_daily(request: FastRequest):
     if now_et.hour != 7:
         return JSONResponse({"status": "outside_freeze_window", "eastern_time": now_et.isoformat(), "required_window": "07:00-07:59 America/New_York"})
     results = {}
-    for market_name in ("points", "rebounds", "assists", "steals", "threes"):
+    for market_name in ACTIVE_PROP_MARKETS:
         try:
             response = proprietary_market_board(market_name)
             payload = json.loads(response.body.decode("utf-8"))
