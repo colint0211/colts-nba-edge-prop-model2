@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from src.api import prediction_ledger
+from datetime import datetime, timezone\nfrom src.api import game_model, prediction_ledger
 
 
 class DailySlateAuditTests(unittest.TestCase):
@@ -31,6 +31,52 @@ class DailySlateAuditTests(unittest.TestCase):
         self.assertFalse(result["markets"]["sides"]["supported"])
         self.assertFalse(result["markets"]["totals"]["supported"])
         self.assertEqual(get_daily_slate.call_count, 5)
+
+
+    @patch("src.api.game_model._connect")
+    def test_audits_side_total_and_experimental_snapshots_without_settlement(self, connect):
+        class Cursor:
+            def __init__(self, rows):
+                self.rows = rows
+
+            def fetchall(self):
+                return self.rows
+
+            def fetchone(self):
+                return self.rows[0] if self.rows else None
+
+        class Connection:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def execute(self, query, params):
+                if "FROM nba_game_slates" in query:
+                    return Cursor([
+                        ("sides", [{"selection": "BOS"}], datetime(2026, 11, 18, 12, 7, tzinfo=timezone.utc)),
+                        ("totals", [], datetime(2026, 11, 18, 12, 8, tzinfo=timezone.utc)),
+                    ])
+                if "FROM nba_experimental_totals" in query:
+                    return Cursor([(
+                        2,
+                        datetime(2026, 11, 18, 12, 9, tzinfo=timezone.utc),
+                        datetime(2026, 11, 18, 12, 10, tzinfo=timezone.utc),
+                    )])
+                raise AssertionError("Unexpected query")
+
+        connect.return_value = Connection()
+        result = game_model.audit_game_slates("2026-11-18")
+
+        self.assertTrue(result["sides"]["locked"])
+        self.assertEqual(result["sides"]["candidate_count"], 1)
+        self.assertEqual(result["sides"]["classification"], "research_only")
+        self.assertFalse(result["totals"]["locked"])
+        self.assertEqual(result["totals"]["candidate_count"], 0)
+        self.assertEqual(result["totals"]["status"], "disabled_empty_placeholder")
+        self.assertEqual(result["experimental_totals"]["candidate_count"], 2)
+        self.assertEqual(result["experimental_totals"]["status"], "research_only_saved")
 
     def test_rejects_invalid_slate_date(self):
         with self.assertRaises(ValueError):
