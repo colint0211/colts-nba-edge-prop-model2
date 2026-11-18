@@ -12,10 +12,12 @@ on:
       - src/api/nba_free_ats_backtest.py
       - src/api/game_model.py
       - src/api/index.py
+      - src/api/prediction_ledger.py
       - tests/test_game_model_player_impact.py
       - tests/test_historical_ats_backtest.py
       - tests/test_free_ats_backtest.py
       - tests/test_propline_draftkings_only.py
+      - tests/test_daily_slate_audit.py
       - .github/workflows/nba-historical-backtest.yml
       - requirements.txt
       - pyproject.toml
