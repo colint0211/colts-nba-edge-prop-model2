@@ -901,3 +901,51 @@ def get_daily_slate(market, slate_date):
         "candidates": candidates if isinstance(candidates, list) else [],
         "created_at": row[1].isoformat() if row[1] else None,
     }
+
+
+def audit_daily_slates(slate_date):
+    """Read-only audit of immutable prop-market slate snapshots for one Eastern date."""
+    import re
+
+    slate_date = str(slate_date or "").strip()
+    if not re.fullmatch(r"\\d{4}-\\d{2}-\\d{2}", slate_date):
+        raise ValueError("Invalid slate date; expected YYYY-MM-DD.")
+
+    markets = {}
+    for market in ("points", "rebounds", "assists", "steals", "threes"):
+        row = get_daily_slate(market, slate_date)
+        if row is None:
+            markets[market] = {
+                "supported": True,
+                "locked": False,
+                "status": "missing",
+                "created_at": None,
+                "candidate_count": None,
+            }
+            continue
+        candidates = row.get("candidates")
+        candidates = candidates if isinstance(candidates, list) else []
+        markets[market] = {
+            "supported": True,
+            "locked": True,
+            "status": "saved",
+            "created_at": row.get("created_at"),
+            "candidate_count": len(candidates),
+        }
+
+    for market in ("sides", "totals"):
+        markets[market] = {
+            "supported": False,
+            "locked": False,
+            "status": "not_persisted",
+            "created_at": None,
+            "candidate_count": None,
+            "reason": "The current nba_daily_slates schema stores only the five player-prop markets.",
+        }
+
+    return {
+        "slate_date": slate_date,
+        "timezone": "America/New_York",
+        "read_only": True,
+        "markets": markets,
+    }
