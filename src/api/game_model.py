@@ -16,7 +16,7 @@ from urllib.request import Request, urlopen
 
 _ET = "America/New_York"
 # Latest formula-aligned walk-forward validation showed material total-projection
-# bias (+4.53 points on the untouched 2026-27 holdout). Keep totals out of the
+# bias (+2.84 points on the latest 205-game 2026-27 holdout). Keep totals out of the
 # official ledger until a new, independently validated calibration passes.
 _TOTALS_OFFICIAL_ENABLED = False
 _PROP_CACHE = {"at": 0.0, "events": None, "quota": {}}
@@ -1079,7 +1079,7 @@ def build_board(force=False,preview_date=None):
         "season":ratings["season"],"team_rating_quality":ratings.get("data_quality"),"team_rating_fallback_used":ratings.get("fallback_used",False),"team_rating_fallback_reason":ratings.get("fallback_reason"),"team_count":len(ratings.get("teams") or {}),"injuries":injury_meta.get("status","unavailable"),
         "player_impact":"Basketball-Reference minutes + shrunk BPM replacement-level proxy (not on/off); only current-season contributors receive incremental OUT adjustments. Zero-appearance OUT players get zero incremental adjustment to avoid double-counting the current-season team baseline; questionable/doubtful/day-to-day remain blocked pending calibrated availability probabilities",
         "player_impact_snapshot":_load_player_impact_snapshot(ratings["season"]).get("meta"),
-        "totals_validation":{"official_picks_enabled":_TOTALS_OFFICIAL_ENABLED,"status":"disabled_pending_holdout_bias_recalibration","holdout_total_bias_points":4.529},
+        "totals_validation":{"official_picks_enabled":_TOTALS_OFFICIAL_ENABLED,"status":"disabled_pending_holdout_bias_recalibration","holdout_total_bias_points":2.841},
         "reviewed_games":len(review_games),
         "injury_impact_audit":[{"event_id":event_id,"matchup":game_by_id[event_id]["matchup"],
           "home":{"team":game_by_id[event_id]["home"],"points":home.get("points"),"unpriced":home.get("unpriced_injury"),"players":home.get("players",[])},
@@ -1087,7 +1087,7 @@ def build_board(force=False,preview_date=None):
           for event_id,(home,away) in reviewed.items()],
         "prop_line_quota":quota,"saved_sides":side_saved,"saved_totals":total_saved,
         "unavailable_games":unique_unavailable[:10]},
-      "model_policy":"Team-efficiency ratings projection with explicit early-season uncertainty. Side spread probabilities use a 14.789-point margin residual SD fitted on 2024-25/2025-26 training seasons only (15.8 for derived early-season ratings); 2026-27 remained untouched. This validates winner-probability scale, not ATS cover calibration: historical DraftKings closing lines, spread-cover calibration, ROI and CLV are unavailable. Market odds are used only for EV and no-vig comparison, never as the model probability. Official game totals are disabled because the untouched 2026-27 holdout showed +4.53 points of total bias; sides remain preview candidates subject to injury and edge gates.",
+      "model_policy":"Team-efficiency ratings projection with explicit early-season uncertainty. Side spread probabilities use a 14.789-point margin residual SD fitted on 2024-25/2025-26 training seasons only (15.8 for derived early-season ratings); 2026-27 remained untouched. This validates winner-probability scale, not ATS cover calibration: historical DraftKings closing lines, spread-cover calibration, ROI and CLV are unavailable. Market odds are used only for EV and no-vig comparison, never as the model probability. Official game totals are disabled because the untouched 2026-27 holdout showed +2.84 points of total bias; sides remain preview candidates subject to injury and edge gates.",
       "thresholds":{"minimum_edge_pp":4.0 if ratings.get("data_quality")=="derived_early_season" else 2.5,
         "maximum_edge_pp":12.0 if ratings.get("data_quality")=="derived_early_season" else None,
         "minimum_ev_pct":2.0 if ratings.get("data_quality")=="derived_early_season" else 1.5,
@@ -1103,3 +1103,82 @@ def history(slate_date):
       "model_probability_pct":round(r[6]*100,2),"market_probability_pct":round(r[7]*100,2) if r[7] is not None else None,
       "projected_home":r[8],"projected_away":r[9],"projected_margin":r[10],"projected_total":r[11],
       "actual_value":r[12],"outcome":r[13],"profit_units":r[14],"created_at":r[15].isoformat() if r[15] else None} for r in rows]
+
+
+def audit_game_slates(slate_date):
+    """Read-only audit of saved side, official-total, and experimental-total snapshots."""
+    import re
+
+    slate_date = str(slate_date or "").strip()
+    if not re.fullmatch(r"\\d{4}-\\d{2}-\\d{2}", slate_date):
+        raise ValueError("Invalid slate date; expected YYYY-MM-DD.")
+
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT market, candidates, created_at FROM nba_game_slates "
+            "WHERE market IN ('sides', 'totals') AND slate_date=%s",
+            (slate_date,),
+        ).fetchall()
+        experimental = conn.execute(
+            "SELECT COUNT(*), MIN(created_at), MAX(created_at) "
+            "FROM nba_experimental_totals WHERE slate_date=%s",
+            (slate_date,),
+        ).fetchone()
+
+    by_market = {row[0]: row for row in rows}
+    markets = {}
+
+    def iso(value):
+        return value.isoformat() if hasattr(value, "isoformat") else (str(value) if value else None)
+
+    side_row = by_market.get("sides")
+    if side_row is None:
+        markets["sides"] = {
+            "supported": True, "classification": "research_only", "locked": False,
+            "status": "missing", "created_at": None, "candidate_count": None,
+            "official_picks_enabled": False,
+        }
+    else:
+        candidates = side_row[1]
+        if isinstance(candidates, str):
+            candidates = json.loads(candidates or "[]")
+        candidates = candidates if isinstance(candidates, list) else []
+        markets["sides"] = {
+            "supported": True, "classification": "research_only", "locked": bool(candidates),
+            "status": "saved" if candidates else "empty_placeholder",
+            "created_at": iso(side_row[2]), "candidate_count": len(candidates),
+            "official_picks_enabled": False,
+        }
+
+    total_row = by_market.get("totals")
+    if total_row is None:
+        markets["totals"] = {
+            "supported": True, "classification": "disabled", "locked": False,
+            "status": "missing", "created_at": None, "candidate_count": None,
+            "official_picks_enabled": _TOTALS_OFFICIAL_ENABLED,
+        }
+    else:
+        candidates = total_row[1]
+        if isinstance(candidates, str):
+            candidates = json.loads(candidates or "[]")
+        candidates = candidates if isinstance(candidates, list) else []
+        markets["totals"] = {
+            "supported": True, "classification": "disabled",
+            "locked": False,
+            "status": "disabled_empty_placeholder" if not candidates else "disabled_candidates_saved",
+            "created_at": iso(total_row[2]), "candidate_count": len(candidates),
+            "official_picks_enabled": _TOTALS_OFFICIAL_ENABLED,
+        }
+
+    experimental_count = int(experimental[0] or 0) if experimental else 0
+    markets["experimental_totals"] = {
+        "supported": True, "classification": "research_only", "locked": False,
+        "status": "research_only_saved" if experimental_count else "no_candidates",
+        "created_at": None,
+        "first_created_at": iso(experimental[1]) if experimental else None,
+        "last_created_at": iso(experimental[2]) if experimental else None,
+        "candidate_count": experimental_count,
+        "official_picks_enabled": False,
+    }
+
+    return markets
