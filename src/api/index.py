@@ -682,6 +682,12 @@ def _dvp_matchup_adjustment(athlete_id,player_team,game,market,player_name=None)
   stat_labels={"points":"points","rebounds":"rebounds","assists":"assists","steals":"steals","threes":"3-pointers made"}
   stat_units={"points":"PPG","rebounds":"RPG","assists":"APG","steals":"SPG","threes":"3PM"}
   season=_DVP_STAT_CACHE.get(stat,{}).get("season") or "season not identified"
+  sample_games=None
+  if str(season).startswith("Tank01 current season"):
+   try:
+    sample_games=int((_TANK01_DVP_TABLE_CACHE.get("meta") or {}).get("min_games_played"))
+   except (TypeError,ValueError,OverflowError):
+    sample_games=None
   position_method="PG/SG 50/50 blend" if espn_position=="G" else "SF/PF 50/50 blend" if espn_position=="F" else "Individual listed position"
   blend_weights={position_keys[0]:1.0} if len(position_keys)==1 else {position_keys[0]:0.5,position_keys[1]:0.5}
   return {"available":True,"adjustment_applied":True,"position":espn_position,"position_group":espn_position,"position_name":position_names[espn_position],
@@ -689,9 +695,11 @@ def _dvp_matchup_adjustment(athlete_id,player_team,game,market,player_name=None)
    "blend_weights":blend_weights,"opponent":opponent,"opponent_name":_TEAM_NAMES.get(opponent,opponent),
    "stat":market,"stat_label":stat_labels[market],"stat_unit":stat_units[market],
    "allowed_per_game":round(allowed,2),"league_position_average":round(league_average,2),
-   "league_relative_ratio":round(ratio,3),"adjustment_pct":0.0,"factor":1.0,
-   "source":"NBA House individual-position "+stat+" allowed table","source_season":season,
-   "method":position_method+" "+stat_labels[market]+" allowed per game compared directly with this player's average; player-specific discrepancy drives matchup grade"}
+   "league_relative_ratio":round(ratio,3),"sample_games":sample_games,
+   "sample_reliability":round(sample_games/(sample_games+8.0),3) if sample_games is not None and sample_games>0 else 0.35,
+   "adjustment_pct":0.0,"factor":1.0,
+   "source":"Tank01 current-season positional allowance" if str(season).startswith("Tank01 current season") else "NBA House previous-season positional allowance","source_season":season,
+   "method":position_method+" "+stat_labels[market]+" allowance normalized to league positional average; sample-shrunk matchup factor; player average shown for context only"}
  except Exception as exc:
   return unavailable("Positional-defense calculation failed: "+type(exc).__name__+".")
 
@@ -1260,14 +1268,17 @@ def _apply_directional_play_grade(model):
     if not isinstance(model, dict):
         return model
     defense = model.get("defense_vs_position") or {}
-    discrepancy_pct = defense.get("player_vs_allowed_pct")
+    ratio = defense.get("league_relative_ratio")
     side = str(model.get("best_side") or "").upper()
-    if discrepancy_pct is None or side not in ("OVER", "UNDER"):
+    if ratio is None or side not in ("OVER", "UNDER"):
         model["matchup_grade"] = None
         model["play_grade"] = None
         return model
     try:
-        directional = float(discrepancy_pct) * (1.0 if side == "OVER" else -1.0)
+        ratio = float(ratio)
+        if not math.isfinite(ratio) or not 0.70 <= ratio <= 1.30:
+            raise ValueError("Invalid positional defense ratio")
+        directional = (ratio - 1.0) * 100.0 * (1.0 if side == "OVER" else -1.0)
         matchup_grade = max(0.0, min(100.0, 50.0 + directional * 2.5))
         form_grade = float(model.get("form_grade") if model.get("form_grade") is not None else 50.0)
         minutes_grade = float(model.get("minutes_grade") if model.get("minutes_grade") is not None else 50.0)
@@ -1315,19 +1326,34 @@ def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, ma
     positional_discrepancy = None
     directional_discrepancy_pct = 0.0
     matchup_grade = 50.0
+    matchup_sample_reliability = None
     if isinstance(matchup_adjustment, dict) and matchup_adjustment.get("available", True):
         try:
             allowed = float(matchup_adjustment.get("allowed_per_game"))
+            ratio = float(matchup_adjustment.get("league_relative_ratio"))
             if math.isfinite(allowed) and long_mean > 0:
                 positional_discrepancy = allowed - long_mean
-                discrepancy_pct = positional_discrepancy / long_mean * 100.0
-                # Larger favorable gaps produce higher grades. Projection impact is damped and capped.
-                matchup_factor = max(0.92, min(1.08, 1.0 + discrepancy_pct / 100.0 * 0.25))
-                target_mean *= matchup_factor
-                matchup_adjustment["player_average"] = round(long_mean, 2)
-                matchup_adjustment["player_vs_allowed_difference"] = round(positional_discrepancy, 2)
-                matchup_adjustment["player_vs_allowed_pct"] = round(discrepancy_pct, 2)
-                matchup_adjustment["adjustment_pct"] = round((matchup_factor - 1.0) * 100.0, 2)
+                # A team's aggregate positional allowance is not a one-player average.
+                # Normalize defense to the league average for this position and market,
+                # then shrink the effect when the current-season sample is small.
+                sample_games = matchup_adjustment.get("sample_games")
+                try:
+                    sample_games = int(sample_games) if sample_games is not None else None
+                except (TypeError, ValueError, OverflowError):
+                    sample_games = None
+                matchup_sample_reliability = sample_games / (sample_games + 8.0) if sample_games is not None and sample_games > 0 else 0.35
+                market_weight = {"points": 0.25, "rebounds": 0.30, "threes": 0.25}.get(market, 0.20)
+                if math.isfinite(ratio) and 0.70 <= ratio <= 1.30:
+                    raw_matchup_effect = (ratio - 1.0) * market_weight * matchup_sample_reliability
+                    matchup_factor = max(0.94, min(1.06, 1.0 + raw_matchup_effect))
+                    target_mean *= matchup_factor
+                    matchup_adjustment["player_average"] = round(long_mean, 2)
+                    matchup_adjustment["player_vs_allowed_difference"] = round(positional_discrepancy, 2)
+                    matchup_adjustment["player_vs_allowed_pct"] = round(positional_discrepancy / long_mean * 100.0, 2)
+                    matchup_adjustment["sample_reliability"] = round(matchup_sample_reliability, 3)
+                    matchup_adjustment["market_weight"] = market_weight
+                    matchup_adjustment["adjustment_pct"] = round((matchup_factor - 1.0) * 100.0, 2)
+                    matchup_adjustment["factor"] = round(matchup_factor, 4)
         except (TypeError, ValueError, OverflowError):
             matchup_factor = 1.0
 
@@ -1393,9 +1419,14 @@ def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, ma
         (over_ev, "OVER", over_p, over_odds), (under_ev, "UNDER", under_p, under_odds)
     ] if v is not None], key=lambda x: x[0], default=None)
     selected_side = best[1] if best else None
-    if positional_discrepancy is not None and long_mean > 0:
-        directional_discrepancy_pct = (positional_discrepancy / long_mean * 100.0) * (1.0 if selected_side == "OVER" else -1.0 if selected_side == "UNDER" else 0.0)
-        matchup_grade = max(0.0, min(100.0, 50.0 + directional_discrepancy_pct * 2.5))
+    if isinstance(matchup_adjustment, dict) and matchup_adjustment.get("available", True) and selected_side in ("OVER", "UNDER"):
+        try:
+            ratio = float(matchup_adjustment.get("league_relative_ratio"))
+            directional_discrepancy_pct = (ratio - 1.0) * 100.0 * (1.0 if selected_side == "OVER" else -1.0)
+            matchup_grade = max(0.0, min(100.0, 50.0 + directional_discrepancy_pct * 2.5))
+        except (TypeError, ValueError, OverflowError):
+            directional_discrepancy_pct = 0.0
+            matchup_grade = 50.0
     form_grade = max(0.0, min(100.0, 50.0 + ((recent5_mean - long_mean) / max(long_mean, 0.1)) * 250.0))
     minutes_grade = max(0.0, min(100.0, 50.0 + (minute_factor - 1.0) * 250.0))
     pace_ratio = (team_context_adjustment or {}).get("pace_ratio") if isinstance(team_context_adjustment, dict) else None
