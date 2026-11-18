@@ -3672,6 +3672,17 @@ def model_record_groups(slate_date: str):
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Player-prop record groups unavailable: " + type(exc).__name__)
 
+@app.get("/api/audit/daily-slates")
+def audit_daily_slate_snapshots(slate_date: str):
+    """Read saved slate timestamps and counts without odds retrieval or settlement."""
+    try:
+        return JSONResponse(prediction_ledger.audit_daily_slates(slate_date))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Daily slate audit unavailable: " + type(exc).__name__) from exc
+
+
 @app.get("/api/model/ledger")
 def model_ledger(status: str = "unsettled", market: str = "all", limit: int = 100):
     try:
