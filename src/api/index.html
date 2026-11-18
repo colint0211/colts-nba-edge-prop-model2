@@ -313,10 +313,10 @@ function reasoning(p){
     const position=esc(dvp.position_name||positionDisplayName(dvp.position));
     const allowedVsLeague=Number(dvp.league_relative_ratio);
     const leagueText=Number.isFinite(allowedVsLeague)?' ('+(allowedVsLeague>1?'allows '+fmt((allowedVsLeague-1)*100,1)+'% more':allowedVsLeague<1?'allows '+fmt((1-allowedVsLeague)*100,1)+'% less':'league average')+' than the position baseline)':'';
-    rows.push('<div><b>Position matchup:</b> '+esc(p.player||'This player')+' averages '+fmt(playerAvg)+' '+esc(meta.unit)+'. '+opponent+' allows '+fmt(allowed)+' '+esc(meta.unit)+' to '+position+leagueText+'. That is a '+(Number.isFinite(diff)?(diff>0?'+':'')+fmt(diff)+' '+esc(meta.unit)+' difference versus this player’s average':'difference that could not be calculated')+'.</div>');
+     rows.push('<div><b>Position matchup:</b> '+opponent+' allows '+fmt(allowed)+' '+esc(meta.unit)+' to '+position+leagueText+'. '+esc(p.player||'This player')+' averages '+fmt(playerAvg)+' '+esc(meta.unit)+'; that player average is shown as context, not compared one-for-one with the team positional total.</div>');
     if(side==='OVER'||side==='UNDER'){
-      const favorable=Number.isFinite(diff)&&(side==='OVER'?diff>0:diff<0);
-      rows.push('<div><b>Does the matchup support '+side+'?</b> '+(favorable?'Yes. The positional allowance points in the same direction as the selected side.':'No / not clearly. The positional allowance does not support the selected side, so the projection must overcome that matchup signal.')+' The matchup changes the projection by '+(Number(dvp.adjustment_pct)>0?'+':'')+fmt(dvp.adjustment_pct,2)+'%.</div>');
+       const favorable=Number.isFinite(allowedVsLeague)&&(side==='OVER'?allowedVsLeague>1:allowedVsLeague<1);
+       rows.push('<div><b>Does the matchup support '+side+'?</b> '+(favorable?'Yes. This defense allows more than league average to this position in this market.':'No / not clearly. This defense is average or restrictive for this position in this market.')+' The sample-shrunk matchup adjustment to the projection is '+(Number(dvp.adjustment_pct)>0?'+':'')+fmt(dvp.adjustment_pct,2)+'%.</div>');
     }
     if(dvp.source_season)rows.push('<div><b>Defense data:</b> '+esc(dvp.source_season)+'. Position resolved by '+esc(dvp.position_source||'the available roster data')+'; '+esc(dvp.position_confidence||'unrated')+' confidence.</div>');
   }else{
@@ -424,7 +424,9 @@ function dvpSummary(p){
   const label=d.stat_label||({points:'points',rebounds:'rebounds',assists:'assists',steals:'steals',threes:'3-pointers made'}[p.market]||p.market||'stat');
   const weights=d.blend_weights&&typeof d.blend_weights==='object'?Object.entries(d.blend_weights).map(([k,v])=>k+' '+Math.round(Number(v)*100)+'%').join(' / '):'';
   const positionMeta=[d.position_source||'Position source unavailable',d.position_confidence?d.position_confidence+' confidence':'',weights?'Blend: '+weights:''].filter(Boolean).join(' · ');
-  return '<div class="card-bottom"><span>Player avg '+num(d.player_average,2)+' '+esc(unit)+' vs '+esc(d.opponent_name||d.opponent)+' allows '+num(d.allowed_per_game,2)+' to '+esc(d.position_name||positionDisplayName(d.position))+' · Gap '+diffText+'</span><span>Matchup grade '+(p.matchup_grade==null?'—':num(p.matchup_grade,1)+'/100')+'</span></div><div class="card-bottom"><span>Positional discrepancy drives 50% of play grade · Projection adjustment: '+sign+num(d.adjustment_pct,1)+'%</span></div><div class="card-bottom"><span>'+esc(positionMeta)+'</span></div>';
+   const ratio=Number(d.league_relative_ratio);
+   const defenseLabel=Number.isFinite(ratio)?(ratio<1?'allows '+num((1-ratio)*100,1)+'% less than positional average':ratio>1?'allows '+num((ratio-1)*100,1)+'% more than positional average':'allows the positional average'):'positional comparison unavailable';
+   return '<div class="card-bottom"><span>'+esc(d.opponent_name||d.opponent)+' '+esc(defenseLabel)+' · '+num(d.allowed_per_game,2)+' '+esc(unit)+' allowed to '+esc(d.position_name||positionDisplayName(d.position))+'</span><span>Matchup grade '+(p.matchup_grade==null?'—':num(p.matchup_grade,1)+'/100')+'</span></div><div class="card-bottom"><span>Player avg '+num(d.player_average,2)+' '+esc(unit)+' shown for context · Projection adjustment: '+sign+num(d.adjustment_pct,1)+'% · Sample reliability '+num(d.sample_reliability??0,2)+'</span></div><div class="card-bottom"><span>'+esc(positionMeta)+'</span></div>';
 }
 function injurySummary(p){
   if(!p||!p.injury_status)return '';
