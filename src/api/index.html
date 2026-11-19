@@ -499,8 +499,22 @@ async function loadBP(m){
     if(!r.ok)throw Error(d.detail||d.error||'Proprietary model request failed');
     const normalizedRows=(d.props||[]).map(p=>({...p,overOdds:p.over_odds,underOdds:p.under_odds,ev:p.expected_value_pct==null?null:Number(p.expected_value_pct)/100,expected_value_pct:p.expected_value_pct??p.expected_profit_per_100??null,expected_profit_per_100:p.expected_profit_per_100??p.expected_value_pct??null,model_status:'projected',best_side:String(p.best_side||'').toUpperCase(),best_probability:p.best_probability,market:m,simulations:p.simulations})).filter(p=>p.player&&p.line!=null);
     bpCache[m]=d.daily_frozen?normalizedRows:await applySavedOverrides(normalizedRows,m);
-    const dailyPicks=rankEV(bpCache[m]).slice(0,3);
-    
+    // Loading the second market can complete the shared nightly selection.
+    // Refresh Points so its cards carry the same server-locked Top 3 flags.
+    if(m==='threes'&&d.daily_frozen){
+      const pr=await fetch('/api/proprietary-market-board?market=points&ts='+Date.now(),{cache:'no-store'});
+      const pd=await pr.json();
+      if(pr.ok&&pd.daily_frozen){
+        data=(pd.props||[]).map(p=>({...p,
+          overOdds:p.over_odds,underOdds:p.under_odds,
+          ev:p.expected_value_pct==null?null:Number(p.expected_value_pct)/100,
+          expected_value_pct:p.expected_value_pct??p.expected_profit_per_100??null,
+          expected_profit_per_100:p.expected_profit_per_100??p.expected_value_pct??null,
+          model_status:'projected',best_side:String(p.best_side||'').toUpperCase(),
+          best_probability:p.best_probability,market:'points',simulations:p.simulations
+        })).filter(p=>p.player&&p.line!=null);
+      }
+    }
     bpLoading[m]=false;render();renderFull();
   }catch(e){bpLoading[m]=false;bpCache[m]={error:e.message};render();renderFull()}
 }
