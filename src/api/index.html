@@ -12,10 +12,10 @@
 <div class="statrow"><div class="stat"><div class="statlabel">Today's games</div><div id="ng" class="num">—</div></div><div class="stat"><div class="statlabel">Prop lines loaded</div><div id="nl" class="num">—</div></div><div class="stat"><div class="statlabel">Projections calculated</div><div id="np" class="num">—</div></div><div class="stat"><div class="statlabel">Positive EV candidates</div><div id="nv" class="num">—</div></div></div>
 
 <div class="sectiontitle" id="pastPlays">Daily Top 5 Results</div>
-<div class="sectionhint">Only the five official picks from each active category are tracked: Points, Rebounds and 3-Pointers Made. Historical records from retired categories remain available. Each active category is locked once per slate day.</div>
+<div class="sectionhint">Only the five official picks from each active category are tracked: Points and 3-Pointers Made. Each active category is locked once per slate day.</div>
 <div class="history-actions">
 <label class="muted">Slate date <input class="pill" id="historyDate" type="date"></label>
-<select class="pill" id="historyMarket" onchange="renderPastPlays()"><option value="all">All five categories</option><option value="points">Points</option><option value="rebounds">Rebounds</option><option value="assists">Assists</option><option value="steals">Steals</option><option value="threes">3-pointers made</option></select>
+<select class="pill" id="historyMarket" onchange="renderPastPlays()"><option value="all">Both active markets</option><option value="points">Points</option><option value="threes">3-pointers made</option></select>
 <button onclick="loadPastPlays()">↻ Refresh results</button>
 </div>
 <div class="history-summary">
@@ -34,10 +34,10 @@
 <div id="historyStatusText" class="muted">Loading Top 5 results…</div>
 <div class="history-table-wrap"><table class="history-table"><thead><tr><th>Market</th><th>Player</th><th>Team</th><th>Matchup</th><th>Pick</th><th>Line</th><th>Odds</th><th>Projection</th><th>Actual</th><th>Result</th><th>Net units</th></tr></thead><tbody id="historyRows"><tr><td colspan="11">Loading Top 5 results…</td></tr></tbody></table></div>
 <div class="sectiontitle">Today's scoreboard</div><div id="games" class="games"><span class="muted">Loading games…</span></div>
-<div class="sectiontitle" id="topTitle">Top 5 EV Plays</div><div class="sectionhint" id="topHint">Top five post-review positive-EV plays ranked across the three active markets.</div>
-<div class="tabs" id="tabs"><button class="active" data-market="ev" onclick="setMarket('ev')">Top 5 EV</button><button data-market="points" onclick="setMarket('points')">Top 5 Points</button><button data-market="rebounds" onclick="setMarket('rebounds')">Top 5 Rebounds</button><button data-market="threes" onclick="setMarket('threes')">Top 5 3-Pointers Made</button></div>
+<div class="sectiontitle" id="topTitle">Top 5 EV Plays</div><div class="sectionhint" id="topHint">Top five post-review positive-EV plays ranked across the two active markets.</div>
+<div class="tabs" id="tabs"><button class="active" data-market="ev" onclick="setMarket('ev')">Top 5 EV</button><button data-market="points" onclick="setMarket('points')">Top 5 Points</button><button data-market="threes" onclick="setMarket('threes')">Top 5 3-Pointers Made</button></div>
 <div class="controls"><input class="pill" id="search" placeholder="Search player or matchup" oninput="render()"><span id="count" class="muted"></span></div><div id="cards" class="cards"><div class="empty">Calculating today's best plays…</div></div>
-<div class="sectiontitle">Full player prop board</div><div class="sectionhint" id="fullHint">All positive-EV candidates across points, rebounds and three-pointers made.</div><div class="controls"><select class="pill" id="filter" onchange="renderFull()"><option value="all">All picks</option><option value="value">Value candidates</option><option value="lean">Leans / verify</option><option value="pass">Pass</option></select><input class="pill" id="searchFull" placeholder="Search full board" oninput="renderFull()"><span id="countFull" class="muted"></span></div><div id="fullCards" class="cards"></div>
+<div class="sectiontitle">Full player prop board</div><div class="sectionhint" id="fullHint">All positive-EV candidates across points and three-pointers made.</div><div class="controls"><select class="pill" id="filter" onchange="renderFull()"><option value="all">All picks</option><option value="value">Value candidates</option><option value="lean">Leans / verify</option><option value="pass">Pass</option></select><input class="pill" id="searchFull" placeholder="Search full board" oninput="renderFull()"><span id="countFull" class="muted"></span></div><div id="fullCards" class="cards"></div>
 <div class="footer">Live scores are supplied by ESPN public endpoints. DraftKings NBA player-prop lines and odds are supplied by PropLine. EV plays are shown only when the API response includes the required projection and expected-value fields; lines alone are not treated as picks. BALLDONTLIE provides a secondary game schedule/status cross-check and does not alter player projections or probabilities. Live data refreshes every 15 seconds while this page is open.</div></main>
 <script>
 let data=[],liveData={games:[],players_by_id:{},players_by_name:{}},market='ev',bpCache={},bpLoading={};
@@ -46,7 +46,7 @@ const el=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const num=(n,d=1)=>n==null||!Number.isFinite(Number(n))?'—':Number(n).toFixed(d);
 const norm=s=>String(s||'').toLowerCase().replace(/[^a-z0-9]/g,'');
-const bpMarkets=['points','rebounds','threes'];
+const bpMarkets=['points','threes'];
 function bpMarketLabel(m){return ({points:'Points',rebounds:'Rebounds',assists:'Assists',steals:'Steals',threes:'3-Pointers Made'})[m]||m}
 function normalizeLiveTeam(value){
   const raw=String(value||'').trim().toUpperCase().replace(/\\./g,'');
@@ -227,11 +227,11 @@ function setMarket(m){
   document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('active',b.dataset.market===m));
   const labels={ev:'Top 5 EV Plays',points:'Top 5 Points',rebounds:'Top 5 Rebounds',assists:'Top 5 Assists',steals:'Top 5 Steals',threes:'Top 5 3-Pointers Made'};
   el('topTitle').textContent=labels[m]||'Top 5 Plays';
-  el('topHint').textContent=m==='points'?'Top five proprietary points projections.':m==='ev'?'Top five positive-EV plays ranked across points, rebounds and three-pointers made.':'Proprietary '+bpMarketLabel(m)+' projections, probabilities and EV. DraftKings lines via PropLine; projections remain model-generated.';
-  el('fullHint').textContent=m==='ev'?'All positive-EV candidates across the three active markets.':m==='points'?'All proprietary points props.':'All proprietary '+bpMarketLabel(m)+' projections using DraftKings lines via PropLine.';
+  el('topHint').textContent=m==='points'?'Top five proprietary points projections.':m==='ev'?'Top five positive-EV plays ranked across points and three-pointers made.':'Proprietary '+bpMarketLabel(m)+' projections, probabilities and EV. DraftKings lines via PropLine; projections remain model-generated.';
+  el('fullHint').textContent=m==='ev'?'All positive-EV candidates across the two active markets.':m==='points'?'All proprietary points props.':'All proprietary '+bpMarketLabel(m)+' projections using DraftKings lines via PropLine.';
   render();renderFull();
-  if(m==='ev')['rebounds','threes'].forEach(loadBP);
-  else if(['rebounds','threes'].includes(m))loadBP(m);
+  if(m==='ev')loadBP('threes');
+  else if(m==='threes')loadBP(m);
 }
 async function load(refresh=false){
   el('status').textContent='CALCULATING';
@@ -256,7 +256,7 @@ async function load(refresh=false){
     })).filter(p=>p.player&&p.line!=null);
     await loadCustomLines();data=board.daily_frozen?data:await applySavedOverrides(data,'points');
     if(board.daily_frozen)await recordDailyTopFive('points',rankEV(data).slice(0,5));
-    ['rebounds','threes'].forEach(loadBP);
+    loadBP('threes');
     el('ng').textContent=schedule.schedule_game_count??'—';
     el('nl').textContent=board.line_count??data.length;
     el('np').textContent=board.projected_count??data.length;
@@ -514,7 +514,7 @@ function sharedPropKey(p){return [p.market||"points",String(p.player||"").toLowe
 function updateSharedProp(updated){
   const key=sharedPropKey(updated);
   for(const p of data)if(sharedPropKey({...p,market:"points"})===key)Object.assign(p,updated);
-  for(const m of ["rebounds","threes"])if(Array.isArray(bpCache[m]))for(const p of bpCache[m])if(sharedPropKey(p)===key)Object.assign(p,updated);
+  for(const m of ["threes"])if(Array.isArray(bpCache[m]))for(const p of bpCache[m])if(sharedPropKey(p)===key)Object.assign(p,updated);
   render();renderFull();
 }
 async function saveCustomLine(button){
@@ -563,7 +563,7 @@ function bpLineCard(p,i){
     '<div class="card-bottom"><span>Calibration: '+esc(p.calibration_status||'collecting data')+'</span><span>Settled samples: '+esc(p.calibration_sample_size??0)+'</span></div>'+injurySummary(p)+balldontlieSummary(p)+dvpSummary(p)+lineEditor(p)+'</article>';
 }
 function allModelEV(){
-  const pools=[['points',data],...['rebounds','threes'].map(m=>[m,bpCache[m]])];
+  const pools=[['points',data],['threes',bpCache.threes]];
   const all=[];
   for(const [m,rows] of pools){
     if(!Array.isArray(rows))continue;
@@ -603,13 +603,13 @@ function bpCard(p,i){
 function render(){
   const q=el('search').value.toLowerCase();let list=[];
   if(market==='ev'){
-    const pending=['rebounds','threes'].filter(m=>bpLoading[m]||!bpCache[m]);
-    if(pending.length){el('count').textContent='Loading the three active markets…';el('cards').innerHTML='<div class="empty">Building the cross-market Top 5 EV board. Checking the three active markets before ranking.</div>';return;}
+    const pending=['threes'].filter(m=>bpLoading[m]||!bpCache[m]);
+    if(pending.length){el('count').textContent='Loading the two active markets…';el('cards').innerHTML='<div class="empty">Building the cross-market Top 5 EV board. Checking the three active markets before ranking.</div>';return;}
     list=allModelEV();
     if(q)list=list.filter(p=>(p.player+' '+(p.team||p.roster_team||'')+' '+(p.game||'')).toLowerCase().includes(q));
     list=list.slice(0,5);
-    el('count').textContent=list.length+' positive-EV plays across the three active markets';
-    if(!list.length){el('cards').innerHTML='<div class="empty">No verified positive-EV plays across the three active markets right now.</div>';return}
+    el('count').textContent=list.length+' positive-EV plays across the two active markets';
+    if(!list.length){el('cards').innerHTML='<div class="empty">No verified positive-EV plays across the two active markets right now.</div>';return}
     el('cards').innerHTML=list.map((p,i)=>p.market==='points'?card(p,i):bpLineCard(p,i)).join('');
     return;
   }
@@ -639,7 +639,7 @@ function renderFull(){
   }
   if(market==='ev'){
     const pending=['rebounds','threes'].filter(m=>bpLoading[m]||!bpCache[m]);
-    if(pending.length){el('countFull').textContent='Loading the three active markets…';el('fullCards').innerHTML='<div class="empty">Waiting for all five market boards before listing cross-market candidates.</div>';return;}
+    if(pending.length){el('countFull').textContent='Loading the two active markets…';el('fullCards').innerHTML='<div class="empty">Waiting for both active market boards before listing cross-market candidates.</div>';return;}
     const rows=sortByEV(allModelEV().filter(p=>(p.player+' '+(p.team||'')+' '+(p.game||'')).toLowerCase().includes(q)));
     el('countFull').textContent=rows.length+' cross-market EV candidates';
     el('fullCards').innerHTML=rows.map((p,i)=>p.market==='points'?card(p,i):bpLineCard(p,i)).join('')||'<div class="empty">No positive-EV plays available.</div>';
@@ -657,7 +657,7 @@ function localDateKey(date){
   const y=date.getFullYear(),m=String(date.getMonth()+1).padStart(2,'0'),d=String(date.getDate()).padStart(2,'0');
   return y+'-'+m+'-'+d;
 }
-function historyMarketName(m){return ({points:'Points',rebounds:'Rebounds',assists:'Assists',steals:'Steals',threes:'3-pointers made'})[m]||m||'—'}
+function historyMarketName(m){return ({points:'Points',threes:'3-pointers made'})[m]||m||'—'}
 async function recordDailyTopFive(m,rows){
   const picks=(rows||[]).slice(0,5);if(!picks.length)return;
   try{
@@ -728,6 +728,6 @@ updateLive();
 load();loadPastPlays();
 ['rebounds','threes'].forEach(loadBP);
 setInterval(async()=>{await updateLive();render();renderFull()},15000);
-setInterval(()=>{['rebounds','threes'].forEach(m=>{delete bpCache[m];loadBP(m)});load(false)},300000);
+setInterval(()=>{delete bpCache.threes;loadBP('threes');load(false)},300000);
 setInterval(()=>loadPastPlays(),60000);
 </script></body></html>
