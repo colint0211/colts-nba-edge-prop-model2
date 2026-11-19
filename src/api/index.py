@@ -665,20 +665,28 @@ def _dvp_matchup_adjustment(athlete_id,player_team,game,market,player_name=None)
   team_rows=ratings.get("teams") or {}
   opponent_pace=float((team_rows.get(opponent) or {}).get("pace") or 0)
   player_team_pace=float((team_rows.get(team_code) or {}).get("pace") or 0)
-  if opponent_pace<=0 or player_team_pace<=0:
-   return unavailable("Verified team possessions/pace unavailable; PPP matchup adjustment withheld.",player_team=team_code,opponent=opponent)
-  allowed_per_100=allowed_per_game/opponent_pace*100.0
-  league_values=[]
-  for (def_team,pos),row in table.items():
-   if pos not in position_keys: continue
-   pace=float((team_rows.get(def_team) or {}).get("pace") or 0)
-   value=row.get(stat)
-   if pace>0 and value is not None: league_values.append(float(value)/pace*100.0)
-  if len(league_values)<20:
-   return unavailable("Too few verified team pace rows to calculate league positional PPP.",player_team=team_code,opponent=opponent)
-  league_average=sum(league_values)/len(league_values)
-  if league_average<=0: return unavailable("League positional PPP baseline is invalid.",player_team=team_code,opponent=opponent)
-  ratio=allowed_per_100/league_average
+  if market=="points":
+   if opponent_pace<=0 or player_team_pace<=0:
+    return unavailable("Verified team possessions/pace unavailable; PPP matchup adjustment withheld.",player_team=team_code,opponent=opponent)
+   allowed_per_100=allowed_per_game/opponent_pace*100.0
+   league_values=[]
+   for (def_team,pos),row in table.items():
+    if pos not in position_keys: continue
+    pace=float((team_rows.get(def_team) or {}).get("pace") or 0)
+    value=row.get(stat)
+    if pace>0 and value is not None: league_values.append(float(value)/pace*100.0)
+   if len(league_values)<20:
+    return unavailable("Too few verified team pace rows to calculate league positional PPP.",player_team=team_code,opponent=opponent)
+   league_average=sum(league_values)/len(league_values)
+   if league_average<=0: return unavailable("League positional PPP baseline is invalid.",player_team=team_code,opponent=opponent)
+   ratio=allowed_per_100/league_average
+  else:
+   allowed_per_100=None
+   league_values=[row[stat] for (def_team,pos),row in table.items() if pos in position_keys and row.get(stat) is not None]
+   if len(league_values)<20: return unavailable("The positional-defense table has too few league comparison rows.",player_team=team_code,opponent=opponent)
+   league_average=sum(league_values)/len(league_values)
+   if league_average<=0: return unavailable("League positional-defense baseline is invalid.",player_team=team_code,opponent=opponent)
+   ratio=allowed_per_game/league_average
   position_names={"PG":"Point Guard","SG":"Shooting Guard","SF":"Small Forward","PF":"Power Forward","C":"Center","G":"Guard (PG/SG blended)","F":"Forward (SF/PF blended)"}
   stat_labels={"points":"points","rebounds":"rebounds","assists":"assists","steals":"steals","threes":"3-pointers made"}
   position_method="PG/SG 50/50 blend" if espn_position=="G" else "SF/PF 50/50 blend" if espn_position=="F" else "Individual listed position"
@@ -686,13 +694,13 @@ def _dvp_matchup_adjustment(athlete_id,player_team,game,market,player_name=None)
   return {"available":True,"adjustment_applied":True,"position":espn_position,"position_group":espn_position,"position_name":position_names[espn_position],
    "position_source":position_source,"position_confidence":position_confidence,"position_crosscheck":position_crosscheck,
    "blend_weights":blend_weights,"opponent":opponent,"opponent_name":_TEAM_NAMES.get(opponent,opponent),
-   "stat":market,"stat_label":stat_labels[market],"stat_unit":"per 100 possessions",
-   "allowed_per_100_possessions":round(allowed_per_100,3),"league_position_average_per_100":round(league_average,3),
-   "allowed_per_game_reference":round(allowed_per_game,2),"opponent_pace":round(opponent_pace,2),
+   "stat":market,"stat_label":stat_labels[market],"stat_unit":"per 100 possessions" if market=="points" else "per game",
+   "allowed_per_100_possessions":round(allowed_per_100,3) if allowed_per_100 is not None else None,"league_position_average_per_100":round(league_average,3) if market=="points" else None,
+   "allowed_per_game_reference":round(allowed_per_game,2),"opponent_pace":round(opponent_pace,2) if opponent_pace>0 else None,
    "player_team_pace":round(player_team_pace,2),"league_relative_ratio":round(ratio,3),
    "adjustment_pct":0.0,"factor":1.0,"source":"NBA House individual-position allowed table normalized by verified team pace",
    "source_season":_DVP_STAT_CACHE.get(stat,{}).get("season") or "season not identified",
-   "method":position_method+" points allowed normalized to per-100-possession rate; player scoring rate is normalized to possessions while on court"}
+   "method":position_method+(" points allowed normalized to per-100-possession rate; player scoring rate normalized to possessions while on court" if market=="points" else " "+stat_labels[market]+" allowed per game compared with player per-game history")}
  except Exception as exc:
   return unavailable("Positional-defense PPP calculation failed: "+type(exc).__name__+".")
 
@@ -1334,22 +1342,34 @@ def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, ma
     matchup_grade = 50.0
     if isinstance(matchup_adjustment, dict) and matchup_adjustment.get("available", True):
         try:
-            allowed_ppp = float(matchup_adjustment.get("allowed_per_100_possessions"))
-            player_team_pace = float(matchup_adjustment.get("player_team_pace"))
-            player_minutes_for_ppp = float(projected_min or baseline_min or 0.0)
-            player_possessions_while_on_court = player_team_pace * player_minutes_for_ppp / 48.0
-            if (math.isfinite(allowed_ppp) and allowed_ppp > 0 and long_mean > 0
-                    and player_possessions_while_on_court > 0):
-                player_ppp_per_100 = long_mean / player_possessions_while_on_court * 100.0
-                positional_discrepancy = allowed_ppp - player_ppp_per_100
-                discrepancy_pct = (allowed_ppp / player_ppp_per_100 - 1.0) * 100.0 if player_ppp_per_100 > 0 else 0.0
-                matchup_factor = max(0.92, min(1.08, 1.0 + discrepancy_pct / 100.0 * 0.25))
-                target_mean *= matchup_factor
-                matchup_adjustment["player_points_per_100_possessions"] = round(player_ppp_per_100, 3)
-                matchup_adjustment["player_possessions_while_on_court"] = round(player_possessions_while_on_court, 2)
-                matchup_adjustment["player_vs_allowed_ppp_difference"] = round(positional_discrepancy, 3)
-                matchup_adjustment["player_vs_allowed_pct"] = round(discrepancy_pct, 2)
-                matchup_adjustment["adjustment_pct"] = round((matchup_factor - 1.0) * 100.0, 2)
+            if market == "points":
+                allowed_ppp = float(matchup_adjustment.get("allowed_per_100_possessions"))
+                player_team_pace = float(matchup_adjustment.get("player_team_pace"))
+                player_minutes_for_ppp = float(projected_min or baseline_min or 0.0)
+                player_possessions_while_on_court = player_team_pace * player_minutes_for_ppp / 48.0
+                if (math.isfinite(allowed_ppp) and allowed_ppp > 0 and long_mean > 0
+                        and player_possessions_while_on_court > 0):
+                    player_ppp_per_100 = long_mean / player_possessions_while_on_court * 100.0
+                    positional_discrepancy = allowed_ppp - player_ppp_per_100
+                    discrepancy_pct = (allowed_ppp / player_ppp_per_100 - 1.0) * 100.0 if player_ppp_per_100 > 0 else 0.0
+                    matchup_factor = max(0.92, min(1.08, 1.0 + discrepancy_pct / 100.0 * 0.25))
+                    target_mean *= matchup_factor
+                    matchup_adjustment["player_points_per_100_possessions"] = round(player_ppp_per_100, 3)
+                    matchup_adjustment["player_possessions_while_on_court"] = round(player_possessions_while_on_court, 2)
+                    matchup_adjustment["player_vs_allowed_ppp_difference"] = round(positional_discrepancy, 3)
+                    matchup_adjustment["player_vs_allowed_pct"] = round(discrepancy_pct, 2)
+                    matchup_adjustment["adjustment_pct"] = round((matchup_factor - 1.0) * 100.0, 2)
+            else:
+                allowed = float(matchup_adjustment.get("allowed_per_game_reference"))
+                if math.isfinite(allowed) and long_mean > 0:
+                    positional_discrepancy = allowed - long_mean
+                    discrepancy_pct = positional_discrepancy / long_mean * 100.0
+                    matchup_factor = max(0.92, min(1.08, 1.0 + discrepancy_pct / 100.0 * 0.25))
+                    target_mean *= matchup_factor
+                    matchup_adjustment["player_average"] = round(long_mean, 2)
+                    matchup_adjustment["player_vs_allowed_difference"] = round(positional_discrepancy, 2)
+                    matchup_adjustment["player_vs_allowed_pct"] = round(discrepancy_pct, 2)
+                    matchup_adjustment["adjustment_pct"] = round((matchup_factor - 1.0) * 100.0, 2)
         except (TypeError, ValueError, OverflowError):
             matchup_factor = 1.0
 
