@@ -2372,9 +2372,13 @@ def _snapshot_daily_market_top5(market, props):
 
 
 def _revalidate_frozen_market_candidates(market, candidates, injury_feed):
-    """Re-rank the shared nightly card; never create a per-market Top 5."""
+    """Return the persisted combined Top 3 annotations; never create per-market picks."""
+    slate_date = _active_nba_slate_date()
     try:
-        _lock_daily_top_three(_active_nba_slate_date())
+        _lock_daily_top_three(slate_date)
+        refreshed = prediction_ledger.get_daily_slate(market, slate_date)
+        if refreshed and isinstance(refreshed.get("candidates"), list):
+            candidates = refreshed["candidates"]
     except Exception:
         pass
     ordered = [dict(p) for p in candidates if isinstance(p, dict)]
