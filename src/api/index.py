@@ -2495,11 +2495,13 @@ def _lock_daily_top_three(slate_date):
     ), reverse=True)
 
     selected, seen = [], set()
+    reviewed_candidates = 0
     for p in eligible:
         key = (_norm_player_name(p.get("player")), str(p.get("game") or "").casefold())
         if not key[0] or key in seen:
             continue
         seen.add(key)
+        reviewed_candidates += 1
         market = p["market"]
         try:
             _apply_absent_teammate_minutes(p, market, injury_feed)
@@ -2521,10 +2523,18 @@ def _lock_daily_top_three(slate_date):
         p["post_selection_reviewed"] = True
         if passed:
             selected.append(p)
-            if len(selected) == 3:
-                break
         else:
             p["negative_review"] = {"status": "rejected", "reason": reason}
+        if reviewed_candidates >= 12:
+            break
+
+    # Re-rank a wider provisional pool after injury and teammate-role adjustments.
+    selected.sort(key=lambda p: (
+        float(p.get("expected_value_pct") or -1e9),
+        float(p.get("edge_pp") or 0),
+        float(p.get("play_grade") if p.get("play_grade") is not None else -1.0)
+    ), reverse=True)
+    selected = selected[:3]
 
     # Risk review may reprice an UNDER or adjust its probability. Rank the
     # final approved selections using their post-review EV, not stale pre-review EV.
