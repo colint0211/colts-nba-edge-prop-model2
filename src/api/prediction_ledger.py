@@ -98,6 +98,11 @@ def save_predictions(rows, market=None):
             if not isinstance(prediction, dict):
                 skipped += 1
                 continue
+            # Calibration/candidate observations are research data, never bets.
+            # Keep them in the frozen slate/archive tables, not the official ledger.
+            if prediction.get("calibration_sample") and not prediction.get("daily_top5"):
+                skipped += 1
+                continue
 
             market_name = str(
                 prediction.get("market") or market or "points"
