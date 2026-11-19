@@ -6,6 +6,7 @@ import math
 import random
 import time
 import re
+import xml.etree.ElementTree as ET
 from difflib import SequenceMatcher
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -2450,6 +2451,163 @@ def _post_selection_negative_review(prop, market, injury_feed):
     return True, "Passed post-selection negative review"
 
 
+_PRE_PICK_CONTEXT_CACHE = {"at": 0.0, "data": None}
+_PRE_PICK_CONTEXT_TTL = 300
+
+
+def _news_xml_items(payload, source, limit=30):
+    """Parse RSS/Atom news items into a small, auditable structure."""
+    root = ET.fromstring(payload)
+    items = []
+    for node in root.iter():
+        tag = str(node.tag).split("}")[-1].lower()
+        if tag not in ("item", "entry"):
+            continue
+        values = {}
+        for child in list(node):
+            key = str(child.tag).split("}")[-1].lower()
+            if key == "link":
+                values[key] = child.attrib.get("href") or (child.text or "").strip()
+            elif key in ("title", "description", "summary", "pubdate", "published", "updated"):
+                values[key] = " ".join("".join(child.itertext()).split())
+        title = values.get("title")
+        link = values.get("link")
+        if title and link:
+            items.append({
+                "source": source,
+                "title": title[:300],
+                "summary": (values.get("description") or values.get("summary") or "")[:600],
+                "published": values.get("pubdate") or values.get("published") or values.get("updated"),
+                "url": link[:1000],
+            })
+        if len(items) >= limit:
+            break
+    return items
+
+
+def _load_pre_pick_news_context(slate_date, candidate_rows):
+    """Require a fresh depth-chart snapshot and two independent news feeds before locking."""
+    now = time.time()
+    cached = _PRE_PICK_CONTEXT_CACHE.get("data")
+    if cached and now - _PRE_PICK_CONTEXT_CACHE.get("at", 0.0) < _PRE_PICK_CONTEXT_TTL:
+        if cached.get("slate_date") == str(slate_date):
+            return cached
+
+    teams = set()
+    players = set()
+    for prop in candidate_rows or []:
+        if not isinstance(prop, dict):
+            continue
+        players.add(str(prop.get("player") or "").strip())
+        team = _canonical_team_code(prop.get("team") or prop.get("roster_team"))
+        if team:
+            teams.add(team)
+        teams.update(_team_codes_from_game(prop.get("game")))
+    teams = sorted(code for code in teams if code in _TEAM_NAMES)
+    if not teams:
+        return {
+            "status": "blocked", "reason": "No verified slate teams could be derived from the candidate boards.",
+            "slate_date": str(slate_date), "teams_checked": [],
+        }
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (compatible; ColtsNBAEdge/1.0; +https://www.nba.com/)",
+        "Accept": "text/html,application/rss+xml,application/xml;q=0.9,*/*;q=0.8",
+    }
+    fetched_at = datetime.now(timezone.utc).isoformat()
+    source_checks = {}
+    depth_chart = {}
+    news_items = []
+
+    # RotoWire's public depth-chart page is used as a role-order cross-check,
+    # not as an authoritative lineup or injury designation.
+    try:
+        request = Request("https://www.rotowire.com/basketball/nba-depth-charts/", headers=headers)
+        with urlopen(request, timeout=8) as response:
+            html = response.read().decode("utf-8", "replace")
+            depth_chart["http_status"] = getattr(response, "status", 200)
+            depth_chart["final_url"] = response.geturl()
+        parser = _DVPHTMLParser()
+        parser.feed(html)
+        page_text = " ".join(parser.text).casefold()
+        missing = [_TEAM_NAMES[code] for code in teams if _TEAM_NAMES[code].casefold() not in page_text]
+        if missing:
+            raise RuntimeError("Depth-chart page missing slate teams: " + ", ".join(missing))
+        depth_chart.update({
+            "status": "ok",
+            "source": "RotoWire NBA depth charts",
+            "url": "https://www.rotowire.com/basketball/nba-depth-charts/",
+            "teams_present": teams,
+            "retrieved_at": datetime.now(timezone.utc).isoformat(),
+            "note": "Role-order reference only; official injury report and confirmed lineups take precedence.",
+        })
+        source_checks["depth_chart"] = "ok"
+    except Exception as exc:
+        depth_chart = {"status": "unavailable", "error": type(exc).__name__}
+        source_checks["depth_chart"] = "failed"
+
+    # ESPN newswire plus Google News' team-specific query provide independent
+    # headline discovery. Headlines are evidence to review, never auto-converted
+    # into confirmed injury statuses.
+    feeds = [
+        ("ESPN NBA news", "https://www.espn.com/espn/rss/nba/news"),
+        ("Google News NBA slate search", "https://news.google.com/rss/search?" + urlencode({
+            "q": "(" + " OR ".join('"' + _TEAM_NAMES[code] + '"' for code in teams) +
+                 ') (injury OR injured OR out OR questionable OR lineup OR rotation OR minutes OR return) when:1d',
+            "hl": "en-US", "gl": "US", "ceid": "US:en",
+        })),
+    ]
+    for label, url in feeds:
+        try:
+            request = Request(url, headers=headers)
+            with urlopen(request, timeout=8) as response:
+                body = response.read(1_500_000)
+                status_code = getattr(response, "status", 200)
+            parsed = _news_xml_items(body, label, limit=40)
+            news_items.extend(parsed)
+            source_checks[label] = "ok" if status_code == 200 else "failed"
+        except Exception as exc:
+            source_checks[label] = "failed:" + type(exc).__name__
+
+    # Keep only slate-relevant articles; do not infer a player status from a headline.
+    team_names = [_TEAM_NAMES[code].casefold() for code in teams]
+    relevant = []
+    for item in news_items:
+        searchable = (item.get("title", "") + " " + item.get("summary", "")).casefold()
+        if any(name in searchable for name in team_names) or any(
+            _norm_player_name(player) and _norm_player_name(player) in _norm_player_name(searchable)
+            for player in players if len(_norm_player_name(player)) >= 5
+        ):
+            relevant.append(item)
+    # Deduplicate by URL while preserving source order.
+    unique, seen_urls = [], set()
+    for item in relevant:
+        url = item.get("url")
+        if url and url not in seen_urls:
+            seen_urls.add(url)
+            unique.append(item)
+    required_ok = (
+        source_checks.get("depth_chart") == "ok"
+        and source_checks.get("ESPN NBA news") == "ok"
+        and source_checks.get("Google News NBA slate search") == "ok"
+    )
+    result = {
+        "status": "ready" if required_ok else "blocked",
+        "reason": None if required_ok else "One or more required news/depth-chart sources failed; no new picks may be locked.",
+        "slate_date": str(slate_date),
+        "fetched_at_utc": fetched_at,
+        "teams_checked": teams,
+        "source_checks": source_checks,
+        "depth_chart": depth_chart,
+        "news_articles": unique[:30],
+        "relevant_article_count": len(unique),
+        "candidate_player_count": len(players),
+        "method": "Official NBA injury report + RotoWire depth chart + ESPN NBA RSS + Google News team-specific RSS; headlines are leads, not confirmed statuses.",
+    }
+    _PRE_PICK_CONTEXT_CACHE.update({"at": now, "data": result})
+    return result
+
+
 def _lock_daily_top_three(slate_date):
     """Rank Points and Threes together after injury/rotation repricing of the full pool."""
     markets = ("points", "threes")
@@ -2478,6 +2636,18 @@ def _lock_daily_top_three(slate_date):
             "reason": "waiting_for_fresh_official_injury_report",
             "injury_feed": injury_feed.get("meta", {}) if isinstance(injury_feed, dict) else {},
             "message": "No picks will be locked until a fresh official NBA injury report for this slate date is available.",
+        }
+
+    # Mandatory pre-pick intelligence gate: current depth chart and two
+    # independent news feeds must be reachable before any new selection.
+    all_candidates = [p for rows in slates.values() for p in rows]
+    news_context = _load_pre_pick_news_context(slate_date, all_candidates)
+    if news_context.get("status") != "ready":
+        return {
+            "locked": False,
+            "reason": "waiting_for_pre_pick_news_and_depth_chart",
+            "news_context": news_context,
+            "message": "No new picks were locked because the required news-wire/depth-chart checks did not complete.",
         }
 
     # Critical ordering: apply confirmed injury and historical teammate on/off
@@ -2578,6 +2748,13 @@ def _lock_daily_top_three(slate_date):
         p["daily_top5"] = True
         p["slate_date"] = slate_date
         p["play_instruction"] = f"PLAY {p['best_side']} {p.get('line')} {p['market'].upper()}"
+        p["pre_pick_intelligence"] = {
+            "checked_at_utc": news_context.get("fetched_at_utc"),
+            "teams_checked": news_context.get("teams_checked"),
+            "sources": news_context.get("source_checks"),
+            "depth_chart_source": (news_context.get("depth_chart") or {}).get("url"),
+            "relevant_news_articles": news_context.get("news_articles", [])[:10],
+        }
 
     saved = 0
     for market in markets:
