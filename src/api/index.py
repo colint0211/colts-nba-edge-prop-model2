@@ -31,6 +31,7 @@ class JSONResponse(StarletteJSONResponse):
 from . import prediction_ledger, game_model
 from .star_backtest import router as star_backtest_router
 from .away_ats_tracker import router as away_ats_router
+from .benter_research import router as benter_research_router
 from pathlib import Path
 from html.parser import HTMLParser
 from zoneinfo import ZoneInfo
@@ -40,6 +41,7 @@ LIVE_UPSTREAM = "https://colts-nba-edge-prop-model-3xj6ghyhl-colin-82ad.vercel.a
 app = FastAPI()
 app.include_router(away_ats_router)
 app.include_router(star_backtest_router)
+app.include_router(benter_research_router)
 BP_MARKETS = {"points": 156, "threes": 162}
 ACTIVE_PROP_MARKETS = ("points", "threes")
 @app.get("/", response_class=HTMLResponse)
