@@ -2066,7 +2066,7 @@ def _injury_feed_valid_for_slate(feed, slate_date):
     if not isinstance(feed, dict) or feed.get("meta", {}).get("status") != "fresh":
         return False
     report_stamp = str(feed.get("meta", {}).get("report_timestamp_et") or "")
-    report_day = report_stamp[:10] if re.match(r"^\\d{4}-\\d{2}-\\d{2}", report_stamp) else ""
+    report_day = report_stamp[:10] if re.match(r"^\d{4}-\d{2}-\d{2}", report_stamp) else ""
     if report_day != str(slate_date):
         return False
     return True
