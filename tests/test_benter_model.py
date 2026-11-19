@@ -78,7 +78,32 @@ class BenterModelTests(unittest.TestCase):
         self.assertGreater(metrics["n"], 0)
         self.assertGreaterEqual(metrics["brier"], 0.0)
 
-    def test_walk_forward_rejects_push_target(self):
+
+    def test_feature_contract_requires_verified_pregame_data(self):
+        from src.api.benter_features import POINTS_FEATURE_NAMES, build_points_feature_vector
+        snapshot = {
+            "source_status": "verified",
+            "feature_as_of": "2026-11-01T18:00:00-04:00",
+            "tipoff_at": "2026-11-01T19:00:00-04:00",
+        }
+        snapshot.update({name: 0.0 for name in POINTS_FEATURE_NAMES})
+        snapshot.update({
+            "projected_minutes": 34.0,
+            "points_per_minute_l5": 0.75,
+            "points_per_minute_l10": 0.72,
+            "points_per_minute_season": 0.70,
+            "usage_rate": 0.29,
+            "team_pace": 99.0,
+            "opponent_pace": 101.0,
+            "opponent_def_rating": 112.0,
+            "rest_days": 1.0,
+            "projection_minus_line": 2.5,
+        })
+        self.assertEqual(len(build_points_feature_vector(snapshot)), len(POINTS_FEATURE_NAMES))
+        snapshot["feature_as_of"] = "2026-11-01T19:01:00-04:00"
+        with self.assertRaises(ValueError):
+            build_points_feature_vector(snapshot)
+\n    def test_walk_forward_rejects_push_target(self):
         with self.assertRaises(ValueError):
             walk_forward_benter([{
                 "date": "2026-11-01",
