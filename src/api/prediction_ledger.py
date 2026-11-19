@@ -788,6 +788,23 @@ def freeze_daily_slate(market, slate_date, candidates):
     }
 
 
+def update_daily_slate_candidates(market, slate_date, candidates):
+    """Update annotations/order on an already frozen candidate board without changing its source rows."""
+    market = str(market or "").strip().lower()
+    slate_date = str(slate_date or "").strip()
+    if market not in ("points", "threes"):
+        raise ValueError("Only points and threes are active markets.")
+    payload = json.dumps(
+        [row for row in (candidates or []) if isinstance(row, dict)],
+        default=str, separators=(",", ":"), allow_nan=False
+    )
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE nba_daily_slates SET candidates=%s::jsonb WHERE market=%s AND slate_date=%s",
+            (payload, market, slate_date),
+        )
+
+
 def get_daily_slate(market, slate_date):
     market = str(market or "").strip().lower()
     slate_date = str(slate_date or "").strip()
