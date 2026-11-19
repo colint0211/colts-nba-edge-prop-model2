@@ -103,7 +103,8 @@ class BenterModelTests(unittest.TestCase):
         snapshot["feature_as_of"] = "2026-11-01T19:01:00-04:00"
         with self.assertRaises(ValueError):
             build_points_feature_vector(snapshot)
-\n    def test_walk_forward_rejects_push_target(self):
+
+    def test_walk_forward_rejects_push_target(self):
         with self.assertRaises(ValueError):
             walk_forward_benter([{
                 "date": "2026-11-01",
