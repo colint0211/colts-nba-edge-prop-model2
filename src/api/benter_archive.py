@@ -142,8 +142,17 @@ def _ensure_table(conn):
           fetched_at TIMESTAMPTZ NOT NULL,
           market_last_update TIMESTAMPTZ,
           raw_quote JSONB NOT NULL DEFAULT '{}'::jsonb,
+          actual_value DOUBLE PRECISION,
+          outcome TEXT,
+          settled_at TIMESTAMPTZ,
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
+        ALTER TABLE nba_benter_market_archive
+          ADD COLUMN IF NOT EXISTS actual_value DOUBLE PRECISION;
+        ALTER TABLE nba_benter_market_archive
+          ADD COLUMN IF NOT EXISTS outcome TEXT;
+        ALTER TABLE nba_benter_market_archive
+          ADD COLUMN IF NOT EXISTS settled_at TIMESTAMPTZ;
         CREATE INDEX IF NOT EXISTS nba_benter_archive_event_market
           ON nba_benter_market_archive(event_id, market, fetched_at DESC);
         CREATE INDEX IF NOT EXISTS nba_benter_archive_player_date
@@ -276,3 +285,85 @@ def draftkings_archive_status():
         }
     except Exception as exc:
         raise HTTPException(status_code=503, detail="DraftKings archive status unavailable: " + type(exc).__name__)
+
+
+@router.get("/api/research/benter/archive/settle")
+def settle_completed_draftkings_quotes():
+    """Attach official ESPN game-log outcomes to archived DK quote snapshots."""
+    try:
+        from zoneinfo import ZoneInfo
+        from . import index as app_module
+        eastern = ZoneInfo("America/New_York")
+        with _connect() as conn:
+            _ensure_table(conn)
+            rows = conn.execute("""
+                SELECT event_id,event,event_start,market,player,player_key,team,line
+                FROM nba_benter_market_archive
+                WHERE actual_value IS NULL AND event_start IS NOT NULL
+                  AND event_start < NOW()
+                GROUP BY event_id,event,event_start,market,player,player_key,team,line
+                ORDER BY event_start ASC
+                LIMIT 500
+            """).fetchall()
+
+        grouped_results = {}
+        skipped = []
+        for event_id,event,event_start,market,player,player_key,team,line in rows:
+            game_date = event_start.astimezone(eastern).date().isoformat()
+            teams = app_module._team_codes_from_game(event or "")
+            if len(teams) != 2:
+                skipped.append({"event_id":event_id,"player":player,"reason":"unverified_matchup"})
+                continue
+            athlete_id, roster_team = app_module._espn_roster_player_id(player, teams)
+            if not athlete_id or (team and roster_team and team.upper() != roster_team.upper()):
+                skipped.append({"event_id":event_id,"player":player,"reason":"player_identity_not_verified"})
+                continue
+            field,label = app_module.STAT_FIELDS[market]
+            records = app_module._gamelog_records(athlete_id, field, label, 2027)
+            matching = [
+                item for item in records
+                if str(item.get("date") or "")[:10] == game_date
+                and isinstance(item.get("value"), (int,float))
+                and math.isfinite(float(item["value"]))
+            ]
+            if len(matching) != 1:
+                skipped.append({"event_id":event_id,"player":player,"reason":"no_unique_official_game_log"})
+                continue
+            actual = float(matching[0]["value"])
+            if math.isclose(actual, float(line), rel_tol=0.0, abs_tol=1e-9):
+                outcome = "PUSH"
+            else:
+                outcome = "OVER" if actual > float(line) else "UNDER"
+            grouped_results[(event_id,market,player_key,float(line))] = (actual,outcome)
+
+        updated = 0
+        with _connect() as conn:
+            _ensure_table(conn)
+            for (event_id,market,player_key,line),(actual,outcome) in grouped_results.items():
+                cur = conn.execute("""
+                    UPDATE nba_benter_market_archive
+                    SET actual_value=%s,outcome=%s,settled_at=NOW()
+                    WHERE event_id=%s AND market=%s AND player_key=%s
+                      AND line=%s AND actual_value IS NULL
+                """,(actual,outcome,event_id,market,player_key,line))
+                updated += max(0,cur.rowcount)
+            totals = conn.execute("""
+                SELECT COUNT(*),COUNT(*) FILTER (WHERE actual_value IS NOT NULL),
+                       COUNT(DISTINCT event_id) FILTER (WHERE actual_value IS NOT NULL)
+                FROM nba_benter_market_archive
+            """).fetchone()
+        return {
+            "status":"settled" if updated else "no_new_settlements",
+            "unique_player_lines_checked":len(rows),
+            "unique_player_lines_resolved":len(grouped_results),
+            "quote_snapshots_updated":updated,
+            "skipped_count":len(skipped),
+            "archive":{"total_quote_snapshots":totals[0],"settled_quote_snapshots":totals[1],
+                       "events_with_settlements":totals[2]},
+            "skipped_examples":skipped[:20],
+            "settlement_source":"ESPN regular-season player game logs; exact roster identity and Eastern-local game-date match required.",
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=503,detail="DraftKings archive settlement failed: "+type(exc).__name__)
