@@ -2242,184 +2242,146 @@ def _post_selection_negative_review(prop, market, injury_feed):
     return True, "Passed post-selection negative review"
 
 
+def _lock_daily_top_three(slate_date):
+    """Rank Points and Threes together and lock only the three best qualified bets."""
+    markets = ("points", "threes")
+    slates = {}
+    for market in markets:
+        slate = prediction_ledger.get_daily_slate(market, slate_date)
+        if not slate or not isinstance(slate.get("candidates"), list):
+            return {"locked": False, "reason": "waiting_for_both_market_boards"}
+        slates[market] = [dict(p, market=market) for p in slate["candidates"] if isinstance(p, dict)]
+
+    injury_feed = _load_official_injury_feed()
+    eligible = []
+    for market, rows in slates.items():
+        for p in rows:
+            if p.get("injury_blocked") or p.get("injury_flag"):
+                continue
+            if p.get("recommendation") not in ("VALUE CANDIDATE", "LEAN / VERIFY"):
+                continue
+            try:
+                ev = float(p.get("expected_value_pct"))
+                sample = int(p.get("sample_size") or p.get("games_used") or 0)
+                minutes = float(p.get("projected_minutes"))
+                edge = float(p.get("edge_pp") or 0.0)
+                odds = int(p.get("best_odds"))
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if (not math.isfinite(ev) or ev < 2.0 or edge < 2.0
+                    or sample < 10 or minutes < 15 or p.get("play_grade") is None
+                    or p.get("best_side") not in ("OVER", "UNDER")):
+                continue
+            p["_ranking_ev"] = ev
+            p["_ranking_edge"] = edge
+            p["_ranking_odds"] = odds
+            eligible.append(p)
+
+    # EV is the primary rank. Edge and model grade break close ties; all
+    # markets compete for the same three slots.
+    eligible.sort(key=lambda p: (
+        p["_ranking_ev"], p["_ranking_edge"],
+        float(p.get("play_grade") if p.get("play_grade") is not None else -1.0)
+    ), reverse=True)
+
+    selected, seen = [], set()
+    for p in eligible:
+        key = (_norm_player_name(p.get("player")), str(p.get("game") or "").casefold())
+        if not key[0] or key in seen:
+            continue
+        seen.add(key)
+        market = p["market"]
+        try:
+            passed, reason = _post_selection_negative_review(p, market, injury_feed)
+        except Exception as exc:
+            passed, reason = False, "Negative review failed safely: " + type(exc).__name__
+            p["negative_review"] = {"status": "review_failed", "reason": reason}
+        p["post_selection_reviewed"] = True
+        if passed:
+            selected.append(p)
+            if len(selected) == 3:
+                break
+        else:
+            p["negative_review"] = {"status": "rejected", "reason": reason}
+
+    for rank, p in enumerate(selected, 1):
+        p["selection_rank"] = rank
+        p["daily_top3"] = True
+        p["daily_top5"] = True  # retain compatibility with existing history/UI endpoints
+        p["slate_date"] = slate_date
+        p["play_instruction"] = (
+            f"PLAY {p['best_side']} {p.get('line')} {p['market'].upper()}"
+        )
+
+    # Persist only the selected rows. The per-market writer is retained, but
+    # each group is a subset of the global three-pick card.
+    saved = 0
+    for market in markets:
+        market_rows = [p for p in selected if p["market"] == market]
+        if market_rows:
+            result = prediction_ledger.save_daily_top_five(market_rows, market, slate_date)
+            saved += int(result.get("saved", 0))
+
+    selected_keys = {
+        (_norm_player_name(p.get("player")), str(p.get("game") or "").casefold(), p["market"])
+        for p in selected
+    }
+    for market, rows in slates.items():
+        for p in rows:
+            key = (_norm_player_name(p.get("player")), str(p.get("game") or "").casefold(), market)
+            if key not in selected_keys and p.get("negative_review") is None:
+                p["negative_review"] = {
+                    "status": "not_selected",
+                    "reason": "Outside the combined nightly Top 3 across Points and Threes"
+                }
+        rows.sort(key=lambda p: (
+            0 if (_norm_player_name(p.get("player")), str(p.get("game") or "").casefold(), market) in selected_keys else 1,
+            -float(p.get("expected_value_pct") or -1e9)
+        ))
+        prediction_ledger.freeze_daily_slate(market, slate_date, rows)
+
+    return {"locked": True, "selected": len(selected), "saved": saved, "picks": selected}
+
+
 def _snapshot_daily_market_top5(market, props):
-    """Select initial Top 5, then run targeted negative review and promote replacements."""
+    """Freeze a market's candidate pool; lock only after both markets are available."""
     try:
         now_et = datetime.now(ZoneInfo("America/New_York"))
         slate_date = _active_nba_slate_date(now_et)
         prediction_ledger.initialize()
-        existing_slate = prediction_ledger.get_daily_slate(market, slate_date)
-        if existing_slate and existing_slate.get("candidates"):
-            return existing_slate["candidates"]
         if now_et.hour < 7:
             return None
-        calibration_rows = []
-        for prop in props or []:
-            if not isinstance(prop, dict) or prop.get("best_side") not in ("OVER", "UNDER"):
-                continue
-            if prop.get("best_odds") is None or prop.get("best_probability") is None:
-                continue
-            sample = int(prop.get("sample_size") or prop.get("games_used") or 0)
-            if sample < 4:
-                continue
-            item = dict(prop)
-            item["market"] = market
-            item["calibration_sample"] = True
-            item["slate_date"] = slate_date
-            calibration_rows.append(item)
-        # Candidate snapshots belong only in nba_daily_slates.candidates.
-        # Do not write the full market pool into nba_predictions: that table is
-        # the official bet ledger and must contain only locked daily Top 5 picks
-        # (plus explicit user-entered custom lines).
-        ordered = sorted(
-            [dict(p, market=market) for p in (props or []) if isinstance(p, dict)],
-            key=lambda item: (float(item.get("play_grade") if item.get("play_grade") is not None else -1.0), float(item.get("expected_value_pct") if item.get("expected_value_pct") is not None else -1e9)),
-            reverse=True,
-        )
-        if not ordered:
-            return []
-        frozen = prediction_ledger.freeze_daily_slate(market, slate_date, ordered)
-        candidates = [dict(p) for p in (frozen.get("candidates") or []) if isinstance(p, dict)]
-        injury_feed = _load_official_injury_feed()
-        eligible = []
-        for prop in candidates:
-            if prop.get("injury_blocked") or prop.get("injury_flag"):
-                continue
-            if prop.get("recommendation") not in ("VALUE CANDIDATE", "LEAN / VERIFY"):
-                continue
-            # Mixed current/prior-season samples are allowed into the risk review;
-            # the review, not a blanket label filter, decides whether they survive.
-            try:
-                ev = float(prop.get("expected_value_pct"))
-                sample = int(prop.get("sample_size") or prop.get("games_used") or 0)
-                minutes = float(prop.get("projected_minutes"))
-            except (TypeError, ValueError, OverflowError):
-                continue
-            edge = float(prop.get("edge_pp") or 0.0)
-            if not math.isfinite(ev) or ev < 2.0 or edge < 2.0 or sample < 10 or minutes < 15:
-                continue
-            if prop.get("play_grade") is None:
-                continue
-            if prop.get("best_side") not in ("OVER", "UNDER") or prop.get("best_odds") is None:
-                continue
-            eligible.append(prop)
-        eligible.sort(key=lambda item: (
-            float(item.get("expected_value_pct") or 0),
-            float(item.get("edge_pp") or 0),
-            float(item.get("play_grade") if item.get("play_grade") is not None else -1.0),
-        ), reverse=True)
-
-        # The expensive injury/workload lookups happen only for provisional picks
-        # and, if one is removed, the next best candidate needed to fill the slot.
-        selected, seen = [], set()
-        reviewed = 0
-        removed = []
-        for prop in eligible:
-            key = (_norm_player_name(prop.get("player")), str(prop.get("game") or "").casefold())
-            if key in seen:
-                continue
-            seen.add(key)
-            reviewed += 1
-            try:
-                passed, reason = _post_selection_negative_review(prop, market, injury_feed)
-            except Exception as review_error:
-                passed = False
-                reason = "Negative review failed safely: " + type(review_error).__name__
-                prop["negative_review"] = {"status": "review_failed", "reason": reason}
-            if passed:
-                selected.append(prop)
-                if len(selected) == 5:
-                    break
-            else:
-                removed.append({
-                    "player": prop.get("player"),
-                    "side": prop.get("best_side"),
-                    "reason": reason,
-                })
-        for prop in candidates:
-            if prop.get("negative_review") is None:
-                prop["negative_review"] = {"status": "not_reviewed", "reason": "Outside provisional Top 5 and not needed as a replacement"}
-        if selected:
-            for index, prop in enumerate(selected, 1):
-                prop["selection_rank"] = index
-                prop["post_selection_reviewed"] = True
-                side = str(prop.get("best_side") or "").upper()
-                line = prop.get("line")
-                prop["play_instruction"] = (
-                    f"PLAY {side} {line} {market.upper()}"
-                    if side in ("OVER", "UNDER") and line is not None
-                    else "NO PLAY"
-                )
-            prediction_ledger.save_daily_top_five(selected, market, slate_date)
-            # Keep selected picks first in the frozen board; leave the remaining
-            # market candidates available as a replacement audit trail.
-            selected_keys = {
-                (_norm_player_name(p.get("player")), str(p.get("game") or "").casefold())
-                for p in selected
-            }
-            candidates.sort(
+        existing = prediction_ledger.get_daily_slate(market, slate_date)
+        if not existing or not existing.get("candidates"):
+            ordered = sorted(
+                [dict(p, market=market) for p in (props or []) if isinstance(p, dict)],
                 key=lambda p: (
-                    (_norm_player_name(p.get("player")), str(p.get("game") or "").casefold()) not in selected_keys,
-                    -float(p.get("expected_value_pct") or -1e9),
-                )
+                    float(p.get("play_grade") if p.get("play_grade") is not None else -1.0),
+                    float(p.get("expected_value_pct") if p.get("expected_value_pct") is not None else -1e9)
+                ),
+                reverse=True,
             )
-        return candidates
+            if ordered:
+                prediction_ledger.freeze_daily_slate(market, slate_date, ordered)
+        # This call intentionally waits until both Points and Threes snapshots exist.
+        _lock_daily_top_three(slate_date)
+        frozen = prediction_ledger.get_daily_slate(market, slate_date)
+        return [dict(p) for p in (frozen.get("candidates") or []) if isinstance(p, dict)] if frozen else []
     except Exception:
         return None
 
+
 def _revalidate_frozen_market_candidates(market, candidates, injury_feed):
-    """Re-run the post-selection risk gate against today's immutable source snapshot."""
-    ordered = sorted(
-        [dict(p) for p in candidates if isinstance(p, dict)],
-        key=lambda p: (
-            float(p.get("expected_value_pct") or 0),
-            float(p.get("edge_pp") or 0),
-            float(p.get("play_grade") if p.get("play_grade") is not None else -1.0),
-        ),
-        reverse=True,
-    )
-    eligible = []
-    for p in ordered:
-        if p.get("recommendation") not in ("VALUE CANDIDATE", "LEAN / VERIFY"):
-            continue
-        # Mixed current/prior-season samples must undergo the workload review.
-        try:
-            ev=float(p.get("expected_value_pct"))
-            sample=int(p.get("sample_size") or p.get("games_used") or 0)
-            minutes=float(p.get("projected_minutes"))
-            edge=float(p.get("edge_pp") or 0.0)
-        except (TypeError,ValueError,OverflowError):
-            continue
-        if not math.isfinite(ev) or ev < 2.0 or edge < 2.0 or sample < 10 or minutes < 15:
-            continue
-        if p.get("play_grade") is None:
-            continue
-        if p.get("best_side") not in ("OVER","UNDER") or p.get("best_odds") is None:
-            continue
-        eligible.append(p)
-    selected=[]; seen=set()
-    for p in eligible:
-        key=(_norm_player_name(p.get("player")),str(p.get("game") or "").casefold())
-        if key in seen: continue
-        seen.add(key)
-        try:
-            passed, reason=_post_selection_negative_review(p,market,injury_feed)
-        except Exception as exc:
-            passed=False; reason="Negative review failed safely: "+type(exc).__name__
-            p["negative_review"]={"status":"review_failed","reason":reason}
-        p["post_selection_reviewed"]=True
-        if passed and p.get("best_side") in ("OVER","UNDER") and float(p.get("expected_value_pct") or 0)>0:
-            selected.append(p)
-            if len(selected)==5: break
-    selected_keys={(_norm_player_name(p.get("player")),str(p.get("game") or "").casefold()) for p in selected}
-    for p in ordered:
-        key=(_norm_player_name(p.get("player")),str(p.get("game") or "").casefold())
-        if key not in selected_keys and p.get("negative_review") is None:
-            p["negative_review"]={"status":"not_reviewed","reason":"Not selected for targeted post-selection review"}
-    for rank,p in enumerate(selected,1): p["selection_rank"]=rank
-    if selected:
-        prediction_ledger.save_daily_top_five(selected,market,_active_nba_slate_date())
-    ordered.sort(key=lambda p: (0 if (_norm_player_name(p.get("player")),str(p.get("game") or "").casefold()) in selected_keys else 1,-float(p.get("expected_value_pct") or -1e9)))
+    """Re-rank the shared nightly card; never create a per-market Top 5."""
+    try:
+        _lock_daily_top_three(_active_nba_slate_date())
+    except Exception:
+        pass
+    ordered = [dict(p) for p in candidates if isinstance(p, dict)]
+    ordered.sort(key=lambda p: (
+        0 if p.get("daily_top3") else 1,
+        -float(p.get("expected_value_pct") or -1e9)
+    ))
     return ordered
 
 @app.get("/api/proprietary-market-board")
