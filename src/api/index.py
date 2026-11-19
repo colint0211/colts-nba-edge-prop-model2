@@ -3589,17 +3589,15 @@ async def cron_settle_pending(request: FastRequest):
 
 @app.post("/api/model/daily-top5")
 async def save_daily_top5(request: FastRequest):
-    try:
-        payload = await request.json()
-        prediction_ledger.initialize()
-        result = prediction_ledger.save_daily_top_five(
-            payload.get("props") or [], payload.get("market"), payload.get("slate_date")
-        )
-        return JSONResponse(result)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(status_code=503, detail="Could not save daily Top 5 picks.") from exc
+    # Legacy browser clients used to post five picks per market independently.
+    # That bypassed the combined cross-market Top 3 selector, so this route is
+    # intentionally non-writing. The server locks the shared card only after
+    # both frozen market boards are available.
+    return JSONResponse({
+        "saved": 0,
+        "status": "server_selected",
+        "message": "Official picks are selected together across Points and 3-Pointers."
+    })
 
 
 # A dashboard history refresh also acts as a live settlement heartbeat.
