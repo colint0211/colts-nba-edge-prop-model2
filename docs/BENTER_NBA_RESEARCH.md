@@ -76,10 +76,13 @@ weights.
 The existing settled Points ledger contains 113 win/loss rows but only three
 distinct slate dates in its current stored sample: 39 rows on October 30, 70
 on November 17, and 4 on November 18, 2026. It is a selected-pick ledger, not a
-complete archive of every DraftKings prop. A date-grouped two-stage pilot can
+complete archive of every DraftKings prop. Its stored market probabilities and
+best-side prices may blend DraftKings and FanDuel, so the current pilot is not a
+DraftKings-only ROI evaluation. A date-grouped two-stage pilot can
 therefore produce at most a four-pick final holdout from the current rows.
 That sample is useful for checking the pipeline, not for claiming an edge.
 
 A meaningful Benter evaluation needs daily archived pregame features, both
-sides' DraftKings prices at the exact line, and final box-score settlement for
+sides' DraftKings prices at the exact line (from DraftKings itself, not a
+best-price blend), and final box-score settlement for
 a much larger chronological sample. This is the next data-collection milestone.
