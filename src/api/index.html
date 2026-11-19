@@ -603,7 +603,7 @@ function render(){
   const q=el('search').value.toLowerCase();let list=[];
   if(market==='ev'){
     const pending=['threes'].filter(m=>bpLoading[m]||!bpCache[m]);
-    if(pending.length){el('count').textContent='Loading the two active markets…';el('cards').innerHTML='<div class="empty">Building the cross-market Top 5 EV board. Checking both active markets before ranking.</div>';return;}
+    if(pending.length){el('count').textContent='Loading the two active markets…';el('cards').innerHTML='<div class="empty">Building the combined nightly Top 3. Checking Points and 3-Pointers together.</div>';return;}
     list=allModelEV();
     if(q)list=list.filter(p=>(p.player+' '+(p.team||p.roster_team||'')+' '+(p.game||'')).toLowerCase().includes(q));
     list=list.slice(0,3);
@@ -624,7 +624,7 @@ function render(){
   if(!Array.isArray(a)){el('count').textContent='Loading';el('cards').innerHTML='<div class="empty">Loading proprietary '+esc(bpMarketLabel(market))+' model…</div>';return}
   list=a.slice().sort((x,y)=>Number(y.play_grade??-1)-Number(x.play_grade??-1)||Number(y.expected_profit_per_100??-999)-Number(x.expected_profit_per_100??-999));
   if(q)list=list.filter(p=>(p.player+' '+p.team+' '+p.game).toLowerCase().includes(q));
-  list=list.slice(0,5);
+  list=list.slice(0,3);
   el('count').textContent=list.length+' model projections';
   el('cards').innerHTML=list.map((p,i)=>bpLineCard(p,i)).join('')||'<div class="empty">No eligible '+esc(bpMarketLabel(market))+' projections. Players without sufficient verified game logs are excluded.</div>';
 }
