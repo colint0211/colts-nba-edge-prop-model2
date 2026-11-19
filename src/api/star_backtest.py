@@ -260,7 +260,7 @@ def _summarize(rows):
 @router.get("/api/backtest/stars/points")
 def stars_points_backtest(request: FastRequest):
     expected = os.getenv("STAR_BACKTEST_TOKEN", "")
-    supplied = request.headers.get("x-backtest-token", "")
+    supplied = request.headers.get("x-backtest-token", "") or request.query_params.get("token", "")
     if not expected or not supplied or not __import__("hmac").compare_digest(expected, supplied):
         raise HTTPException(status_code=404, detail="Not found")
 
