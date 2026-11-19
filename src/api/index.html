@@ -419,8 +419,8 @@ function dvpSummary(p){
   const sign=Number(d.adjustment_pct)>0?'+':'';
   const diff=Number(d.player_vs_allowed_difference);
   const diffText=Number.isFinite(diff)?(diff>0?'+':'')+num(diff,2):'—';
-  const unit=d.stat_unit||({points:'PPG',rebounds:'RPG',assists:'APG',steals:'SPG',threes:'3PM'}[p.market]||'per game');
-  const label=d.stat_label||({points:'points',rebounds:'rebounds',assists:'assists',steals:'steals',threes:'3-pointers made'}[p.market]||p.market||'stat');
+  const unit=d.stat_unit||({points:'PPG',threes:'3PM'}[p.market]||'per game');
+  const label=d.stat_label||({points:'points',threes:'3-pointers made'}[p.market]||p.market||'stat');
   const weights=d.blend_weights&&typeof d.blend_weights==='object'?Object.entries(d.blend_weights).map(([k,v])=>k+' '+Math.round(Number(v)*100)+'%').join(' / '):'';
   const positionMeta=[d.position_source||'Position source unavailable',d.position_confidence?d.position_confidence+' confidence':'',weights?'Blend: '+weights:''].filter(Boolean).join(' · ');
   return '<div class="card-bottom"><span>Player avg '+num(d.player_average,2)+' '+esc(unit)+' vs '+esc(d.opponent_name||d.opponent)+' allows '+num(d.allowed_per_game,2)+' to '+esc(d.position_name||positionDisplayName(d.position))+' · Gap '+diffText+'</span><span>Matchup grade '+(p.matchup_grade==null?'—':num(p.matchup_grade,1)+'/100')+'</span></div><div class="card-bottom"><span>Positional discrepancy drives 50% of play grade · Projection adjustment: '+sign+num(d.adjustment_pct,1)+'%</span></div><div class="card-bottom"><span>'+esc(positionMeta)+'</span></div>';
