@@ -344,7 +344,7 @@ function reasoning(p){
   rows.push('<div><b>Sample and reliability:</b> '+(p.games_used??p.sample_size??'—')+' games used. '+esc(p.confidence||'Provisional')+' confidence. Model probabilities remain provisional until enough settled picks are available for calibration.</div>');
   if(isFallback(p))rows.push('<div class="reason-warning"><b>Fallback safeguard:</b> This projection uses previous-season data. It is shown for context only and is excluded from Top 5 EV.</div>');
   if(p.reason)rows.push('<div><b>Model note:</b> '+esc(p.reason)+'.</div>');
-  return '<details class="reasoning" open><summary>Why this play? Player production, positional defense &amp; game context</summary><div class="reasoning-body">'+rows.join('')+'</div></details>';
+  return '<details class="reasoning" open><summary>Why this play?</summary><div class="reasoning-body">'+rows.join('')+'</div></details>';
 }
 function livePace(p){
   const st=playerLive(p)||{},g=gameFor(p)||{};
