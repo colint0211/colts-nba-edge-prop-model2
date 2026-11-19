@@ -313,7 +313,7 @@ def settle_completed_draftkings_quotes():
             event_text = str(event or "").lower()
             teams = {
                 code for code, team_name in app_module._TEAM_NAMES.items()
-                if re.search(r"\\b" + re.escape(str(team_name).lower()) + r"\\b", event_text)
+                if re.search(r"\b" + re.escape(str(team_name).lower()) + r"\b", event_text)
             }
             if len(teams) != 2:
                 skipped.append({
