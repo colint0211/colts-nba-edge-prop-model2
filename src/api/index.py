@@ -2267,8 +2267,10 @@ def _snapshot_daily_market_top5(market, props):
             item["calibration_sample"] = True
             item["slate_date"] = slate_date
             calibration_rows.append(item)
-        if calibration_rows:
-            prediction_ledger.save_predictions(calibration_rows, market)
+        # Candidate snapshots belong only in nba_daily_slates.candidates.
+        # Do not write the full market pool into nba_predictions: that table is
+        # the official bet ledger and must contain only locked daily Top 5 picks
+        # (plus explicit user-entered custom lines).
         ordered = sorted(
             [dict(p, market=market) for p in (props or []) if isinstance(p, dict)],
             key=lambda item: (float(item.get("play_grade") if item.get("play_grade") is not None else -1.0), float(item.get("expected_value_pct") if item.get("expected_value_pct") is not None else -1e9)),
