@@ -555,9 +555,7 @@ def list_daily_top_five(slate_date, market="all"):
                    outcome, actual_value, profit_units
             FROM nba_predictions
             WHERE """ + " AND ".join(clauses) + """
-            ORDER BY CASE market
-              WHEN 'points' THEN 1 WHEN 'rebounds' THEN 2 WHEN 'assists' THEN 3
-              WHEN 'steals' THEN 4 WHEN 'threes' THEN 5 ELSE 6 END, id
+            ORDER BY CASE market WHEN 'points' THEN 1 WHEN 'threes' THEN 2 ELSE 3 END, id
             """,
             args,
         ).fetchall()
@@ -750,8 +748,8 @@ def freeze_daily_slate(market, slate_date, candidates):
     """Atomically preserve the first complete candidate board for a market/day."""
     market = str(market or "").strip().lower()
     slate_date = str(slate_date or "").strip()
-    if market not in ("points", "rebounds", "assists", "steals", "threes"):
-        raise ValueError("Unsupported market")
+    if market not in ("points", "threes"):
+        raise ValueError("Only points and threes are active markets.")
     import re
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", slate_date):
         raise ValueError("Invalid slate date")
