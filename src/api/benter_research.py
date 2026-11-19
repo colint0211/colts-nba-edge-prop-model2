@@ -144,6 +144,9 @@ def _make_dataset(db_rows):
             "actual_value": _as_float(actual),
             "outcome": str(outcome),
             "slate_date": date_value,
+            "market_books": snap.get("market_books") or [],
+            "best_over_book": snap.get("best_over_book"),
+            "best_under_book": snap.get("best_under_book"),
         }
     return dataset, source_dates, skipped
 
@@ -213,6 +216,8 @@ def benter_ledger_backtest():
             "model_version": result.get("model_version"),
             "market": "NBA player points",
             "data_source": "Existing settled nba_predictions ledger",
+            "market_input": "Stored market_probability from the historical ledger; existing snapshots commonly blend DraftKings and FanDuel and are not a DK-only market archive.",
+            "price_basis": "Stored best-side odds; may be DraftKings or FanDuel. Not a DraftKings-only ROI test.",
             "database_rows": len(db_rows),
             "eligible_rows": len(dataset),
             "skipped_rows": len(skipped),
@@ -223,7 +228,7 @@ def benter_ledger_backtest():
             "holdout_count": len(predictions),
             "holdout_brier": {"benter_combined": benter_brier, "market": market_brier,
                               "legacy_model": old_brier},
-            "benter_positive_ev_subset": {
+            "positive_ev_subset_at_stored_best_price": {
                 "bets": len(ev_picks), "wins": wins, "losses": len(ev_picks) - wins,
                 "win_rate_pct": round(100.0 * wins / len(ev_picks), 2) if ev_picks else None,
                 "profit_units": round(roi_units, 4),
@@ -235,7 +240,8 @@ def benter_ledger_backtest():
                 "This is a selected-pick ledger, not the complete DraftKings player-prop market; selection bias applies.",
                 "The current ledger has only a few distinct slate dates. A tiny holdout cannot establish a betting edge.",
                 "Historical feature snapshots lack a complete set of usage, injury, lineup, opponent and pace inputs; this pilot uses only fields present on every eligible record.",
-                "The holdout is evaluated at the originally recorded price; no claims about closing-line value are made.",
+                "The stored market probability and best-side price may blend DraftKings and FanDuel; this is not a DraftKings-only test.",
+                "The holdout is evaluated at the originally recorded best-side price; no claims about closing-line value are made.",
                 "No production data is modified and no picks are generated."
             ],
             "skipped_examples": skipped[:20],
