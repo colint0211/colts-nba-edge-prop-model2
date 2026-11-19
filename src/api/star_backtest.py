@@ -331,9 +331,9 @@ def stars_points_backtest(request: FastRequest):
         "source_errors": errors,
         "method": {
             "prediction": "Pregame points-only blend of prior L5, L10 and season-to-date game means; residual SD from prior L10, clipped 4.5–13.5 points; normal CDF for line probability.",
-            "weight_selection": "Five fixed L5/L10/season scoring-rate blends compared on training Brier score only; lowest-Brier blend frozen before holdout.",
+            "weight_selection": "Five fixed L5/L10/season points-mean blends compared on training Brier score only; lowest-Brier blend frozen before holdout.",
             "selection": "Confidence cutoff selected from a fixed grid on training dates only (minimum 25 training bets), then frozen for holdout; one side per player-game.",
-            "leakage_controls": "Game logs strictly before tip; same-day games held together; current-season regular season only; main line only; in-play re-priced lines excluded; player history actuals cross-checked against box scores."
+            "leakage_controls": "Game logs strictly before tip; same-day games held together; current-season regular season only; DraftKings main line only; historical line joined to the same player and game date; box-score points supply settlement because Free-tier result fields are redacted."
         },
         "selected_weights_l5_l10_season": list(best_weights),
         "selected_confidence_threshold": selected_threshold,
