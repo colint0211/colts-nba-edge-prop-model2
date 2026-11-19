@@ -2104,6 +2104,9 @@ def _apply_absent_teammate_minutes(prop, market, injury_feed):
         if "two-way" in reason or "g league" in reason or "surgery" in reason:
             continue
         absent_name = str(row.get("player") or "").strip()
+        if "," in absent_name:
+            last, first = [part.strip() for part in absent_name.split(",", 1)]
+            absent_name = first + " " + last
         if not absent_name or _norm_player_name(absent_name) == _norm_player_name(prop.get("player")):
             continue
         absences.append(absent_name)
@@ -2242,6 +2245,10 @@ def _apply_absent_teammate_minutes(prop, market, injury_feed):
     prop["model_components"] = list(prop.get("model_components") or []) + [
         "historical teammate-absence on/off minutes adjustment"
     ]
+    note = ("Projected minutes +" + str(round(bump, 1)) + " from verified historical " +
+            strongest["teammate"] + " absence/on-off data.")
+    prior_reason = str(prop.get("selection_reason") or "").strip()
+    prop["selection_reason"] = (prior_reason + " " + note).strip()
 
 def _post_selection_negative_review(prop, market, injury_feed):
     """Run expensive injury/workload checks only on provisional combined Top 3 candidates."""
@@ -2762,6 +2769,7 @@ def proprietary_market_board(market: str = "points"):
                 "market_books": raw.get("market_books") or ["Sportsbook"],
                 "position": (matchup_adjustment or {}).get("position"),
                 "defense_vs_position": matchup_adjustment,
+                "team_context_adjustment": team_context_adjustment,
                 **model,
             }
             # Injury and return-to-play review is deliberately deferred until
