@@ -282,11 +282,11 @@ def stars_points_backtest(request: FastRequest):
         coverage.append({
             "player": name, "resolved_history_entries": history_count,
             "season_game_logs": game_count, "joined_eligible_props": len(rows),
-            "history_sample": ({k: hsample[0].get(k) for k in ("event_id", "commence_time", "bookmaker", "line", "actual_value", "is_main_line")} if hsample else None),
+            "history_sample": ({k: hsample[0].get(k) for k in ("event_id", "commence_time", "bookmaker", "line", "over_price", "under_price", "actual_value", "over_result", "under_result", "is_main_line", "redacted")} if hsample else None),
             "game_sample": ({"event_id": gfirst.get("event_id"), "commence_time": gfirst.get("commence_time"),
                              "stats_type": type(gstats).__name__,
                              "stats_keys": list(gstats.keys())[:15] if isinstance(gstats, dict) else None,
-                             "stats_first": gstats[:3] if isinstance(gstats, list) else None} if gsample else None)
+                             "stats_first": gstats[:3] if isinstance(gstats, list) else None, "game_dates": [{"event_id": x.get("event_id"), "date": x.get("commence_time"), "points": (x.get("stats") or {}).get("points")} for x in (games.get("games") or [])[:8]]} if gsample else None)
         })
 
     # Split by date, not by row, so every same-day game is held out together.
