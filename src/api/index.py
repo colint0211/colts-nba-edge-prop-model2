@@ -628,18 +628,12 @@ def _dvp_matchup_adjustment(athlete_id,player_team,game,market,player_name=None)
   if len(game_teams)!=2:
    return unavailable("Matchup could not be parsed into two verified NBA teams.", player_team=team_code or None)
   if not team_code and player_name:
-   # PropLine often omits a team suffix. Resolve the exact player name against
-   # only the two verified matchup rosters; never infer from name or position.
    try:
     roster_id, roster_team = _espn_roster_player_id(player_name, game_teams)
-    if roster_id and roster_team in game_teams:
-     team_code = roster_team
-   except Exception:
-    team_code = None
-  if not team_code:
-   return unavailable("Player team was absent from the prop quote and could not be uniquely verified on either matchup roster.", matchup_teams=game_teams)
-  if team_code not in game_teams:
-   return unavailable("Player team does not match either team in the supplied matchup.", player_team=team_code, matchup_teams=game_teams)
+    if roster_id and roster_team in game_teams: team_code=roster_team
+   except Exception: team_code=None
+  if not team_code: return unavailable("Player team could not be uniquely verified on either matchup roster.",matchup_teams=game_teams)
+  if team_code not in game_teams: return unavailable("Player team does not match either team in the supplied matchup.",player_team=team_code,matchup_teams=game_teams)
   opponent=next((code for code in game_teams if code!=team_code),None)
   if not opponent: return unavailable("Opponent could not be identified from the matchup.")
   espn_position=_espn_player_position(athlete_id,team_code)
@@ -660,42 +654,47 @@ def _dvp_matchup_adjustment(athlete_id,player_team,game,market,player_name=None)
     position_source="API-Sports Basketball fallback"
     position_confidence="medium"
     position_crosscheck="fallback_used"
-  if not espn_position:
-   return unavailable("Player position was not found in ESPN or the exact-name API-Sports lookup.",player_team=team_code,opponent=opponent)
+  if not espn_position: return unavailable("Player position was not found in ESPN or the exact-name API-Sports lookup.",player_team=team_code,opponent=opponent)
   position_keys={"G":("PG","SG"),"F":("SF","PF")}.get(espn_position,(espn_position,))
-  try:
-   table=_fetch_dvp_table(stat)
-  except Exception as exc:
-   return unavailable("Positional-defense data source failed: "+type(exc).__name__+".",player_team=team_code,opponent=opponent,position=espn_position,stat=market)
+  table=_fetch_dvp_table(stat)
   allowed_values=[table.get((opponent,pos),{}).get(stat) for pos in position_keys]
   if any(value is None for value in allowed_values):
    return unavailable("The defensive table did not contain the opponent's required position rows.",player_team=team_code,opponent=opponent,position=espn_position,stat=market)
-  allowed=sum(allowed_values)/len(allowed_values)
-  league_values=[row[stat] for (team,pos),row in table.items() if pos in position_keys and stat in row]
+  allowed_per_game=sum(allowed_values)/len(allowed_values)
+  ratings=game_model._team_ratings()
+  team_rows=ratings.get("teams") or {}
+  opponent_pace=float((team_rows.get(opponent) or {}).get("pace") or 0)
+  player_team_pace=float((team_rows.get(team_code) or {}).get("pace") or 0)
+  if opponent_pace<=0 or player_team_pace<=0:
+   return unavailable("Verified team possessions/pace unavailable; PPP matchup adjustment withheld.",player_team=team_code,opponent=opponent)
+  allowed_per_100=allowed_per_game/opponent_pace*100.0
+  league_values=[]
+  for (def_team,pos),row in table.items():
+   if pos not in position_keys: continue
+   pace=float((team_rows.get(def_team) or {}).get("pace") or 0)
+   value=row.get(stat)
+   if pace>0 and value is not None: league_values.append(float(value)/pace*100.0)
   if len(league_values)<20:
-   return unavailable("The positional-defense table has too few league comparison rows.",player_team=team_code,opponent=opponent,position=espn_position,stat=market)
+   return unavailable("Too few verified team pace rows to calculate league positional PPP.",player_team=team_code,opponent=opponent)
   league_average=sum(league_values)/len(league_values)
-  if league_average<=0:
-   return unavailable("The positional-defense league average is invalid.",player_team=team_code,opponent=opponent,position=espn_position,stat=market)
-  ratio=allowed/league_average
-  # Player-specific discrepancy is calculated later, where the player's average is known.
-  factor=1.0
+  if league_average<=0: return unavailable("League positional PPP baseline is invalid.",player_team=team_code,opponent=opponent)
+  ratio=allowed_per_100/league_average
   position_names={"PG":"Point Guard","SG":"Shooting Guard","SF":"Small Forward","PF":"Power Forward","C":"Center","G":"Guard (PG/SG blended)","F":"Forward (SF/PF blended)"}
   stat_labels={"points":"points","rebounds":"rebounds","assists":"assists","steals":"steals","threes":"3-pointers made"}
-  stat_units={"points":"PPG","rebounds":"RPG","assists":"APG","steals":"SPG","threes":"3PM"}
-  season=_DVP_STAT_CACHE.get(stat,{}).get("season") or "season not identified"
   position_method="PG/SG 50/50 blend" if espn_position=="G" else "SF/PF 50/50 blend" if espn_position=="F" else "Individual listed position"
   blend_weights={position_keys[0]:1.0} if len(position_keys)==1 else {position_keys[0]:0.5,position_keys[1]:0.5}
   return {"available":True,"adjustment_applied":True,"position":espn_position,"position_group":espn_position,"position_name":position_names[espn_position],
    "position_source":position_source,"position_confidence":position_confidence,"position_crosscheck":position_crosscheck,
    "blend_weights":blend_weights,"opponent":opponent,"opponent_name":_TEAM_NAMES.get(opponent,opponent),
-   "stat":market,"stat_label":stat_labels[market],"stat_unit":stat_units[market],
-   "allowed_per_game":round(allowed,2),"league_position_average":round(league_average,2),
-   "league_relative_ratio":round(ratio,3),"adjustment_pct":0.0,"factor":1.0,
-   "source":"NBA House individual-position "+stat+" allowed table","source_season":season,
-   "method":position_method+" "+stat_labels[market]+" allowed per game compared directly with this player's average; player-specific discrepancy drives matchup grade"}
+   "stat":market,"stat_label":stat_labels[market],"stat_unit":"per 100 possessions",
+   "allowed_per_100_possessions":round(allowed_per_100,3),"league_position_average_per_100":round(league_average,3),
+   "allowed_per_game_reference":round(allowed_per_game,2),"opponent_pace":round(opponent_pace,2),
+   "player_team_pace":round(player_team_pace,2),"league_relative_ratio":round(ratio,3),
+   "adjustment_pct":0.0,"factor":1.0,"source":"NBA House individual-position allowed table normalized by verified team pace",
+   "source_season":_DVP_STAT_CACHE.get(stat,{}).get("season") or "season not identified",
+   "method":position_method+" points allowed normalized to per-100-possession rate; player scoring rate is normalized to possessions while on court"}
  except Exception as exc:
-  return unavailable("Positional-defense calculation failed: "+type(exc).__name__+".")
+  return unavailable("Positional-defense PPP calculation failed: "+type(exc).__name__+".")
 
 def _espn_roster_player_id(name, team_codes):
     """Resolve an exact player identity only from the two teams in the matchup."""
@@ -1154,7 +1153,7 @@ def _player_history(athlete_id, field, label):
     ]
     if any(row.get("date") for row in history_stats):
         history_stats.sort(key=lambda row: row.get("date") or "")
-    # Retain the full regular-season sample so the matchup comparison uses true season PPG/RPG/3PM, not only the last 25 games.
+    # Retain the full regular-season sample so the matchup comparison uses true full-season stat baseline, not only the last 25 games.
     history_stats = history_stats[-82:]
 
     # Minutes are used only when verified by event ID or exact game date.
@@ -1211,7 +1210,7 @@ def _projected_minutes(valid_minutes):
     return 0.55 * recent5 + 0.30 * recent10 + 0.15 * established
 
 def _team_factor_prop_adjustment(player_team, game, market):
-    """Use cached team pace/Four-Factor/shot-profile context to adjust player volume conservatively."""
+    """Adjust player volume using pace plus offense/defense points per possession."""
     try:
         codes=_team_codes_from_game(game)
         team=_canonical_team_code(player_team)
@@ -1223,10 +1222,25 @@ def _team_factor_prop_adjustment(player_team, game, market):
         opponent=rows.get(next(code for code in codes if code!=team))
         if not own or not opponent:
             return {"available":False,"reason":"Verified team efficiency rows unavailable."}
-        league_pace=sum(float(row.get("pace") or 0) for row in rows.values())/max(1,len(rows))
+        league_pace=sum(float(row.get("pace") or 0) for row in rows.values() if row.get("pace"))/max(1,sum(1 for row in rows.values() if row.get("pace")))
         if league_pace<=0 or not own.get("pace"):
             return {"available":False,"reason":"Team pace baseline unavailable."}
         pace_ratio=float(own["pace"])/league_pace
+        league_ortg=[float(row["ortg"]) for row in rows.values() if row.get("ortg") is not None]
+        league_drtg=[float(row["drtg"]) for row in rows.values() if row.get("drtg") is not None]
+        if len(league_ortg)<28 or len(league_drtg)<28 or own.get("ortg") is None or opponent.get("drtg") is None:
+            return {"available":False,"reason":"Verified offensive and defensive PPP ratings unavailable."}
+        league_off_ppp=sum(league_ortg)/len(league_ortg)/100.0
+        league_def_ppp=sum(league_drtg)/len(league_drtg)/100.0
+        offensive_ppp=float(own["ortg"])/100.0
+        defensive_ppp_allowed=float(opponent["drtg"])/100.0
+        offense_ratio=offensive_ppp/league_off_ppp
+        defense_ratio=defensive_ppp_allowed/league_def_ppp
+        scoring_efficiency_ratio=0.5*offense_ratio+0.5*defense_ratio
+        factor=1.0
+        if market in ("points","threes"):
+            factor*=1.0+0.20*(scoring_efficiency_ratio-1.0)
+        factor*=1.0+0.10*(pace_ratio-1.0)
         factor_keys=("efg","tov","oreb","fta_rate")
         four_factors=all(own.get(k) is not None for k in factor_keys)
         ff_score=0.0
@@ -1240,21 +1254,22 @@ def _team_factor_prop_adjustment(player_team, game, market):
         shot_score=0.0
         if shot_profile:
             shot_score=0.25*((own["fg3a_rate"]-0.38)/0.12)*((own["fg3_pct"]-0.36)/0.06)+0.20*((own["fg2_pct"]-0.53)/0.07)
-        # The player-history baseline already embeds team context. Apply only a
-        # small residual correction, and never synthesize missing OREB/shot data.
-        multiplier=1.0+0.20*(pace_ratio-1.0)
         if four_factors and market in ("points","assists","threes"):
-            multiplier+=0.012*max(-2.0,min(2.0,ff_score))
+            factor+=0.006*max(-2.0,min(2.0,ff_score))
         if shot_profile and market in ("points","threes"):
-            multiplier+=0.008*max(-1.5,min(1.5,shot_score))
-        multiplier=max(0.94,min(1.06,multiplier))
-        return {"available":True,"factor":round(multiplier,4),"pace_ratio":round(pace_ratio,4),
+            factor+=0.004*max(-1.5,min(1.5,shot_score))
+        factor=max(0.94,min(1.06,factor))
+        return {"available":True,"factor":round(factor,4),"pace_ratio":round(pace_ratio,4),
+          "offensive_ppp":round(offensive_ppp,4),"opponent_defensive_ppp_allowed":round(defensive_ppp_allowed,4),
+          "league_offensive_ppp":round(league_off_ppp,4),"league_defensive_ppp_allowed":round(league_def_ppp,4),
+          "offense_ppp_ratio":round(offense_ratio,4),"defense_ppp_ratio":round(defense_ratio,4),
+          "scoring_efficiency_ratio":round(scoring_efficiency_ratio,4),
           "four_factors_available":four_factors,"four_factor_score":round(ff_score,3) if four_factors else None,
           "shot_profile_available":shot_profile,"shot_profile_score":round(shot_score,3) if shot_profile else None,
-          "team":team,"opponent":next(code for code in codes if code!=team),
-          "source":ratings.get("source"),"method":"team pace residual + Oliver-weighted eFG/TOV/OREB/FTr + 3P share/accuracy and 2P efficiency; capped +/-6%"}
+          "team":team,"opponent":next(code for code in codes if code!=team),"source":ratings.get("source"),
+          "method":"offensive PPP + opponent defensive PPP allowed (50/50), separate pace factor, Four Factors and shot profile; capped +/-6%"}
     except Exception as exc:
-        return {"available":False,"reason":"Team context unavailable: "+type(exc).__name__}
+        return {"available":False,"reason":"Team PPP context unavailable: "+type(exc).__name__}
 
 
 def _apply_directional_play_grade(model):
@@ -1319,15 +1334,20 @@ def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, ma
     matchup_grade = 50.0
     if isinstance(matchup_adjustment, dict) and matchup_adjustment.get("available", True):
         try:
-            allowed = float(matchup_adjustment.get("allowed_per_game"))
-            if math.isfinite(allowed) and long_mean > 0:
-                positional_discrepancy = allowed - long_mean
-                discrepancy_pct = positional_discrepancy / long_mean * 100.0
-                # Larger favorable gaps produce higher grades. Projection impact is damped and capped.
+            allowed_ppp = float(matchup_adjustment.get("allowed_per_100_possessions"))
+            player_team_pace = float(matchup_adjustment.get("player_team_pace"))
+            player_minutes_for_ppp = float(projected_min or baseline_min or 0.0)
+            player_possessions_while_on_court = player_team_pace * player_minutes_for_ppp / 48.0
+            if (math.isfinite(allowed_ppp) and allowed_ppp > 0 and long_mean > 0
+                    and player_possessions_while_on_court > 0):
+                player_ppp_per_100 = long_mean / player_possessions_while_on_court * 100.0
+                positional_discrepancy = allowed_ppp - player_ppp_per_100
+                discrepancy_pct = (allowed_ppp / player_ppp_per_100 - 1.0) * 100.0 if player_ppp_per_100 > 0 else 0.0
                 matchup_factor = max(0.92, min(1.08, 1.0 + discrepancy_pct / 100.0 * 0.25))
                 target_mean *= matchup_factor
-                matchup_adjustment["player_average"] = round(long_mean, 2)
-                matchup_adjustment["player_vs_allowed_difference"] = round(positional_discrepancy, 2)
+                matchup_adjustment["player_points_per_100_possessions"] = round(player_ppp_per_100, 3)
+                matchup_adjustment["player_possessions_while_on_court"] = round(player_possessions_while_on_court, 2)
+                matchup_adjustment["player_vs_allowed_ppp_difference"] = round(positional_discrepancy, 3)
                 matchup_adjustment["player_vs_allowed_pct"] = round(discrepancy_pct, 2)
                 matchup_adjustment["adjustment_pct"] = round((matchup_factor - 1.0) * 100.0, 2)
         except (TypeError, ValueError, OverflowError):
@@ -1429,7 +1449,7 @@ def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, ma
         "expected_value_pct": round(best[0]*100, 2) if best else None,
         "edge_pp": None,
         "recommendation": "VALUE CANDIDATE" if best and best[0] > 0.05 else ("LEAN / VERIFY" if best and best[0] > 0 else "PASS"),
-        "model_components": ["recency-weighted history", "10-game form signal", "minutes adjustment" if valid_minutes else "minutes unavailable; no adjustment", "defense-vs-position matchup adjustment" if isinstance(matchup_adjustment, dict) and matchup_adjustment.get("available", True) else "defense-vs-position unavailable; no adjustment", "team pace + Four Factors + shot-profile adjustment" if isinstance(team_context_adjustment, dict) and team_context_adjustment.get("available") else "team factor context unavailable; no adjustment", "20% empirical history + 80% negative-binomial count distribution"],
+        "model_components": ["recency-weighted history", "10-game form signal", "minutes adjustment" if valid_minutes else "minutes unavailable; no adjustment", "defense-vs-position matchup adjustment" if isinstance(matchup_adjustment, dict) and matchup_adjustment.get("available", True) else "defense-vs-position unavailable; no adjustment", "offensive PPP + opponent defensive PPP + pace + Four Factors + shot-profile adjustment" if isinstance(team_context_adjustment, dict) and team_context_adjustment.get("available") else "team factor context unavailable; no adjustment", "20% empirical history + 80% negative-binomial count distribution"],
         "model_method": "recency-weighted count-rate projection with Gamma-Poisson overdispersion; provisional pending out-of-sample calibration",
         "sample_size": n, "long_run_mean": round(long_mean, 2), "recent5_mean": round(recent5_mean, 2),
         "recent10_mean": round(recent10_mean, 2), "weighted_mean": round(weighted_mean, 2),
