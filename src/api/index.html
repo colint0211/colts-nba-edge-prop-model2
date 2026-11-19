@@ -569,7 +569,7 @@ function allModelEV(){
     // Use exactly the same approval, sample-size, injury and positive-EV
     // checks as each individual market board. A second hand-written filter
     // here previously discarded valid reviewed candidates.
-    const marketRows=rows.map(p=>({...p,market:m,
+    const marketRows=rows.filter(p=>p.daily_top3===true).map(p=>({...p,market:m,
       best_side:String(p.best_side||'').toUpperCase(),
       expected_value_pct:p.expected_value_pct??p.expected_profit_per_100??null,
       expected_profit_per_100:p.expected_profit_per_100??p.expected_value_pct??null
@@ -613,7 +613,7 @@ function render(){
     return;
   }
   if(market==='points'){
-    list=rankEV(data).slice(0,3);
+    list=rankEV(data.filter(p=>p.daily_top3===true)).slice(0,3);
     if(q)list=list.filter(p=>(p.player+' '+p.game).toLowerCase().includes(q));
     el('count').textContent=list.length+' model plays';
     el('cards').innerHTML=list.map((p,i)=>card(p,i)).join('')||'<div class="empty">No verified points projections available.</div>';
@@ -622,7 +622,7 @@ function render(){
   const a=bpCache[market];
   if(a&&a.error){el('count').textContent='Model unavailable';el('cards').innerHTML='<div class="empty">'+esc(a.error)+'</div>';return}
   if(!Array.isArray(a)){el('count').textContent='Loading';el('cards').innerHTML='<div class="empty">Loading proprietary '+esc(bpMarketLabel(market))+' model…</div>';return}
-  list=a.slice().sort((x,y)=>Number(y.play_grade??-1)-Number(x.play_grade??-1)||Number(y.expected_profit_per_100??-999)-Number(x.expected_profit_per_100??-999));
+  list=a.filter(p=>p.daily_top3===true).slice().sort((x,y)=>Number(x.selection_rank??99)-Number(y.selection_rank??99));
   if(q)list=list.filter(p=>(p.player+' '+p.team+' '+p.game).toLowerCase().includes(q));
   list=list.slice(0,3);
   el('count').textContent=list.length+' model projections';
