@@ -310,9 +310,16 @@ def settle_completed_draftkings_quotes():
         skipped = []
         for event_id,event,event_start,market,player,player_key,team,line in rows:
             game_date = event_start.astimezone(eastern).date().isoformat()
-            teams = app_module._team_codes_from_game(event or "")
+            event_text = str(event or "").lower()
+            teams = {
+                code for code, team_name in app_module._TEAM_NAMES.items()
+                if re.search(r"\\b" + re.escape(str(team_name).lower()) + r"\\b", event_text)
+            }
             if len(teams) != 2:
-                skipped.append({"event_id":event_id,"player":player,"reason":"unverified_matchup"})
+                skipped.append({
+                    "event_id":event_id,"player":player,"reason":"unverified_matchup",
+                    "event":str(event or ""),"resolved_teams":sorted(teams),
+                })
                 continue
             athlete_id, roster_team = app_module._espn_roster_player_id(player, teams)
             if not athlete_id or (team and roster_team and team.upper() != roster_team.upper()):
