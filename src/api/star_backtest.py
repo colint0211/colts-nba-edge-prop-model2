@@ -146,8 +146,6 @@ def _prepare_player(name, history, games):
             continue
         try:
             line = float(entry.get("line"))
-            over_price = float(entry.get("over_price"))
-            under_price = float(entry.get("under_price"))
         except (TypeError, ValueError):
             continue
         try:
@@ -160,7 +158,7 @@ def _prepare_player(name, history, games):
         result = "PUSH" if actual == line else ("OVER" if actual > line else "UNDER")
         rows.append({
             "player": name, "event_id": event_id, "date": date,
-            "line": line, "over_price": over_price, "under_price": under_price,
+            "line": line,
             "actual": actual, "result": result, "minutes": game["minutes"],
             "points": actual
         })
@@ -195,15 +193,11 @@ def _score(rows, weights):
     scored = []
     for row in rows:
         mean, sd, p_over = _predict(row, weights)
-        p_market_over_raw = _implied(row["over_price"])
-        p_market_under_raw = _implied(row["under_price"])
-        p_market_over = p_market_over_raw / (p_market_over_raw + p_market_under_raw)
-        target = 1.0 if row["result"] == "OVER" else 0.0
         if row["result"] == "PUSH":
             continue
         scored.append({
             **row, "projection": mean, "sd": sd, "p_over": p_over,
-            "market_p_over": p_market_over, "target_over": target
+            "target_over": 1.0 if row["result"] == "OVER" else 0.0
         })
     return scored
 
@@ -214,38 +208,31 @@ def _brier(rows):
     return sum((r["p_over"] - r["target_over"]) ** 2 for r in rows) / len(rows)
 
 
-def _summarize(rows):
-    settled = [r for r in rows if r["result"] != "PUSH"]
-    wins = 0
-    units = 0.0
+def _summarize(rows, threshold):
     picks = []
-    for r in settled:
-        p_over = r["p_over"]
-        edge_over = p_over - r["market_p_over"]
-        edge_under = -edge_over
-        over_ev = p_over * (_american_decimal(r["over_price"]) - 1.0) - (1.0 - p_over)
-        p_under = 1.0 - p_over
-        under_ev = p_under * (_american_decimal(r["under_price"]) - 1.0) - (1.0 - p_under)
-        side = "OVER" if over_ev >= under_ev else "UNDER"
-        ev = max(over_ev, under_ev)
-        edge = edge_over if side == "OVER" else edge_under
-        if ev <= 0 or edge < 0.02:
+    wins = 0
+    for r in rows:
+        if r["p_over"] >= threshold:
+            side = "OVER"
+            confidence = r["p_over"]
+        elif r["p_over"] <= 1.0 - threshold:
+            side = "UNDER"
+            confidence = 1.0 - r["p_over"]
+        else:
             continue
         won = r["result"] == side
-        price = r["over_price"] if side == "OVER" else r["under_price"]
-        units += (_american_decimal(price) - 1.0) if won else -1.0
-        wins += 1 if won else 0
-        picks.append({"player": r["player"], "date": r["date"][:10],
-                      "side": side, "line": r["line"], "price": price,
-                      "projection": round(r["projection"], 2),
-                      "actual": r["actual"], "win": won,
-                      "edge_pct": round(edge * 100, 2), "ev_pct": round(ev * 100, 2)})
+        wins += int(won)
+        picks.append({
+            "player": r["player"], "date": r["date"][:10],
+            "side": side, "line": r["line"],
+            "projection": round(r["projection"], 2),
+            "actual": r["actual"], "win": won,
+            "model_probability": round(confidence, 4)
+        })
     n = len(picks)
     return {
-        "bets": n, "wins": wins, "losses": n - wins,
+        "threshold": threshold, "bets": n, "wins": wins, "losses": n - wins,
         "win_rate_pct": round(100.0 * wins / n, 2) if n else None,
-        "net_units_flat_1u": round(units, 3),
-        "roi_pct": round(100.0 * units / n, 2) if n else None,
         "over_bets": sum(1 for p in picks if p["side"] == "OVER"),
         "under_bets": sum(1 for p in picks if p["side"] == "UNDER"),
         "picks": picks
@@ -312,19 +299,24 @@ def stars_points_backtest(request: FastRequest):
     best_brier, best_weights, best_train = train_scored[0]
     test_scored = _score(test_rows, best_weights)
 
-    # The market's no-vig side is a benchmark, not a model pick.
-    market_wins = 0
-    market_units = 0.0
-    market_n = 0
-    for r in test_scored:
-        side = "OVER" if r["market_p_over"] >= 0.5 else "UNDER"
-        price = r["over_price"] if side == "OVER" else r["under_price"]
-        won = r["result"] == side
-        market_units += (_american_decimal(price) - 1.0) if won else -1.0
-        market_wins += int(won)
-        market_n += 1
+    # Tune a confidence cutoff on training dates only, then freeze it for holdout.
+    threshold_candidates = [0.50, 0.52, 0.55, 0.58, 0.60]
+    train_threshold_results = []
+    for threshold in threshold_candidates:
+        summary = _summarize(best_train, threshold)
+        if summary["bets"] >= 25:
+            train_threshold_results.append(summary)
+    if train_threshold_results:
+        train_threshold_results.sort(
+            key=lambda x: (x["win_rate_pct"], x["bets"]), reverse=True
+        )
+        selected_threshold = train_threshold_results[0]["threshold"]
+    else:
+        selected_threshold = 0.50
 
-    holdout = _summarize(test_scored)
+    holdout = _summarize(test_scored, selected_threshold)
+    holdout_directional = _summarize(test_scored, 0.50)
+    train_selection = _summarize(best_train, selected_threshold)
     return {
         "status": "complete",
         "season": SEASON,
@@ -340,23 +332,23 @@ def stars_points_backtest(request: FastRequest):
         "method": {
             "prediction": "Pregame points-only blend of prior L5, L10 and season-to-date game means; residual SD from prior L10, clipped 4.5–13.5 points; normal CDF for line probability.",
             "weight_selection": "Five fixed L5/L10/season scoring-rate blends compared on training Brier score only; lowest-Brier blend frozen before holdout.",
-            "selection": "One side per player-game only when model EV at the actual DraftKings price is positive and model edge versus the no-vig DraftKings market is at least 2 percentage points.",
+            "selection": "Confidence cutoff selected from a fixed grid on training dates only (minimum 25 training bets), then frozen for holdout; one side per player-game.",
             "leakage_controls": "Game logs strictly before tip; same-day games held together; current-season regular season only; main line only; in-play re-priced lines excluded; player history actuals cross-checked against box scores."
         },
         "selected_weights_l5_l10_season": list(best_weights),
+        "selected_confidence_threshold": selected_threshold,
         "train_brier": round(best_brier, 6) if best_brier is not None else None,
+        "train_selected_bets": train_selection,
         "holdout": holdout,
+        "holdout_directional_at_50pct": holdout_directional,
         "holdout_probability_brier": round(_brier(test_scored), 6) if test_scored else None,
-        "holdout_market_baseline": {
-            "bets": market_n, "wins": market_wins,
-            "win_rate_pct": round(100.0 * market_wins / market_n, 2) if market_n else None,
-            "net_units_flat_1u": round(market_units, 3),
-            "roi_pct": round(100.0 * market_units / market_n, 2) if market_n else None
-        },
+        "roi": None,
+        "roi_note": "Unavailable because PropLine Free-tier redacts both historical side prices.",
         "limitations": [
             "The fixed cohort is a predeclared star list, not a claim that these are the league's top 20 by current usage.",
             "The model uses historical points only for this baseline; it does not yet include minutes, archived pregame injury, lineup, opponent, pace or usage features.",
             "Only DraftKings main lines are evaluated; this is not a test of alternate lines or FanDuel.",
+            "Free-tier responses redact DraftKings prices and settled-result fields; hit rate is calculated from the line and independently returned game-log points, but ROI and price-based EV cannot be calculated.",
             "A 30-day Hobby event-history window may constrain available odds history; report coverage is shown per player."
         ]
     }
