@@ -86,3 +86,19 @@ A meaningful Benter evaluation needs daily archived pregame features, both
 sides' DraftKings prices at the exact line (from DraftKings itself, not a
 best-price blend), and final box-score settlement for
 a much larger chronological sample. This is the next data-collection milestone.
+
+
+## Official nightly card: combined Top 3
+
+The official betting card contains **three selections total per Eastern-time slate
+date**, not three per market and not five per market. Points and 3-Pointers Made
+compete in one ranked pool. Expected value is the primary ranking metric, with
+model edge and play grade used only as tie-breakers. Each provisional selection
+must pass the existing injury, player-identity and workload negative review.
+Duplicate player/game selections are suppressed across markets.
+
+Both frozen market candidate boards must exist before the shared card is locked.
+Candidate analysis remains separate from the official ledger. Only the final
+three-or-fewer passed selections are written to the official prediction ledger.
+The legacy browser endpoint that previously wrote independent per-market Top 5
+cards is now non-writing.
