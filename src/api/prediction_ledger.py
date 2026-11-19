@@ -346,7 +346,7 @@ def _probability_metrics(rows, probability_index=3):
 
 
 def metrics(market=None):
-    where = "WHERE settled_at IS NOT NULL"
+    where = "WHERE settled_at IS NOT NULL AND market IN ('points', 'threes')"
     args = []
     if market and market != "all":
         where += " AND market=%s"
@@ -490,8 +490,8 @@ def save_daily_top_five(rows, market, slate_date):
     import re
     market = str(market or "").strip().lower()
     slate_date = str(slate_date or "").strip()
-    if market not in ("points", "rebounds", "assists", "steals", "threes"):
-        raise ValueError("Unsupported market")
+    if market not in ("points", "threes"):
+        raise ValueError("Only points and threes are active markets.")
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", slate_date):
         raise ValueError("Invalid slate date")
     with _connect() as conn:
@@ -542,7 +542,7 @@ def save_daily_top_five(rows, market, slate_date):
 
 
 def list_daily_top_five(slate_date, market="all"):
-    clauses = ["snapshot->>'daily_top5'='true'", "snapshot->>'slate_date'=%s"]
+    clauses = ["snapshot->>'daily_top5'='true'", "snapshot->>'slate_date'=%s", "market IN ('points', 'threes')"]
     args = [str(slate_date)]
     if market and market != "all":
         clauses.append("market=%s")
@@ -583,7 +583,7 @@ def daily_top_five_metrics():
                    COUNT(*) FILTER (WHERE outcome='PUSH'),
                    COALESCE(SUM(profit_units), 0)
             FROM nba_predictions
-            WHERE snapshot->>'daily_top5'='true' AND settled_at IS NOT NULL
+            WHERE snapshot->>'daily_top5'='true' AND settled_at IS NOT NULL AND market IN ('points', 'threes')
             """
         ).fetchone()
         markets = conn.execute(
@@ -615,7 +615,7 @@ def daily_top_five_metrics():
 
 
 def list_predictions(status="unsettled", market=None, limit=100):
-    clauses = []
+    clauses = ["market IN ('points', 'threes')"]
     args = []
     if status == "unsettled":
         clauses.append("settled_at IS NULL")
@@ -672,7 +672,7 @@ def calibration_profile(market=None, min_samples=100, bins=10, min_bin_samples=2
     Require 100 settled forecasts and three probability buckets with at least
     20 outcomes each. The no-vig market is an audit benchmark only.
     """
-    clauses = ["settled_at IS NOT NULL", "snapshot->>'calibration_sample'='true'"]
+    clauses = ["settled_at IS NOT NULL", "snapshot->>'calibration_sample'='true'", "market IN ('points', 'threes')"]
     args = []
     if market and market != "all":
         clauses.append("market=%s")
