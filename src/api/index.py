@@ -1880,7 +1880,7 @@ def _propline_fetch_events():
 
     params = urlencode({
         "markets": ",".join(_PROPLINE_MARKETS.values()),
-        "bookmakers": "draftkings,fanduel",
+        "bookmakers": "draftkings",
         "includeLinks": "true",
         "max_age": 300,
     })
