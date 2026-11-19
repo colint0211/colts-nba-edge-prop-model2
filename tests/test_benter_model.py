@@ -2,6 +2,7 @@
 import math
 import random
 import unittest
+from datetime import date, timedelta
 
 from src.api.benter_model import (
     combine_benter_probability,
@@ -54,13 +55,13 @@ class BenterModelTests(unittest.TestCase):
         rng = random.Random(7)
         rows = []
         for day in range(100):
-            date = f"2026-10-{(day % 28) + 1:02d}" if day < 28 else f"2026-{11 + (day // 28):02d}-{(day % 28) + 1:02d}"
+            game_date = (date(2026, 10, 1) + timedelta(days=day)).isoformat()
             for _ in range(3):
                 x = rng.uniform(-2, 2)
                 market = min(0.85, max(0.15, 0.5 + 0.12 * x + rng.uniform(-0.12, 0.12)))
                 p = 1 / (1 + math.exp(-(0.9 * x + 0.35 * math.log(market / (1 - market)))))
                 y = int(rng.random() < p)
-                rows.append({"date": date, "features": [x], "market_probability": market, "target": y})
+                rows.append({"date": game_date, "features": [x], "market_probability": market, "target": y})
 
         result = walk_forward_benter(
             rows, minimum_stage1_rows=30, minimum_stage2_rows=30
