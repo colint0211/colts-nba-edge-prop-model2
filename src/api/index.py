@@ -2338,7 +2338,7 @@ def _lock_daily_top_three(slate_date):
             0 if (_norm_player_name(p.get("player")), str(p.get("game") or "").casefold(), market) in selected_keys else 1,
             -float(p.get("expected_value_pct") or -1e9)
         ))
-        prediction_ledger.freeze_daily_slate(market, slate_date, rows)
+        prediction_ledger.update_daily_slate_candidates(market, slate_date, rows)
 
     return {"locked": True, "selected": len(selected), "saved": saved, "picks": selected}
 
