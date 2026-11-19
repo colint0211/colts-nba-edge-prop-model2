@@ -2451,7 +2451,7 @@ def _post_selection_negative_review(prop, market, injury_feed):
 
 
 def _lock_daily_top_three(slate_date):
-    """Rank Points and Threes together and lock only the three best qualified bets."""
+    """Rank Points and Threes together after injury/rotation repricing of the full pool."""
     markets = ("points", "threes")
     # Once even one official pick exists, the slate is immutable. Never rerun
     # the risk review or change ranks/prices on a later browser refresh.
@@ -2479,12 +2479,24 @@ def _lock_daily_top_three(slate_date):
             "injury_feed": injury_feed.get("meta", {}) if isinstance(injury_feed, dict) else {},
             "message": "No picks will be locked until a fresh official NBA injury report for this slate date is available.",
         }
+
+    # Critical ordering: apply confirmed injury and historical teammate on/off
+    # adjustments to EVERY candidate before filtering on recommendation/EV.
+    # Otherwise a replacement player whose original projection was mediocre
+    # can never enter the shortlist even when a teammate's absence changes his role.
     eligible = []
     for market, rows in slates.items():
         for p in rows:
             _apply_official_injury(p, injury_feed, p.get("player"), p.get("team"))
             if p.get("injury_blocked") or p.get("injury_flag"):
                 continue
+            try:
+                _apply_absent_teammate_minutes(p, market, injury_feed)
+            except Exception as exc:
+                p["teammate_absence_adjustment"] = {
+                    "applied": False,
+                    "reason": "Historical on/off adjustment failed safely: " + type(exc).__name__,
+                }
             if p.get("recommendation") not in ("VALUE CANDIDATE", "LEAN / VERIFY"):
                 continue
             try:
@@ -2505,7 +2517,7 @@ def _lock_daily_top_three(slate_date):
             eligible.append(p)
 
     # EV is the primary rank. Edge and model grade break close ties; all
-    # markets compete for the same three slots.
+    # markets compete for the same three slots after injury repricing.
     eligible.sort(key=lambda p: (
         p["_ranking_ev"], p["_ranking_edge"],
         float(p.get("play_grade") if p.get("play_grade") is not None else -1.0)
@@ -2521,17 +2533,13 @@ def _lock_daily_top_three(slate_date):
         reviewed_candidates += 1
         market = p["market"]
         try:
-            _apply_absent_teammate_minutes(p, market, injury_feed)
-            # An absence-driven role change can invalidate the original EV rank.
-            try:
-                adjusted_ev = float(p.get("expected_value_pct"))
-                adjusted_edge = float(p.get("edge_pp") or 0.0)
-                adjusted_minutes = float(p.get("projected_minutes") or 0.0)
-            except (TypeError, ValueError, OverflowError):
-                adjusted_ev, adjusted_edge, adjusted_minutes = -1e9, -1e9, 0.0
+            # Role repricing has already happened across the entire candidate pool.
+            adjusted_ev = float(p.get("expected_value_pct"))
+            adjusted_edge = float(p.get("edge_pp") or 0.0)
+            adjusted_minutes = float(p.get("projected_minutes") or 0.0)
             if (not math.isfinite(adjusted_ev) or adjusted_ev < 2.0 or adjusted_edge < 2.0
                     or adjusted_minutes < 15.0 or p.get("best_side") not in ("OVER", "UNDER")):
-                passed, reason = False, "Teammate-absence minutes adjustment removed the required EV/edge/minutes threshold."
+                passed, reason = False, "Injury/rotation repricing removed the required EV/edge/minutes threshold."
             else:
                 passed, reason = _post_selection_negative_review(p, market, injury_feed)
         except Exception as exc:
@@ -2542,10 +2550,10 @@ def _lock_daily_top_three(slate_date):
             selected.append(p)
         else:
             p["negative_review"] = {"status": "rejected", "reason": reason}
-        if reviewed_candidates >= 12:
+        if reviewed_candidates >= 20:
             break
 
-    # Re-rank a wider provisional pool after injury and teammate-role adjustments.
+    # Re-rank after risk review; no pre-injury EV is used for final ordering.
     selected.sort(key=lambda p: (
         float(p.get("expected_value_pct") or -1e9),
         float(p.get("edge_pp") or 0),
@@ -2553,8 +2561,6 @@ def _lock_daily_top_three(slate_date):
     ), reverse=True)
     selected = selected[:3]
 
-    # Risk review may reprice an UNDER or adjust its probability. Rank the
-    # final approved selections using their post-review EV, not stale pre-review EV.
     for p in selected:
         try:
             p["_ranking_ev"] = float(p.get("expected_value_pct"))
@@ -2569,14 +2575,10 @@ def _lock_daily_top_three(slate_date):
     for rank, p in enumerate(selected, 1):
         p["selection_rank"] = rank
         p["daily_top3"] = True
-        p["daily_top5"] = True  # retain compatibility with existing history/UI endpoints
+        p["daily_top5"] = True
         p["slate_date"] = slate_date
-        p["play_instruction"] = (
-            f"PLAY {p['best_side']} {p.get('line')} {p['market'].upper()}"
-        )
+        p["play_instruction"] = f"PLAY {p['best_side']} {p.get('line')} {p['market'].upper()}"
 
-    # Persist only the selected rows. The per-market writer is retained, but
-    # each group is a subset of the global three-pick card.
     saved = 0
     for market in markets:
         market_rows = [p for p in selected if p["market"] == market]
@@ -2594,7 +2596,7 @@ def _lock_daily_top_three(slate_date):
             if key not in selected_keys and p.get("negative_review") is None:
                 p["negative_review"] = {
                     "status": "not_selected",
-                    "reason": "Outside the combined nightly Top 3 across Points and Threes"
+                    "reason": "Outside the combined nightly Top 3 after injury/rotation repricing across the full candidate pool"
                 }
         rows.sort(key=lambda p: (
             0 if (_norm_player_name(p.get("player")), str(p.get("game") or "").casefold(), market) in selected_keys else 1,
@@ -2603,7 +2605,6 @@ def _lock_daily_top_three(slate_date):
         prediction_ledger.update_daily_slate_candidates(market, slate_date, rows)
 
     return {"locked": True, "selected": len(selected), "saved": saved, "picks": selected}
-
 
 def _snapshot_daily_market_top5(market, props):
     """Freeze a market's candidate pool; lock only after both markets are available."""
