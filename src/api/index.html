@@ -350,8 +350,7 @@ function livePace(p){
   const st=playerLive(p)||{},g=gameFor(p)||{};
   const market=String(p.market||"points").toLowerCase();
   const fields={
-    points:["points","pts"],rebounds:["rebounds","rebound","reb"],
-    assists:["assists","assist","ast"],steals:["steals","steal","stl"],
+    points:["points","pts"],
     threes:["three_points_made","threePointsMade","three_pointers_made","threePointersMade","threes","3pm","3PTM"]
   };
   let raw=null;
