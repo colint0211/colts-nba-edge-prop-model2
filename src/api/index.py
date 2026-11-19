@@ -2174,7 +2174,7 @@ def _post_selection_negative_review(prop, market, injury_feed):
                 "under_probability": under_raw / mass,
                 "over_odds": over_odds,
                 "under_odds": under_odds,
-                "books_used": prop.get("market_books") or ["DraftKings/FanDuel via PropLine"],
+                "books_used": prop.get("market_books") or ["DraftKings-only odds via PropLine"],
                 "over_book": "PropLine",
                 "under_book": "PropLine",
             }
@@ -2578,7 +2578,7 @@ def proprietary_market_board(market: str = "points"):
         pass
     result = {
         "market": market,
-        "source": "ESPN game-log distribution + DraftKings/FanDuel odds via PropLine",
+        "source": "ESPN game-log distribution + DraftKings-only odds via PropLine",
         "blend": "Independent proprietary probability; DraftKings/FanDuel prices used only for EV and market-relative edge",
         "line_count": len(props),
         "projected_count": len(output),
