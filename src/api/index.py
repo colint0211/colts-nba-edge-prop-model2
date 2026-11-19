@@ -1282,7 +1282,7 @@ def _apply_directional_play_grade(model):
     return model
 
 
-def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, market="", matchup_adjustment=None, team_context_adjustment=None):
+def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, market="", matchup_adjustment=None, team_context_adjustment=None, injury_variance_cv=0.0):
     """Project count stats with an overdispersed count model; never truncate the upper tail at the observed maximum."""
     clean = [float(v) for v in values if v is not None and math.isfinite(float(v)) and float(v) >= 0]
     if len(clean) < 4:
@@ -1359,6 +1359,11 @@ def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, ma
     model_variance = target_mean + (target_mean**2 / dispersion_k)
     std_dev = math.sqrt(model_variance)
 
+    try:
+        injury_variance_cv = max(0.0, min(0.20, float(injury_variance_cv or 0.0)))
+    except (TypeError, ValueError):
+        injury_variance_cv = 0.0
+    injury_shape = (1.0 / (injury_variance_cv ** 2)) if injury_variance_cv > 1e-6 else None
     rng = random.Random(str(seed) + "|" + str(line) + "|" + str(market))
     sims = 60000
     over = under = push = 0
@@ -1380,6 +1385,10 @@ def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, ma
         else:
             latent_rate = rng.gammavariate(dispersion_k, target_mean / dispersion_k)
             sample = poisson_draw(latent_rate)
+        if injury_shape is not None:
+            # Independent mean-preserving Gamma multiplier adds rotation
+            # uncertainty without changing the expected projection.
+            sample *= rng.gammavariate(injury_shape, 1.0 / injury_shape)
         if abs(sample - line) < 1e-9:
             push += 1
         elif sample > line:
@@ -1409,6 +1418,7 @@ def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, ma
         play_grade = None
     return {
         "projection": round(target_mean, 2),
+        "injury_variance_cv": round(injury_variance_cv, 4),
         "projected_minutes": round(projected_min, 1) if projected_min is not None else None,
         "over_probability": round(over_p*100, 2), "under_probability": round(under_p*100, 2),
         "push_probability": round(push_p*100, 2), "simulations": sims,
@@ -2097,7 +2107,7 @@ def _apply_absent_teammate_minutes(prop, market, injury_feed):
             continue
         status = str(row.get("status") or "").strip().casefold()
         reason = str(row.get("reason") or "").casefold()
-        if status not in ("out", "doubtful"):
+        if status != "out":
             continue
         # Two-way/G League assignments and long-term surgery absences are
         # not treated as a newly vacated rotation role.
@@ -2155,6 +2165,7 @@ def _apply_absent_teammate_minutes(prop, market, injury_feed):
                     "absent_games": len(absent_minutes),
                     "active_games": len(active_minutes),
                     "observed_minutes_delta": round(delta, 2),
+                    "absent_minutes_sd": round(math.sqrt(sum((x - sum(absent_minutes) / len(absent_minutes)) ** 2 for x in absent_minutes) / max(1, len(absent_minutes) - 1)), 2),
                 })
 
     if not season_deltas:
@@ -2203,12 +2214,16 @@ def _apply_absent_teammate_minutes(prop, market, injury_feed):
         line = float(prop.get("line"))
     except (TypeError, ValueError):
         return
+    # Estimate role uncertainty from observed minutes dispersion in verified
+    # teammate-absent games. Shrink by 50%, scale to projected minutes, and cap.
+    injury_variance_cv = min(0.20, max(0.0, (float(strongest.get("absent_minutes_sd") or 0.0) * 0.50) / max(baseline_minutes + bump, 1.0)))
     adjusted = _simulate_market(
         values, line, None, None,
         _norm_player_name(prop.get("player")) + market + "teammate-absence",
         minutes=adjusted_minutes, market=market,
         matchup_adjustment=prop.get("defense_vs_position"),
         team_context_adjustment=prop.get("team_context_adjustment"),
+        injury_variance_cv=injury_variance_cv,
     )
     if not adjusted:
         return
@@ -2241,6 +2256,8 @@ def _apply_absent_teammate_minutes(prop, market, injury_feed):
         "evidence_absent_games": strongest["absent_games"],
         "evidence_active_games": strongest["active_games"],
         "method": "50% shrinkage of historical on/off median minutes difference; capped at +6 minutes",
+        "injury_variance_cv": round(injury_variance_cv, 4),
+        "variance_method": "mean-preserving gamma mixture from observed absent-game minutes dispersion",
     }
     prop["model_components"] = list(prop.get("model_components") or []) + [
         "historical teammate-absence on/off minutes adjustment"
