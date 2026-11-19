@@ -39,7 +39,7 @@ LIVE_UPSTREAM = "https://colts-nba-edge-prop-model-3xj6ghyhl-colin-82ad.vercel.a
 app = FastAPI()
 app.include_router(away_ats_router)
 BP_MARKETS = {"points": 156, "rebounds": 157, "assists": 151, "steals": 160, "threes": 162}
-ACTIVE_PROP_MARKETS = ("points", "rebounds", "threes")
+ACTIVE_PROP_MARKETS = ("points", "threes")
 @app.get("/", response_class=HTMLResponse)
 async def home():
     return HTMLResponse(HTML)
@@ -2423,10 +2423,10 @@ def _revalidate_frozen_market_candidates(market, candidates, injury_feed):
     return ordered
 
 @app.get("/api/proprietary-market-board")
-def proprietary_market_board(market: str = "rebounds"):
+def proprietary_market_board(market: str = "points"):
     market = market.lower().strip()
     if market not in ACTIVE_PROP_MARKETS:
-        raise HTTPException(status_code=404, detail="Active model markets are points, rebounds, and threes.")
+        raise HTTPException(status_code=404, detail="Active model markets are points and threes.")
     now = time.time()
     cached_board = _BP_BOARD_CACHE.get(market)
     injury_feed = _load_official_injury_feed()
@@ -2616,13 +2616,13 @@ def proprietary_market_board(market: str = "rebounds"):
 def cron_freeze_daily_market(market_name: str, request: FastRequest):
     """Freeze one active market per invocation so market jobs stay within timeout."""
     if market_name not in ACTIVE_PROP_MARKETS:
-        raise HTTPException(status_code=404, detail="Only points, rebounds, and threes are active freeze markets.")
+        raise HTTPException(status_code=404, detail="Only points and threes are active freeze markets.")
     secret = os.getenv("CRON_SECRET", "")
     if not secret or not secrets.compare_digest(request.headers.get("authorization", ""), "Bearer " + secret):
         raise HTTPException(status_code=401, detail="Unauthorized")
     market_name = market_name.lower().strip()
     if market_name not in ACTIVE_PROP_MARKETS:
-        raise HTTPException(status_code=400, detail="Only points, rebounds, and threes are active markets.")
+        raise HTTPException(status_code=400, detail="Only points and threes are active markets.")
     now_et = datetime.now(ZoneInfo("America/New_York"))
     if now_et.hour != 7:
         return JSONResponse({
@@ -2656,7 +2656,7 @@ def cron_freeze_daily_market(market_name: str, request: FastRequest):
 
 @app.get("/api/cron/freeze-daily")
 def cron_freeze_daily(request: FastRequest):
-    """Capture all five market boards at 7 a.m. Eastern."""
+    """Capture both active market boards at 7 a.m. Eastern."""
     secret = os.getenv("CRON_SECRET", "")
     if not secret or not secrets.compare_digest(request.headers.get("authorization", ""), "Bearer " + secret):
         raise HTTPException(status_code=401, detail="Unauthorized")
@@ -2696,7 +2696,7 @@ def bettingpros_books():
 
 
 @app.get("/api/bettingpros-offers")
-def bettingpros_offers(market: str = "rebounds", event_id: int | None = None):
+def bettingpros_offers(market: str = "points", event_id: int | None = None):
     """Expose current offers for supported NBA prop markets, preserving per-book prices."""
     market = market.lower().strip()
     market_id = BP_MARKETS.get(market)
@@ -2727,11 +2727,11 @@ def bettingpros_offers(market: str = "rebounds", event_id: int | None = None):
 
 
 @app.get("/api/bettingpros-props")
-def bettingpros_props(market: str = "rebounds"):
+def bettingpros_props(market: str = "points"):
     market = market.lower().strip()
     market_id = BP_MARKETS.get(market)
     if market_id is None:
-        raise HTTPException(status_code=400, detail="Unsupported market. Use points, rebounds, assists, steals, or threes.")
+        raise HTTPException(status_code=400, detail="Unsupported active market. Use points or threes.")
     payload, cache_status = _bp_fetch_props(market, 50)
     return JSONResponse({
         "market": market, "market_id": market_id,
