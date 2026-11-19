@@ -47,7 +47,7 @@ const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 const num=(n,d=1)=>n==null||!Number.isFinite(Number(n))?'—':Number(n).toFixed(d);
 const norm=s=>String(s||'').toLowerCase().replace(/[^a-z0-9]/g,'');
 const bpMarkets=['points','threes'];
-function bpMarketLabel(m){return ({points:'Points',rebounds:'Rebounds',assists:'Assists',steals:'Steals',threes:'3-Pointers Made'})[m]||m}
+function bpMarketLabel(m){return ({points:'Points',threes:'3-Pointers Made'})[m]||m}
 function normalizeLiveTeam(value){
   const raw=String(value||'').trim().toUpperCase().replace(/\\./g,'');
   const aliases={
@@ -115,7 +115,7 @@ function playerLive(p){
 function liveStatValue(p){
   const st=playerLive(p)||{},market=String(p.market||"points").toLowerCase();
   const fields={
-    points:["points","pts"],rebounds:["rebounds","rebound","reb"],
+    points:["points","pts"],
     assists:["assists","assist","ast"],steals:["steals","steal","stl"],
     threes:["three_points_made","threePointsMade","three_pointers_made","threePointersMade","threes","3pm","3PTM"]
   };
@@ -225,7 +225,7 @@ function rankEV(a){
 function setMarket(m){
   market=m;
   document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('active',b.dataset.market===m));
-  const labels={ev:'Top 5 EV Plays',points:'Top 5 Points',rebounds:'Top 5 Rebounds',assists:'Top 5 Assists',steals:'Top 5 Steals',threes:'Top 5 3-Pointers Made'};
+  const labels={ev:'Top 5 EV Plays',points:'Top 5 Points',threes:'Top 5 3-Pointers Made'};
   el('topTitle').textContent=labels[m]||'Top 5 Plays';
   el('topHint').textContent=m==='points'?'Top five proprietary points projections.':m==='ev'?'Top five positive-EV plays ranked across points and three-pointers made.':'Proprietary '+bpMarketLabel(m)+' projections, probabilities and EV. DraftKings lines via PropLine; projections remain model-generated.';
   el('fullHint').textContent=m==='ev'?'All positive-EV candidates across the two active markets.':m==='points'?'All proprietary points props.':'All proprietary '+bpMarketLabel(m)+' projections using DraftKings lines via PropLine.';
@@ -296,7 +296,7 @@ function positionDisplayName(position){
 }
 function reasoning(p){
   const market=String(p.market||'points').toLowerCase();
-  const labels={points:{name:'points',unit:'PPG'},rebounds:{name:'rebounds',unit:'RPG'},threes:{name:'3-pointers made',unit:'3PM'}};
+  const labels={points:{name:'points',unit:'PPG'},threes:{name:'3-pointers made',unit:'3PM'}};
   const meta=labels[market]||{name:market,unit:'per game'};
   const fmt=(v,d=2)=>v==null||!Number.isFinite(Number(v))?'not available':num(v,d);
   const rows=[];
@@ -386,13 +386,13 @@ function livePace(p){
   const projected=current+(current/minutes)*remainingPlayerMinutes;
   const margin=projected-line;
   const verdict=margin>=0.5?"ON PACE TO HIT":margin<=-0.5?"ON PACE TO MISS":"TOO CLOSE TO CALL";
-  const label=({points:"pts",rebounds:"reb",assists:"ast",steals:"stl",threes:"3PM"})[market]||"stat";
+  const label=({points:"pts",threes:"3PM"})[market]||"stat";
   return {current,minutes,gameMinutesLeft,remainingPlayerMinutes,projected,margin,verdict,label};
 }
 function liveTickerHtml(p){
   const g=gameFor(p)||{},value=liveStatValue(p),pace=livePace(p);
   const market=String(p.market||"points").toLowerCase();
-  const label=({points:"PTS",rebounds:"REB",assists:"AST",steals:"STL",threes:"3PM"})[market]||"STAT";
+  const label=({points:"PTS",threes:"3PM"})[market]||"STAT";
   const line=Number(p.line),validLine=Number.isFinite(line);
   const progress=value==null||!validLine||line<=0?0:Math.max(0,Math.min(100,value/line*100));
   const score=g.away_score!=null&&g.home_score!=null?g.away+" "+g.away_score+" – "+g.home_score+" "+g.home:(g.away&&g.home?g.away+" @ "+g.home:"Score unavailable");
@@ -464,7 +464,7 @@ function card(p,i){
   return '<article class="player-card '+d+'"><div class="player-top"><div><div class="player-name">'+esc((i+1)+'. '+p.player+(p.roster_team?' ('+p.roster_team+')':''))+'</div><div class="matchup">'+esc(p.game||'Matchup unavailable')+' · '+esc(p.sample_label||'Projection unavailable')+'</div></div><span class="decision '+d+'">'+esc(shownRecommendation)+'</span></div>'+
   '<div class="card-bottom" style="font-size:1.08em;padding:12px;border:2px solid currentColor;border-radius:10px;margin:10px 0"><b>'+esc(action)+'</b></div>'+
   '<div class="scorebox"><div><div class="score-label">Live game score</div><div class="score">'+esc(score)+'</div></div><div class="game-status">'+liveText+'</div></div>'+
-  '<div class="statline"><div class="mini"><div class="mini-label">Live '+esc(({points:'points',rebounds:'rebounds',assists:'assists',steals:'steals',threes:'3-pointers made'})[p.market]||'stat')+' / prop line</div><div class="mini-value">'+(pts==null?'—':pts)+' <span>/ '+num(p.line)+' '+esc(({points:'pts',rebounds:'reb',assists:'ast',steals:'stl',threes:'3PM'})[p.market]||'stat')+'</span></div><div class="progress"><span style="width:'+progress+'%"></span></div></div><div class="mini"><div class="mini-label">Pre-game model projection</div><div class="mini-value">'+num(p.projection)+' <span>'+esc(({points:'pts',rebounds:'reb',assists:'ast',steals:'stl',threes:'3PM'})[p.market]||'stat')+'</span></div><div class="mini-label">'+num(p.best_probability)+'% best-side probability</div></div></div>'+sideValueHtml(p)+paceHtml+
+  '<div class="statline"><div class="mini"><div class="mini-label">Live '+esc(({points:'points',threes:'3-pointers made'})[p.market]||'stat')+' / prop line</div><div class="mini-value">'+(pts==null?'—':pts)+' <span>/ '+num(p.line)+' '+esc(({points:'pts',rebounds:'reb',assists:'ast',steals:'stl',threes:'3PM'})[p.market]||'stat')+'</span></div><div class="progress"><span style="width:'+progress+'%"></span></div></div><div class="mini"><div class="mini-label">Pre-game model projection</div><div class="mini-value">'+num(p.projection)+' <span>'+esc(({points:'pts',rebounds:'reb',assists:'ast',steals:'stl',threes:'3PM'})[p.market]||'stat')+'</span></div><div class="mini-label">'+num(p.best_probability)+'% best-side probability</div></div></div>'+sideValueHtml(p)+paceHtml+
   '<div class="card-bottom"><span>Pick: <b>'+esc(p.best_side||'—')+'</b> · '+num(p.edge_pp)+' pp edge</span><span class="ev">'+(p.expected_profit_per_100==null?'—':'$'+num(p.expected_profit_per_100,2)+' EV')+'</span></div>'+
   '<div class="card-bottom"><span>Odds O '+esc(p.over_odds??'—')+' / U '+esc(p.under_odds??'—')+'</span><span>'+gradeHtml+'</span></div>'+injurySummary(p)+balldontlieSummary(p)+lineEditor(p)+reasoning(p)+reasoning(p)+'</article>';
 }
@@ -604,7 +604,7 @@ function render(){
   const q=el('search').value.toLowerCase();let list=[];
   if(market==='ev'){
     const pending=['threes'].filter(m=>bpLoading[m]||!bpCache[m]);
-    if(pending.length){el('count').textContent='Loading the two active markets…';el('cards').innerHTML='<div class="empty">Building the cross-market Top 5 EV board. Checking the three active markets before ranking.</div>';return;}
+    if(pending.length){el('count').textContent='Loading the two active markets…';el('cards').innerHTML='<div class="empty">Building the cross-market Top 5 EV board. Checking both active markets before ranking.</div>';return;}
     list=allModelEV();
     if(q)list=list.filter(p=>(p.player+' '+(p.team||p.roster_team||'')+' '+(p.game||'')).toLowerCase().includes(q));
     list=list.slice(0,5);
@@ -638,7 +638,7 @@ function renderFull(){
     return;
   }
   if(market==='ev'){
-    const pending=['rebounds','threes'].filter(m=>bpLoading[m]||!bpCache[m]);
+    const pending=['threes'].filter(m=>bpLoading[m]||!bpCache[m]);
     if(pending.length){el('countFull').textContent='Loading the two active markets…';el('fullCards').innerHTML='<div class="empty">Waiting for both active market boards before listing cross-market candidates.</div>';return;}
     const rows=sortByEV(allModelEV().filter(p=>(p.player+' '+(p.team||'')+' '+(p.game||'')).toLowerCase().includes(q)));
     el('countFull').textContent=rows.length+' cross-market EV candidates';
@@ -726,7 +726,7 @@ const today=new Date();el('historyDate').value=localDateKey(today);el('historyDa
 // unavailable odds/model request must never prevent live scores from rendering.
 updateLive();
 load();loadPastPlays();
-['rebounds','threes'].forEach(loadBP);
+loadBP('threes');
 setInterval(async()=>{await updateLive();render();renderFull()},15000);
 setInterval(()=>{delete bpCache.threes;loadBP('threes');load(false)},300000);
 setInterval(()=>loadPastPlays(),60000);
