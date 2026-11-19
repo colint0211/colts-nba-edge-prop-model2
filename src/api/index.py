@@ -38,7 +38,7 @@ UPSTREAM = "https://colts-nba-edge-prop-model-e2oyr9l03-colin-82ad.vercel.app"
 LIVE_UPSTREAM = "https://colts-nba-edge-prop-model-3xj6ghyhl-colin-82ad.vercel.app"
 app = FastAPI()
 app.include_router(away_ats_router)
-BP_MARKETS = {"points": 156, "rebounds": 157, "assists": 151, "steals": 160, "threes": 162}
+BP_MARKETS = {"points": 156, "threes": 162}
 ACTIVE_PROP_MARKETS = ("points", "threes")
 @app.get("/", response_class=HTMLResponse)
 async def home():
@@ -3299,7 +3299,7 @@ def model_calibration(market: str = "all"):
     """Expose per-market calibration readiness and a same-sample no-vig benchmark."""
     selected = market.lower().strip()
     if selected != "all" and selected not in STAT_FIELDS:
-        raise HTTPException(status_code=400, detail="Use points, rebounds, assists, steals, threes, or all.")
+        raise HTTPException(status_code=400, detail="Use points, threes, or all.")
     try:
         prediction_ledger.initialize()
         names = list(STAT_FIELDS) if selected == "all" else [selected]
