@@ -486,7 +486,11 @@ def list_settlement_candidates(limit=500):
 
 
 def save_daily_top_five(rows, market, slate_date):
-    """Save the first official Top 5 set for a market and slate date."""
+    """Save at most five immutable official picks for one market/slate.
+
+    Candidate pools must never be passed here; only the final ranked and
+    risk-reviewed selections belong in nba_predictions.
+    """
     import re
     market = str(market or "").strip().lower()
     slate_date = str(slate_date or "").strip()
