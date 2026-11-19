@@ -87,7 +87,7 @@ def _extract_dk_quotes(events):
                     if not player:
                         continue
                     team = ""
-                    match = re.search(r"\\(([A-Z]{2,3})\\)\\s*$", player)
+                    match = re.search(r"\(([A-Z]{2,3})\)\s*$", player)
                     if match:
                         team = match.group(1)
                         player = player[:match.start()].strip()
