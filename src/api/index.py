@@ -1937,7 +1937,7 @@ def _propline_fetch_events():
 
 
 def _propline_market_props(events, market):
-    """Normalize DraftKings main-line Over/Under outcomes into one row per player."""
+    """Normalize DraftKings main-line Over/Under prices at an exact shared line."""
     market_key = _PROPLINE_MARKETS[market]
     grouped = {}
     for event in events or []:
@@ -2010,13 +2010,14 @@ def _propline_market_props(events, market):
                         row["book_links"][bookmaker_key] = bookmaker.get("link")
     output = []
     for row in grouped.values():
+        # The user's requested execution market is DraftKings only. Do not
+        # substitute FanDuel's better price or blend its quote into DK pricing.
         for side in ("over", "under"):
-            prices = row.get("book_prices", {}).get(side, {})
-            if prices:
-                best_key, best_price = max(prices.items(), key=lambda item: float(item[1]) if float(item[1]) > 0 else 100.0 / abs(float(item[1])))
-                row[side + "_odds"] = best_price
-                row["best_" + side + "_book"] = row.get("book_names", {}).get(best_key, best_key.title())
-        row["market_books"] = sorted(set(row.get("book_names", {}).values()))
+            draftkings_price = row.get("book_prices", {}).get(side, {}).get("draftkings")
+            if draftkings_price is not None:
+                row[side + "_odds"] = draftkings_price
+                row["best_" + side + "_book"] = "DraftKings"
+        row["market_books"] = ["DraftKings"]
         selected_book = None
         for side in ("over", "under"):
             name = row.get("best_" + side + "_book")
@@ -2060,7 +2061,7 @@ def _active_nba_slate_date(now_et=None):
 
 
 def _post_selection_negative_review(prop, market, injury_feed):
-    """Run expensive injury/workload checks only after a prop reaches the provisional Top 5."""
+    """Run expensive injury/workload checks only on provisional combined Top 3 candidates."""
     if not isinstance(prop, dict):
         return False, "Invalid candidate"
     _apply_official_injury(prop, injury_feed, prop.get("player"), prop.get("team"))
@@ -2528,7 +2529,7 @@ def proprietary_market_board(market: str = "points"):
                 "athlete_id": athlete_id,
                 "games_used": len(values),
                 "event_id": raw.get("event_id"),
-                "line_source": "DraftKings/FanDuel via PropLine",
+                "line_source": "DraftKings via PropLine",
                 "line_updated_at": raw.get("last_update"),
                 "bookmaker_link": raw.get("bookmaker_link"),
                 "market_books": raw.get("market_books") or ["Sportsbook"],
