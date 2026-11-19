@@ -2080,6 +2080,13 @@ def _injury_feed_valid_for_slate(feed, slate_date):
     report_day = report_stamp[:10] if re.match(r"^\d{4}-\d{2}-\d{2}", report_stamp) else ""
     if report_day != str(slate_date):
         return False
+    try:
+        age_minutes = float(feed.get("meta", {}).get("age_minutes"))
+    except (TypeError, ValueError):
+        return False
+    # A same-day report can still be materially stale; fail closed after 3 hours.
+    if not math.isfinite(age_minutes) or age_minutes < 0 or age_minutes > 180:
+        return False
     return True
 
 
@@ -2606,6 +2613,42 @@ def _load_pre_pick_news_context(slate_date, candidate_rows):
     }
     _PRE_PICK_CONTEXT_CACHE.update({"at": now, "data": result})
     return result
+
+
+@app.get("/api/pre-pick-context")
+def pre_pick_context(slate_date: str = None):
+    """Read-only audit of the mandatory news/depth-chart checks used before a daily lock."""
+    slate_date = str(slate_date or _active_nba_slate_date())
+    prediction_ledger.initialize()
+    candidates = []
+    boards = {}
+    for market in ("points", "threes"):
+        slate = prediction_ledger.get_daily_slate(market, slate_date)
+        if not slate or not isinstance(slate.get("candidates"), list):
+            boards[market] = "missing"
+            continue
+        boards[market] = "ready"
+        candidates.extend(p for p in slate["candidates"] if isinstance(p, dict))
+    injury_feed = _load_official_injury_feed()
+    injury_ok = _injury_feed_valid_for_slate(injury_feed, slate_date)
+    news_context = _load_pre_pick_news_context(slate_date, candidates) if candidates else {
+        "status": "blocked", "reason": "No saved candidate boards are available for this slate.",
+        "teams_checked": [], "source_checks": {},
+    }
+    ready = injury_ok and news_context.get("status") == "ready"
+    return JSONResponse({
+        "slate_date": slate_date,
+        "status": "ready" if ready else "blocked",
+        "can_lock_new_picks": bool(ready),
+        "boards": boards,
+        "official_injury_report": {
+            "status": injury_feed.get("meta", {}).get("status"),
+            "report_timestamp_et": injury_feed.get("meta", {}).get("report_timestamp_et"),
+            "age_minutes": injury_feed.get("meta", {}).get("age_minutes"),
+            "valid_for_slate": injury_ok,
+        },
+        "news_and_depth_chart": news_context,
+    })
 
 
 def _lock_daily_top_three(slate_date):
