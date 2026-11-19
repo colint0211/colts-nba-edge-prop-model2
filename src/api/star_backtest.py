@@ -110,21 +110,24 @@ def _player_payload(name):
 def _prepare_player(name, history, games):
     game_rows = games.get("games") or []
     by_event = {}
+    by_date = {}
     for game in game_rows:
         stats = game.get("stats") or {}
-        pts = stats.get("points")
-        mins = _minutes(stats.get("minutes", stats.get("min")))
         try:
-            pts = float(pts)
+            pts = float(stats.get("points"))
         except (TypeError, ValueError):
             continue
-        if mins is None or not math.isfinite(pts):
+        date = str(game.get("commence_time") or "")
+        if not date:
             continue
-        by_event[str(game.get("event_id"))] = {
+        row = {
             "event_id": str(game.get("event_id")),
-            "date": str(game.get("commence_time") or ""),
-            "points": pts, "minutes": mins
+            "date": date,
+            "points": pts,
+            "minutes": _minutes(stats.get("minutes", stats.get("min")))
         }
+        by_event[row["event_id"]] = row
+        by_date[date[:10]] = row
 
     entries = history.get("entries") or []
     rows = []
@@ -134,36 +137,34 @@ def _prepare_player(name, history, games):
         if entry.get("line_moved_in_play") is True:
             continue
         event_id = str(entry.get("event_id"))
-        game = by_event.get(event_id)
+        date = str(entry.get("commence_time") or "")
+        game = by_event.get(event_id) or by_date.get(date[:10])
         if not game:
             continue
-        date = str(entry.get("commence_time") or game.get("date") or "")
+        date = date or game["date"]
         if not date or date[:10] < START_DATE:
             continue
         try:
             line = float(entry.get("line"))
             over_price = float(entry.get("over_price"))
             under_price = float(entry.get("under_price"))
-            actual = float(entry.get("actual_value"))
         except (TypeError, ValueError):
             continue
-        # Reject a resolution/game-log mismatch rather than silently trusting a bad join.
-        if abs(actual - game["points"]) > 0.01:
+        try:
+            archived_actual = float(entry.get("actual_value"))
+        except (TypeError, ValueError):
+            archived_actual = None
+        actual = game["points"]
+        if archived_actual is not None and abs(archived_actual - actual) > 0.01:
             continue
-        if actual == line:
-            result = "PUSH"
-        elif actual > line:
-            result = "OVER"
-        else:
-            result = "UNDER"
+        result = "PUSH" if actual == line else ("OVER" if actual > line else "UNDER")
         rows.append({
             "player": name, "event_id": event_id, "date": date,
             "line": line, "over_price": over_price, "under_price": under_price,
             "actual": actual, "result": result, "minutes": game["minutes"],
-            "points": game["points"]
+            "points": actual
         })
 
-    # Only game-log rows dated before each prop are eligible as model inputs.
     all_games = sorted(
         [g for g in by_event.values() if g["date"] and g["date"][:10] >= START_DATE],
         key=lambda g: (g["date"], g["event_id"])
@@ -172,24 +173,18 @@ def _prepare_player(name, history, games):
         prior = [g for g in all_games if g["date"] < row["date"]]
         if len(prior) < 5:
             continue
-        prior = prior[-20:]
-        row["prior_games"] = prior
+        row["prior_games"] = prior[-20:]
     return [r for r in rows if "prior_games" in r], len(entries), len(by_event)
-
 
 def _predict(row, weights):
     prior = row["prior_games"]
     last5 = prior[-5:]
     last10 = prior[-10:]
-    def ppm(items):
-        total_minutes = sum(g["minutes"] for g in items)
-        return sum(g["points"] for g in items) / total_minutes if total_minutes else 0.0
-    rate = weights[0] * ppm(last5) + weights[1] * ppm(last10) + weights[2] * ppm(prior)
-    mins5 = sum(g["minutes"] for g in last5) / len(last5)
-    mins10 = sum(g["minutes"] for g in last10) / len(last10)
-    expected_minutes = 0.60 * mins5 + 0.40 * mins10
-    mean = rate * expected_minutes
-    residuals = [g["points"] - rate * g["minutes"] for g in last10]
+    mean5 = sum(g["points"] for g in last5) / len(last5)
+    mean10 = sum(g["points"] for g in last10) / len(last10)
+    season_mean = sum(g["points"] for g in prior) / len(prior)
+    mean = weights[0] * mean5 + weights[1] * mean10 + weights[2] * season_mean
+    residuals = [g["points"] - mean for g in last10]
     variance = sum(x * x for x in residuals) / max(1, len(residuals) - 1)
     sd = max(4.5, min(13.5, math.sqrt(variance)))
     p_over = max(0.001, min(0.999, 1.0 - _normal_cdf(row["line"], mean, sd)))
@@ -343,7 +338,7 @@ def stars_points_backtest(request: FastRequest):
         "coverage": coverage,
         "source_errors": errors,
         "method": {
-            "prediction": "Pregame scoring rate per minute from prior L5/L10/season games multiplied by projected minutes (60% L5 / 40% L10); residual SD from prior L10, clipped 4.5–13.5 points; normal CDF for line probability.",
+            "prediction": "Pregame points-only blend of prior L5, L10 and season-to-date game means; residual SD from prior L10, clipped 4.5–13.5 points; normal CDF for line probability.",
             "weight_selection": "Five fixed L5/L10/season scoring-rate blends compared on training Brier score only; lowest-Brier blend frozen before holdout.",
             "selection": "One side per player-game only when model EV at the actual DraftKings price is positive and model edge versus the no-vig DraftKings market is at least 2 percentage points.",
             "leakage_controls": "Game logs strictly before tip; same-day games held together; current-season regular season only; main line only; in-play re-priced lines excluded; player history actuals cross-checked against box scores."
@@ -360,7 +355,7 @@ def stars_points_backtest(request: FastRequest):
         },
         "limitations": [
             "The fixed cohort is a predeclared star list, not a claim that these are the league's top 20 by current usage.",
-            "The model uses historical points and minutes only; no archived pregame injury, lineup, opponent, pace or usage feed is included.",
+            "The model uses historical points only for this baseline; it does not yet include minutes, archived pregame injury, lineup, opponent, pace or usage features.",
             "Only DraftKings main lines are evaluated; this is not a test of alternate lines or FanDuel.",
             "A 30-day Hobby event-history window may constrain available odds history; report coverage is shown per player."
         ]
