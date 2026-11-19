@@ -2060,6 +2060,189 @@ def _active_nba_slate_date(now_et=None):
     return active_date.isoformat()
 
 
+
+def _injury_feed_valid_for_slate(feed, slate_date):
+    """Require a fresh official report for the exact NBA slate date before locking picks."""
+    if not isinstance(feed, dict) or feed.get("meta", {}).get("status") != "fresh":
+        return False
+    report_stamp = str(feed.get("meta", {}).get("report_timestamp_et") or "")
+    report_day = report_stamp[:10] if re.match(r"^\\d{4}-\\d{2}-\\d{2}", report_stamp) else ""
+    if report_day != str(slate_date):
+        return False
+    return True
+
+
+def _apply_absent_teammate_minutes(prop, market, injury_feed):
+    """Use verified game-log on/off minutes to estimate a teammate's role increase.
+
+    The adjustment is conservative: it requires at least 3 games with the
+    teammate absent and 5 games with the teammate active, shrinks the observed
+    median difference by 50%, and caps the projected increase at 6 minutes.
+    If the evidence is insufficient, no uplift is applied.
+    """
+    if not isinstance(prop, dict) or not isinstance(injury_feed, dict):
+        return
+    if injury_feed.get("meta", {}).get("status") != "fresh":
+        return
+    team = _canonical_team_code(prop.get("team") or prop.get("roster_team"))
+    athlete_id = str(prop.get("athlete_id") or "").strip()
+    if not team or not athlete_id:
+        return
+
+    absences = []
+    for row in injury_feed.get("records") or []:
+        if not isinstance(row, dict):
+            continue
+        if _canonical_team_code(row.get("team")) != team:
+            continue
+        status = str(row.get("status") or "").strip().casefold()
+        reason = str(row.get("reason") or "").casefold()
+        if status not in ("out", "doubtful"):
+            continue
+        # Two-way/G League assignments and long-term surgery absences are
+        # not treated as a newly vacated rotation role.
+        if "two-way" in reason or "g league" in reason or "surgery" in reason:
+            continue
+        absent_name = str(row.get("player") or "").strip()
+        if not absent_name or _norm_player_name(absent_name) == _norm_player_name(prop.get("player")):
+            continue
+        absences.append(absent_name)
+
+    if not absences:
+        return
+
+    season_deltas = []
+    for absent_name in absences:
+        absent_id, absent_team = _espn_roster_player_id(absent_name, {team})
+        if not absent_id or absent_team != team or absent_id == athlete_id:
+            continue
+        absent_event_ids = set()
+        absent_dates = set()
+        for season in (2027, 2026):
+            for row in _gamelog_records(absent_id, "minutes", "MIN", season):
+                if row.get("event_id"):
+                    absent_event_ids.add(str(row["event_id"]))
+                if row.get("date"):
+                    absent_dates.add(str(row["date"])[:10])
+        if not absent_event_ids and not absent_dates:
+            continue
+
+        absent_minutes, active_minutes = [], []
+        for season in (2027, 2026):
+            for row in _gamelog_records(athlete_id, "minutes", "MIN", season):
+                try:
+                    value = float(row.get("value"))
+                except (TypeError, ValueError):
+                    continue
+                if not math.isfinite(value) or value <= 0 or value > 60:
+                    continue
+                event_id = str(row.get("event_id") or "")
+                game_date = str(row.get("date") or "")[:10]
+                teammate_played = (
+                    event_id in absent_event_ids if event_id and absent_event_ids
+                    else game_date in absent_dates
+                )
+                (active_minutes if teammate_played else absent_minutes).append(value)
+
+        if len(absent_minutes) >= 3 and len(active_minutes) >= 5:
+            delta = _median(absent_minutes) - _median(active_minutes)
+            if delta > 0:
+                season_deltas.append({
+                    "teammate": absent_name,
+                    "absent_games": len(absent_minutes),
+                    "active_games": len(active_minutes),
+                    "observed_minutes_delta": round(delta, 2),
+                })
+
+    if not season_deltas:
+        prop["teammate_absence_adjustment"] = {
+            "applied": False,
+            "reason": "No sufficiently large verified on/off minutes sample; no speculative minutes bump applied.",
+        }
+        return
+
+    # Use the largest single supported role effect; do not add overlapping
+    # absences together because their minutes can represent the same rotation.
+    strongest = max(season_deltas, key=lambda item: item["observed_minutes_delta"])
+    bump = min(6.0, max(0.0, strongest["observed_minutes_delta"] * 0.50))
+    baseline_minutes = prop.get("projected_minutes")
+    try:
+        baseline_minutes = float(baseline_minutes)
+    except (TypeError, ValueError):
+        baseline_minutes = None
+    if baseline_minutes is None or baseline_minutes <= 0 or bump < 0.5:
+        prop["teammate_absence_adjustment"] = {
+            "applied": False, "reason": "No reliable baseline projection or the observed role change was too small.",
+            "evidence": strongest,
+        }
+        return
+
+    field, label = STAT_FIELDS[market]
+    values, sample_label, minutes = _player_history(athlete_id, field, label)
+    if len(values) < 8 or not minutes:
+        prop["teammate_absence_adjustment"] = {
+            "applied": False, "reason": "Insufficient verified player history to reprice the minutes change.",
+            "evidence": strongest,
+        }
+        return
+
+    adjusted_minutes = list(minutes)
+    # Raise only the latest three observed minute entries. The older baseline
+    # remains intact so the model's minutes trend actually moves upward.
+    for index in range(max(0, len(adjusted_minutes) - 3), len(adjusted_minutes)):
+        try:
+            adjusted_minutes[index] = float(adjusted_minutes[index]) + bump
+        except (TypeError, ValueError):
+            pass
+
+    quote_over, quote_under = prop.get("over_odds"), prop.get("under_odds")
+    try:
+        line = float(prop.get("line"))
+    except (TypeError, ValueError):
+        return
+    adjusted = _simulate_market(
+        values, line, None, None,
+        _norm_player_name(prop.get("player")) + market + "teammate-absence",
+        minutes=adjusted_minutes, market=market,
+        matchup_adjustment=prop.get("defense_vs_position"),
+        team_context_adjustment=prop.get("team_context_adjustment"),
+    )
+    if not adjusted:
+        return
+    if quote_over is not None and quote_under is not None:
+        over_raw, under_raw = _american_probability(int(quote_over)), _american_probability(int(quote_under))
+        mass = max(1e-9, over_raw + under_raw)
+        quote = {
+            "over_probability": over_raw / mass, "under_probability": under_raw / mass,
+            "over_odds": int(quote_over), "under_odds": int(quote_under),
+            "books_used": prop.get("market_books") or ["DraftKings-only odds via PropLine"],
+            "over_book": "PropLine", "under_book": "PropLine",
+        }
+        adjusted = _score_blended_market(adjusted, quote)
+        adjusted = _apply_directional_play_grade(adjusted)
+    for key in (
+        "projection", "projected_minutes", "over_probability", "under_probability",
+        "push_probability", "best_side", "best_probability", "best_odds",
+        "expected_value_pct", "edge_pp", "recommendation", "play_grade",
+        "model_over_probability", "model_under_probability", "over_ev_pct", "under_ev_pct",
+        "over_edge_pp", "under_edge_pp", "selection_reason", "model_components",
+        "minute_adjustment_factor", "minutes_sample_size",
+    ):
+        if key in adjusted:
+            prop[key] = adjusted[key]
+    prop["teammate_absence_adjustment"] = {
+        "applied": True,
+        "teammate": strongest["teammate"],
+        "observed_minutes_delta": strongest["observed_minutes_delta"],
+        "applied_minutes_bump": round(bump, 2),
+        "evidence_absent_games": strongest["absent_games"],
+        "evidence_active_games": strongest["active_games"],
+        "method": "50% shrinkage of historical on/off median minutes difference; capped at +6 minutes",
+    }
+    prop["model_components"] = list(prop.get("model_components") or []) + [
+        "historical teammate-absence on/off minutes adjustment"
+    ]
+
 def _post_selection_negative_review(prop, market, injury_feed):
     """Run expensive injury/workload checks only on provisional combined Top 3 candidates."""
     if not isinstance(prop, dict):
@@ -2265,9 +2448,17 @@ def _lock_daily_top_three(slate_date):
         slates[market] = [dict(p, market=market) for p in slate["candidates"] if isinstance(p, dict)]
 
     injury_feed = _load_official_injury_feed()
+    if not _injury_feed_valid_for_slate(injury_feed, slate_date):
+        return {
+            "locked": False,
+            "reason": "waiting_for_fresh_official_injury_report",
+            "injury_feed": injury_feed.get("meta", {}) if isinstance(injury_feed, dict) else {},
+            "message": "No picks will be locked until a fresh official NBA injury report for this slate date is available.",
+        }
     eligible = []
     for market, rows in slates.items():
         for p in rows:
+            _apply_official_injury(p, injury_feed, p.get("player"), p.get("team"))
             if p.get("injury_blocked") or p.get("injury_flag"):
                 continue
             if p.get("recommendation") not in ("VALUE CANDIDATE", "LEAN / VERIFY"):
@@ -2304,7 +2495,19 @@ def _lock_daily_top_three(slate_date):
         seen.add(key)
         market = p["market"]
         try:
-            passed, reason = _post_selection_negative_review(p, market, injury_feed)
+            _apply_absent_teammate_minutes(p, market, injury_feed)
+            # An absence-driven role change can invalidate the original EV rank.
+            try:
+                adjusted_ev = float(p.get("expected_value_pct"))
+                adjusted_edge = float(p.get("edge_pp") or 0.0)
+                adjusted_minutes = float(p.get("projected_minutes") or 0.0)
+            except (TypeError, ValueError, OverflowError):
+                adjusted_ev, adjusted_edge, adjusted_minutes = -1e9, -1e9, 0.0
+            if (not math.isfinite(adjusted_ev) or adjusted_ev < 2.0 or adjusted_edge < 2.0
+                    or adjusted_minutes < 15.0 or p.get("best_side") not in ("OVER", "UNDER")):
+                passed, reason = False, "Teammate-absence minutes adjustment removed the required EV/edge/minutes threshold."
+            else:
+                passed, reason = _post_selection_negative_review(p, market, injury_feed)
         except Exception as exc:
             passed, reason = False, "Negative review failed safely: " + type(exc).__name__
             p["negative_review"] = {"status": "review_failed", "reason": reason}
