@@ -328,9 +328,6 @@ ESPN_BASE = "https://site.web.api.espn.com/apis/common/v3/sports/basketball/nba"
 ESPN_SEARCH = "https://site.web.api.espn.com/apis/search/v2"
 STAT_FIELDS = {
     "points": ("points", "PTS"),
-    "rebounds": ("rebounds", "REB"),
-    "assists": ("assists", "AST"),
-    "steals": ("steals", "STL"),
     "threes": ("threePointsMade", "3PT"),
 }
 _ESPN_ID_CACHE = {}
@@ -1854,9 +1851,6 @@ _PROPLINE_STALE_TTL = 600
 _PROPLINE_COOLDOWN_UNTIL = 0.0
 _PROPLINE_MARKETS = {
     "points": "player_points",
-    "rebounds": "player_rebounds",
-    "assists": "player_assists",
-    "steals": "player_steals",
     "threes": "player_threes",
 }
 
@@ -3358,8 +3352,7 @@ def model_diagnostics():
 def _run_pending_settlements():
     """Settle only completed ESPN games with exact athlete and matchup verification."""
     market_fields = {
-        "points": ("points", "PTS"), "rebounds": ("rebounds", "REB"),
-        "assists": ("assists", "AST"), "steals": ("steals", "STL"),
+        "points": ("points", "PTS"),
         "threes": ("threePointsMade", "3PT"),
     }
     team_aliases = {"NY": "NYK", "GS": "GSW", "WSH": "WAS"}
