@@ -2246,6 +2246,17 @@ def _post_selection_negative_review(prop, market, injury_feed):
 def _lock_daily_top_three(slate_date):
     """Rank Points and Threes together and lock only the three best qualified bets."""
     markets = ("points", "threes")
+    # Once even one official pick exists, the slate is immutable. Never rerun
+    # the risk review or change ranks/prices on a later browser refresh.
+    existing_picks = prediction_ledger.list_daily_top_five(slate_date, "all")
+    if existing_picks:
+        return {
+            "locked": True,
+            "selected": len(existing_picks),
+            "saved": 0,
+            "already_locked": True,
+            "picks": existing_picks,
+        }
     slates = {}
     for market in markets:
         slate = prediction_ledger.get_daily_slate(market, slate_date)
@@ -2304,6 +2315,19 @@ def _lock_daily_top_three(slate_date):
                 break
         else:
             p["negative_review"] = {"status": "rejected", "reason": reason}
+
+    # Risk review may reprice an UNDER or adjust its probability. Rank the
+    # final approved selections using their post-review EV, not stale pre-review EV.
+    for p in selected:
+        try:
+            p["_ranking_ev"] = float(p.get("expected_value_pct"))
+        except (TypeError, ValueError, OverflowError):
+            p["_ranking_ev"] = -1e9
+    selected.sort(key=lambda p: (
+        p["_ranking_ev"],
+        float(p.get("edge_pp") or 0),
+        float(p.get("play_grade") if p.get("play_grade") is not None else -1.0)
+    ), reverse=True)
 
     for rank, p in enumerate(selected, 1):
         p["selection_rank"] = rank
