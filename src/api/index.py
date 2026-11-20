@@ -1174,6 +1174,73 @@ def _player_history(athlete_id, field, label):
     sample_label = "2026-27 + 2025-26 limited fallback" if used_prior else "2026-27 regular season"
     return values, sample_label, minutes
 
+def _player_possession_history(athlete_id):
+    """Build verified per-game player PPP and possessions-used history from aligned ESPN box-score logs."""
+    def aligned_season(season):
+        specs = {
+            "points": ("points", "PTS"), "fga": ("fieldGoalsAttempted", "FGA"),
+            "fta": ("freeThrowsAttempted", "FTA"), "turnovers": ("turnovers", "TO"),
+            "minutes": ("minutes", "MIN"),
+        }
+        logs = {key: _gamelog_records(athlete_id, field, label, season)
+                for key, (field, label) in specs.items()}
+        if any(not logs.get(key) for key in specs):
+            return []
+        maps = {}
+        for key, records in logs.items():
+            by_event, by_date = {}, {}
+            for row in records:
+                event_id = str(row.get("event_id") or "").strip()
+                date_key = str(row.get("date") or "")[:10]
+                if event_id:
+                    by_event[event_id] = row
+                if date_key:
+                    by_date[date_key] = row
+            maps[key] = (by_event, by_date)
+        output = []
+        for point_row in logs["points"]:
+            event_id = str(point_row.get("event_id") or "").strip()
+            date_key = str(point_row.get("date") or "")[:10]
+            joined = {}
+            for key, (by_event, by_date) in maps.items():
+                row = by_event.get(event_id) if event_id else None
+                if row is None and date_key:
+                    row = by_date.get(date_key)
+                if row is None:
+                    joined = {}
+                    break
+                joined[key] = row["value"]
+            if not joined:
+                continue
+            try:
+                pts, fga = float(joined["points"]), float(joined["fga"])
+                fta, tov, mins = float(joined["fta"]), float(joined["turnovers"]), float(joined["minutes"])
+                used = fga + 0.44 * fta + tov
+                if (not all(math.isfinite(x) for x in (pts, fga, fta, tov, mins, used))
+                        or mins <= 0 or mins > 60 or used <= 0 or min(pts, fga, fta, tov) < 0):
+                    continue
+                output.append({
+                    "event_id": event_id or None, "date": date_key, "points": pts,
+                    "fga": fga, "fta": fta, "turnovers": tov, "minutes": mins,
+                    "possessions_used": used, "ppp": pts / used,
+                    "possessions_per_minute": used / mins,
+                })
+            except (TypeError, ValueError, OverflowError):
+                continue
+        output.sort(key=lambda row: row.get("date") or "")
+        return output[-82:]
+
+    current = aligned_season(2027)
+    history, used_prior = list(current), False
+    if len(current) < 8:
+        prior = aligned_season(2026)
+        if prior:
+            history = prior[-8:] + history
+            used_prior = True
+    history.sort(key=lambda row: row.get("date") or "")
+    return history[-82:], ("2026-27 + 2025-26 limited PPP fallback" if used_prior else "2026-27 regular-season PPP")
+
+
 def _odds_profit(win_probability, loss_probability, odds):
     if odds is None:
         return None
@@ -1306,7 +1373,7 @@ def _apply_directional_play_grade(model):
     return model
 
 
-def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, market="", matchup_adjustment=None, team_context_adjustment=None, injury_variance_cv=0.0):
+def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, market="", matchup_adjustment=None, team_context_adjustment=None, injury_variance_cv=0.0, ppp_history=None):
     """Project count stats with an overdispersed count model; never truncate the upper tail at the observed maximum."""
     clean = [float(v) for v in values if v is not None and math.isfinite(float(v)) and float(v) >= 0]
     if len(clean) < 4:
@@ -1320,6 +1387,8 @@ def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, ma
     weighted_mean = sum(v*w for v,w in zip(clean,weights)) / sum(weights)
     form_weight = min(0.30, len(recent10)/(len(recent10)+20.0))
     target_mean = (1.0-form_weight)*long_mean + form_weight*weighted_mean
+    ppp_mode = False
+    ppp_diagnostics = {}
 
     valid_minutes = []
     for item in (minutes or []):
@@ -1332,15 +1401,64 @@ def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, ma
     projected_min = _projected_minutes(valid_minutes)
     baseline_min = _median(valid_minutes[-20:]) if valid_minutes else None
     minute_factor = 1.0
-    if projected_min is not None and baseline_min and baseline_min > 0 and len(valid_minutes) >= 8:
-        minute_factor = max(0.85, min(1.15, projected_min / baseline_min))
-        target_mean *= minute_factor
+    if market == "points" and isinstance(ppp_history, list) and len(ppp_history) >= 4 and projected_min:
+        valid_ppp = [row for row in ppp_history if isinstance(row, dict)
+                     and row.get("possessions_used", 0) > 0 and row.get("minutes", 0) > 0]
+        if len(valid_ppp) >= 4:
+            ppp_weights = [math.exp(-0.075 * (len(valid_ppp)-1-i)) for i in range(len(valid_ppp))]
+            weighted_possessions = sum(float(row["possessions_used"])*w for row,w in zip(valid_ppp,ppp_weights))
+            weighted_points = sum(float(row["points"])*w for row,w in zip(valid_ppp,ppp_weights))
+            weighted_minutes = sum(float(row["minutes"])*w for row,w in zip(valid_ppp,ppp_weights))
+            weighted_used_per_min = weighted_possessions / weighted_minutes if weighted_minutes > 0 else 0.0
+            player_ppp = weighted_points / weighted_possessions if weighted_possessions > 0 else 0.0
+            expected_used = projected_min * weighted_used_per_min
+            positional_factor = 1.0
+            if isinstance(matchup_adjustment, dict) and matchup_adjustment.get("available"):
+                allowed, league_pos = matchup_adjustment.get("allowed_per_100_possessions"), matchup_adjustment.get("league_position_average_per_100")
+                try:
+                    if allowed is not None and league_pos and float(league_pos) > 0:
+                        positional_factor = max(0.92, min(1.08, 1.0 + 0.25 * (float(allowed)/float(league_pos)-1.0)))
+                except (TypeError, ValueError, OverflowError):
+                    positional_factor = 1.0
+            team_efficiency_factor = 1.0
+            if not ppp_mode and isinstance(team_context_adjustment, dict) and team_context_adjustment.get("available"):
+                try:
+                    ratio = float(team_context_adjustment.get("scoring_efficiency_ratio") or 1.0)
+                    pace_ratio = float(team_context_adjustment.get("pace_ratio") or 1.0)
+                    raw_factor = float(team_context_adjustment.get("factor") or 1.0)
+                    pace_factor = 1.0 + 0.10 * (pace_ratio - 1.0)
+                    team_efficiency_factor = max(0.94, min(1.06, raw_factor / pace_factor if pace_factor > 0 else 1.0))
+                    if ratio > 0:
+                        team_efficiency_factor = max(0.94, min(1.06, 0.5 * team_efficiency_factor + 0.5 * (1.0 + 0.20 * (ratio - 1.0))))
+                except (TypeError, ValueError, OverflowError):
+                    team_efficiency_factor = 1.0
+            adjusted_ppp = player_ppp * positional_factor * team_efficiency_factor
+            ppp_mode = expected_used > 0 and adjusted_ppp > 0
+            if ppp_mode:
+                clean = [max(0.0, projected_min * (float(row["possessions_used"])/float(row["minutes"]))
+                             * (float(row["points"])/float(row["possessions_used"]))
+                             * positional_factor * team_efficiency_factor) for row in valid_ppp]
+                n = len(clean)
+                long_mean = sum(clean) / n
+                recent5, recent10 = clean[-5:], clean[-10:]
+                recent5_mean = sum(recent5) / len(recent5)
+                recent10_mean = sum(recent10) / len(recent10)
+                target_mean = expected_used * adjusted_ppp
+                minute_factor = projected_min / baseline_min if baseline_min and baseline_min > 0 else 1.0
+                ppp_diagnostics = {
+                    "player_ppp": round(player_ppp, 4), "adjusted_player_ppp": round(adjusted_ppp, 4),
+                    "expected_player_possessions_used": round(expected_used, 2),
+                    "possessions_used_formula": "FGA + 0.44*FTA + turnovers",
+                    "possessions_rate_per_minute": round(weighted_used_per_min, 4),
+                    "ppp_sample_games": len(valid_ppp), "ppp_positional_factor": round(positional_factor, 4),
+                    "ppp_team_efficiency_factor": round(team_efficiency_factor, 4),
+                }
 
     matchup_factor = 1.0
     positional_discrepancy = None
     directional_discrepancy_pct = 0.0
     matchup_grade = 50.0
-    if isinstance(matchup_adjustment, dict) and matchup_adjustment.get("available", True):
+    if not ppp_mode and isinstance(matchup_adjustment, dict) and matchup_adjustment.get("available", True):
         try:
             if market == "points":
                 allowed_ppp = float(matchup_adjustment.get("allowed_per_100_possessions"))
@@ -1444,7 +1562,10 @@ def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, ma
         (over_ev, "OVER", over_p, over_odds), (under_ev, "UNDER", under_p, under_odds)
     ] if v is not None], key=lambda x: x[0], default=None)
     selected_side = best[1] if best else None
-    if positional_discrepancy is not None and long_mean > 0:
+    if ppp_mode:
+        directional_discrepancy_pct = 0.0
+        matchup_grade = 50.0
+    elif positional_discrepancy is not None and long_mean > 0:
         directional_discrepancy_pct = (positional_discrepancy / long_mean * 100.0) * (1.0 if selected_side == "OVER" else -1.0 if selected_side == "UNDER" else 0.0)
         matchup_grade = max(0.0, min(100.0, 50.0 + directional_discrepancy_pct * 2.5))
     form_grade = max(0.0, min(100.0, 50.0 + ((recent5_mean - long_mean) / max(long_mean, 0.1)) * 250.0))
@@ -1469,8 +1590,9 @@ def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, ma
         "expected_value_pct": round(best[0]*100, 2) if best else None,
         "edge_pp": None,
         "recommendation": "VALUE CANDIDATE" if best and best[0] > 0.05 else ("LEAN / VERIFY" if best and best[0] > 0 else "PASS"),
-        "model_components": ["recency-weighted history", "10-game form signal", "minutes adjustment" if valid_minutes else "minutes unavailable; no adjustment", "defense-vs-position matchup adjustment" if isinstance(matchup_adjustment, dict) and matchup_adjustment.get("available", True) else "defense-vs-position unavailable; no adjustment", "offensive PPP + opponent defensive PPP + pace + Four Factors + shot-profile adjustment" if isinstance(team_context_adjustment, dict) and team_context_adjustment.get("available") else "team factor context unavailable; no adjustment", "20% empirical history + 80% negative-binomial count distribution"],
-        "model_method": "recency-weighted count-rate projection with Gamma-Poisson overdispersion; provisional pending out-of-sample calibration",
+        "model_components": (["individual player PPP from FGA + 0.44*FTA + turnovers", "expected player possessions used from possessions-per-minute × projected minutes", "team offensive PPP + opponent defensive PPP and positional efficiency adjustment", "PPP × expected player possessions used; empirical projected-game distribution"] if ppp_mode else ["recency-weighted history", "10-game form signal", "minutes adjustment" if valid_minutes else "minutes unavailable; no adjustment", "defense-vs-position matchup adjustment" if isinstance(matchup_adjustment, dict) and matchup_adjustment.get("available", True) else "defense-vs-position unavailable; no adjustment", "offensive PPP + opponent defensive PPP + pace + Four Factors + shot-profile adjustment" if isinstance(team_context_adjustment, dict) and team_context_adjustment.get("available") else "team factor context unavailable; no adjustment", "20% empirical history + 80% negative-binomial count distribution"]),
+        "ppp_calculation": ppp_diagnostics if ppp_mode else None,
+        "model_method": "individual PPP × expected player possessions used with overdispersed projected-game distribution" if ppp_mode else "recency-weighted count-rate projection with Gamma-Poisson overdispersion; provisional pending out-of-sample calibration",
         "sample_size": n, "long_run_mean": round(long_mean, 2), "recent5_mean": round(recent5_mean, 2),
         "recent10_mean": round(recent10_mean, 2), "weighted_mean": round(weighted_mean, 2),
         "distribution_std_dev": round(std_dev, 2), "minute_adjustment_factor": round(minute_factor, 3),
