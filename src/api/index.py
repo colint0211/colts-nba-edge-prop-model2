@@ -1165,9 +1165,8 @@ def _player_history(athlete_id, field, label):
     return values, sample_label, minutes
 
 def _player_ppp_context(athlete_id, matchup, projected_minutes=None):
-    """Build points projection from player PPP and used possessions, not PPG."""
-    # ESPN's gamelog exposes attempts inside the FG / FT made-attempted
-    # composite fields (for example, "12-24"), not standalone FGA / FTA labels.
+    """Project points using minutes-conditioned PPP and player possessions."""
+    # ESPN logs encode FGA / FTA inside made-attempted composite fields.
     fields = (("points", "PTS", "points"), ("fieldGoalsAttempted", "FG", "fga"),
               ("freeThrowsAttempted", "FT", "fta"), ("turnovers", "TO", "turnovers"),
               ("minutes", "MIN", "minutes"))
@@ -1193,33 +1192,91 @@ def _player_ppp_context(athlete_id, matchup, projected_minutes=None):
             try:
                 pts, fga, fta, tov, mins = (float(maps[k][key]) for k in ("points", "fga", "fta", "turnovers", "minutes"))
                 possessions = fga + 0.44 * fta + tov
-                if mins > 0 and possessions > 0 and pts >= 0:
+                if mins > 0 and possessions > 0 and pts >= 0 and all(math.isfinite(v) for v in (pts, possessions, mins)):
                     rows.append({"date": key[1], "ppp": pts / possessions,
+                                 "possessions": possessions,
                                  "possessions_per_minute": possessions / mins, "minutes": mins})
             except (TypeError, ValueError, ZeroDivisionError):
                 continue
         rows.sort(key=lambda row: row["date"])
         season_rows[season] = rows
+
     current, prior = season_rows[2027], season_rows[2026]
     used_prior = len(current) < 5 and bool(prior)
     rows = ((prior[-8:] if used_prior else []) + current)[-82:]
-    if len(rows) < 4:
+    if len(rows) < 8:
         return None
-    def weighted_mean(values):
-        weights = [math.exp(-0.075 * (len(values)-1-i)) for i in range(len(values))]
-        return sum(v*w for v, w in zip(values, weights)) / sum(weights)
-    ppp = weighted_mean([r["ppp"] for r in rows])
-    poss_per_min = weighted_mean([r["possessions_per_minute"] for r in rows])
-    minutes = float(projected_minutes) if projected_minutes is not None else _projected_minutes([r["minutes"] for r in rows])
-    if minutes is None or minutes <= 0:
-        return None
-    return {"player_ppp": ppp, "ppp_history": [r["ppp"] for r in rows],
-            "possessions_per_minute_history": [r["possessions_per_minute"] for r in rows],
-            "projected_player_possessions": poss_per_min * minutes,
-            "projected_minutes": minutes, "sample_size": len(rows), "used_prior_season": used_prior,
-            "method": "recency-weighted player PPP × projected player possessions",
-            "source": "ESPN PTS / (FGA + 0.44 × FTA + turnovers)"}
 
+    minutes = float(projected_minutes) if projected_minutes is not None else _projected_minutes([r["minutes"] for r in rows])
+    if minutes is None or not math.isfinite(minutes) or minutes <= 0:
+        return None
+
+    bands = [
+        ("under_15", "Under 15", lambda m: m < 15),
+        ("15_19", "15-19", lambda m: 15 <= m < 20),
+        ("20_24", "20-24", lambda m: 20 <= m < 25),
+        ("25_29", "25-29", lambda m: 25 <= m < 30),
+        ("30_34", "30-34", lambda m: 30 <= m < 35),
+        ("35_plus", "35+", lambda m: m >= 35),
+    ]
+    band_diagnostics = {}
+    for key, label, predicate in bands:
+        sample = [r for r in rows if predicate(r["minutes"])]
+        poss = sum(r["possessions"] for r in sample)
+        points = sum(r["ppp"] * r["possessions"] for r in sample)
+        band_diagnostics[key] = {
+            "band": label, "games": len(sample),
+            "ppp": round(points / poss, 4) if poss else None,
+            "possessions_per_minute": round(poss / sum(r["minutes"] for r in sample), 4)
+                if sample and sum(r["minutes"] for r in sample) > 0 else None,
+        }
+
+    selected_index = next((i for i, (_, _, predicate) in enumerate(bands) if predicate(minutes)), None)
+    if selected_index is None:
+        return None
+    selected = [r for r in rows if bands[selected_index][2](r["minutes"])]
+    distance_order = sorted((i for i in range(len(bands)) if i != selected_index),
+                            key=lambda i: abs(i - selected_index))
+    chosen = list(selected)
+    used_band_indices = [selected_index]
+    for idx in distance_order:
+        if len(chosen) >= 5:
+            break
+        additions = [r for r in rows if bands[idx][2](r["minutes"])]
+        chosen.extend(additions)
+        if additions:
+            used_band_indices.append(idx)
+    if len(chosen) < 5:
+        return None
+
+    total_possessions = sum(r["possessions"] for r in chosen)
+    total_points = sum(r["ppp"] * r["possessions"] for r in chosen)
+    total_minutes = sum(r["minutes"] for r in chosen)
+    if total_possessions <= 0 or total_minutes <= 0:
+        return None
+    ppp = total_points / total_possessions
+    poss_per_min = total_possessions / total_minutes
+    projected_possessions = poss_per_min * minutes
+
+    # Retain the full aligned history for dispersion, but center it on the
+    # minute-band PPP and possessions rate used for the actual projection.
+    ppp_history = [r["ppp"] for r in chosen]
+    possessions_per_minute_history = [r["possessions_per_minute"] for r in chosen]
+    return {
+        "player_ppp": ppp,
+        "ppp_history": ppp_history,
+        "possessions_per_minute_history": possessions_per_minute_history,
+        "projected_player_possessions": projected_possessions,
+        "projected_minutes": minutes,
+        "sample_size": len(chosen),
+        "minutes_band": bands[selected_index][1],
+        "minutes_band_games": len(selected),
+        "minutes_bands_used": [bands[i][1] for i in used_band_indices],
+        "minutes_band_diagnostics": band_diagnostics,
+        "used_prior_season": used_prior,
+        "method": "minutes-conditioned player PPP × projected player possessions",
+        "source": "ESPN PTS / (FGA + 0.44 × FTA + turnovers)",
+    }
 
 def _apply_opponent_defensive_ppp(context, player_team, matchup):
     """Adjust player PPP for opponent defensive points allowed per possession."""
