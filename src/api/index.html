@@ -398,9 +398,17 @@ function livePace(p){
   const remainingPlayerMinutes=Math.max(0,Math.min(gameMinutesLeft,expectedTotalMinutes-minutes));
   const projected=current+(current/minutes)*remainingPlayerMinutes;
   const margin=projected-line;
-  const verdict=margin>=0.5?"ON PACE TO HIT":margin<=-0.5?"ON PACE TO MISS":"TOO CLOSE TO CALL";
+  const side=String(p.best_side||p.side||"").trim().toUpperCase();
+  // A positive margin favors OVER; a negative margin favors UNDER.
+  // Never grade the live outlook without knowing the actual selected side.
+  const sideAdjustedMargin=side==="UNDER"?-margin:side==="OVER"?margin:null;
+  const verdict=sideAdjustedMargin==null
+    ?"SIDE UNAVAILABLE"
+    :sideAdjustedMargin>=0.5?"ON PACE TO HIT"
+    :sideAdjustedMargin<=-0.5?"ON PACE TO MISS"
+    :"TOO CLOSE TO CALL";
   const label=({points:"pts",threes:"3PM"})[market]||"stat";
-  return {current,minutes,gameMinutesLeft,remainingPlayerMinutes,projected,margin,verdict,label};
+  return {current,minutes,gameMinutesLeft,remainingPlayerMinutes,projected,margin,side,sideAdjustedMargin,verdict,label};
 }
 function liveTickerHtml(p){
   const g=gameFor(p)||{},value=liveStatValue(p),pace=livePace(p);
