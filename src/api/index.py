@@ -2158,52 +2158,47 @@ def _apply_historical_calibration(model, market):
     return model
 
 def _score_blended_market(model, market_quote):
-    """Price a conservative probability blend until the proprietary model proves calibration."""
+    """Price the independent model probability; sportsbook prices are audit/EV inputs only."""
     model_over = max(0.0, min(1.0, model["over_probability"] / 100.0))
     model_under = max(0.0, min(1.0, model["under_probability"] / 100.0))
     model_push = max(0.0, min(0.25, model.get("push_probability", 0.0) / 100.0))
     model_mass = max(1e-9, model_over + model_under)
     model_over_cond = model_over / model_mass
     model_under_cond = model_under / model_mass
+
+    # The user explicitly wants proprietary probabilities to come from the
+    # model calculations, not from sportsbook lines or prices. Keep the
+    # two-sided no-vig market only as a comparison benchmark and use the
+    # quoted Over/Under prices to calculate expected value.
     market_over = float(market_quote["over_probability"])
     market_under = float(market_quote["under_probability"])
     market_mass = max(1e-9, market_over + market_under)
     market_over_cond = market_over / market_mass
     market_under_cond = market_under / market_mass
 
-    # The model was recently reset and has not earned independent probability
-    # authority yet. Shrink its conditional probabilities 35% toward the
-    # two-sided no-vig market prior until the historical calibration gate is met.
-    # Once calibrated, retain a smaller 15% market prior rather than overreacting
-    # to a short-lived model edge. This changes betting probabilities, not projections.
-    calibrated = bool(model.get("calibration_applied"))
-    market_weight = 0.15 if calibrated else 0.35
-    blended_over_cond = _log_pool(model_over_cond, market_over_cond, weight=market_weight)
-    blended_under_cond = 1.0 - blended_over_cond
-    over = blended_over_cond * model_mass
-    under = blended_under_cond * model_mass
-
+    over = model_over_cond * model_mass
+    under = model_under_cond * model_mass
     choices = []
-    for side, prob, conditional_prob, market_prob, loss, odds in (
-        ("OVER", over, blended_over_cond, market_over_cond, under, market_quote["over_odds"]),
-        ("UNDER", under, blended_under_cond, market_under_cond, over, market_quote["under_odds"]),
+    for side, prob, loss, odds in (
+        ("OVER", over, under, market_quote["over_odds"]),
+        ("UNDER", under, over, market_quote["under_odds"]),
     ):
         ev = _odds_profit(prob, loss, odds)
         if ev is not None:
-            choices.append((ev, side, prob, odds, loss, conditional_prob, market_prob))
+            choices.append((ev, side, prob, odds, loss))
     best = max(choices, key=lambda x: x[0], default=None)
     over_ev = next((item[0] for item in choices if item[1] == "OVER"), None)
     under_ev = next((item[0] for item in choices if item[1] == "UNDER"), None)
-    over_edge = (blended_over_cond - market_over_cond) * 100
-    under_edge = (blended_under_cond - market_under_cond) * 100
+    over_edge = (model_over_cond - market_over_cond) * 100
+    under_edge = (model_under_cond - market_under_cond) * 100
     model.update({
         "over_ev_pct": round(over_ev * 100, 2) if over_ev is not None else None,
         "under_ev_pct": round(under_ev * 100, 2) if under_ev is not None else None,
         "over_edge_pp": round(over_edge, 2),
         "under_edge_pp": round(under_edge, 2),
         "selection_reason": (
-            "Selected " + best[1] + " using the risk-adjusted probability at the available two-sided price; "
-            "the projection is an average, not the selected betting side."
+            "Selected " + best[1] + " using the independent model probability and the available sportsbook price; "
+            "market-implied probability is shown only as a comparison."
         ) if best else "No side has a calculable expected value at the listed odds.",
         "proprietary_over_probability": round(model_over * 100, 2),
         "proprietary_under_probability": round(model_under * 100, 2),
@@ -2218,17 +2213,19 @@ def _score_blended_market(model, market_quote):
         "best_probability": round(best[2] * 100, 2) if best else None,
         "best_odds": best[3] if best else None,
         "expected_value_pct": round(best[0] * 100, 2) if best else None,
-        "edge_pp": round((best[5] - best[6]) * 100, 2) if best else None,
+        "edge_pp": round((model_over_cond - market_over_cond) * 100, 2)
+            if best and best[1] == "OVER" else
+            round((model_under_cond - market_under_cond) * 100, 2) if best else None,
         "recommendation": "VALUE CANDIDATE" if best and best[0] > 0.05 else ("LEAN / VERIFY" if best and best[0] > 0 else "PASS"),
         "kelly_fraction_pct": round(max(0.0, (best[2] * _american_payout(best[3]) - best[4]) /
             max(1e-9, _american_payout(best[3]) * (best[2] + best[4]))) * 100, 2) if best else None,
-        "blend_method": "Geometric probability shrinkage toward the two-sided no-vig market prior",
-        "market_weight": round(market_weight * 100, 1),
+        "blend_method": "Independent proprietary model probability; sportsbook market is audit-only",
+        "market_weight": 0.0,
         "market_books": market_quote["books_used"],
         "best_over_book": market_quote["over_book"],
         "best_under_book": market_quote["under_book"],
         "calibration_status": model.get("calibration_status", "collecting data"),
-        "calibration_applied": calibrated,
+        "calibration_applied": bool(model.get("calibration_applied")),
     })
     return model
 
