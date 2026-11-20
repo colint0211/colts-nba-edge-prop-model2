@@ -1454,6 +1454,10 @@ def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, ma
                     "ppp_team_efficiency_factor": round(team_efficiency_factor, 4),
                 }
 
+    if market == "points" and not ppp_mode:
+        # Fail closed: never silently fall back to a PPG-based points projection.
+        return None
+
     matchup_factor = 1.0
     positional_discrepancy = None
     directional_discrepancy_pct = 0.0
@@ -2394,6 +2398,7 @@ def _apply_absent_teammate_minutes(prop, market, injury_feed):
         matchup_adjustment=prop.get("defense_vs_position"),
         team_context_adjustment=prop.get("team_context_adjustment"),
         injury_variance_cv=injury_variance_cv,
+        ppp_history=_player_possession_history(athlete_id)[0] if market == "points" else None,
     )
     if not adjusted:
         return
@@ -2540,6 +2545,7 @@ def _post_selection_negative_review(prop, market, injury_feed):
             adjusted_values, float(prop.get("line")), over_odds, under_odds,
             _norm_player_name(prop.get("player")) + market + "negative-review",
             minutes=[], market=market, matchup_adjustment=None,
+            ppp_history=[dict(row, points=float(row["points"])*factor) for row in _player_possession_history(athlete_id)[0]] if market == "points" else None,
         )
         if adjusted and over_odds is not None and under_odds is not None:
             adjusted = _apply_historical_calibration(adjusted, market)
@@ -3116,6 +3122,7 @@ def proprietary_market_board(market: str = "points"):
                 minutes=player_minutes, market=market,
                 matchup_adjustment=matchup_adjustment,
                 team_context_adjustment=team_context_adjustment,
+                ppp_history=_player_possession_history(athlete_id)[0] if market == "points" else None,
             )
             if not model:
                 failures.append(name + ": fewer than five valid game logs")
@@ -4347,7 +4354,7 @@ async def model_recalculate(request: FastRequest):
         values, sample_label, minutes = _player_history(athlete_id, field, label)
         matchup_adjustment = _dvp_matchup_adjustment(athlete_id, payload.get("team"), payload.get("game"), market, player)
         team_context_adjustment = _team_factor_prop_adjustment(payload.get("team"), payload.get("game"), market)
-        model = _simulate_market(values, line, None, None, _norm_player_name(player) + market + "custom", minutes=minutes, market=market, matchup_adjustment=matchup_adjustment, team_context_adjustment=team_context_adjustment)
+        model = _simulate_market(values, line, None, None, _norm_player_name(player) + market + "custom", minutes=minutes, market=market, matchup_adjustment=matchup_adjustment, team_context_adjustment=team_context_adjustment, ppp_history=_player_possession_history(athlete_id)[0] if market == "points" else None)
         if not model:
             raise HTTPException(status_code=422, detail="Not enough verified game-log history to recalculate this player.")
         over_raw, under_raw = _american_probability(over_odds), _american_probability(under_odds)
@@ -4534,7 +4541,8 @@ async def api_proxy(path: str, request: FastRequest):
                                 prop.get("under_odds"),
                                 _norm_player_name(prop.get("player")) + "points",
                                 minutes=player_minutes, market="points", matchup_adjustment=matchup_adjustment,
-                                team_context_adjustment=team_context_adjustment
+                                team_context_adjustment=team_context_adjustment,
+                                ppp_history=_player_possession_history(athlete_id)[0],
                             )
                             if not model:
                                 # Never leave an upstream projection/probability on a row
