@@ -2735,10 +2735,11 @@ def _load_pre_pick_news_context(slate_date, candidate_rows):
             depth_chart["final_url"] = response.geturl()
         parser = _DVPHTMLParser()
         parser.feed(html)
-        page_text = " ".join(parser.text).casefold()
-        missing = [_TEAM_NAMES[code] for code in teams if _TEAM_NAMES[code].casefold() not in page_text]
+        # RotoWire's index renders team abbreviations in scroll tabs, not full city names.
+        present_codes = set(re.findall(r'<a[^>]*class="scroll-tab"[^>]*>\s*([A-Z]{2,3})\s*</a>', html))
+        missing = [code for code in teams if code not in present_codes]
         if missing:
-            raise RuntimeError("Depth-chart page missing slate teams: " + ", ".join(missing))
+            raise RuntimeError("Depth-chart page missing slate team codes: " + ", ".join(missing))
         depth_chart.update({
             "status": "ok",
             "source": "RotoWire NBA depth charts",
