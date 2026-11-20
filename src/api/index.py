@@ -795,7 +795,7 @@ def _load_official_injury_feed():
             _INJURY_FEED_URL + "?v=" + str(int(now // 60)),
             headers={"User-Agent": "ColtsNBAEdge/1.0", "Accept": "application/json", "Cache-Control": "no-cache"},
         )
-        with urlopen(request, timeout=4) as response:
+        with urlopen(request, timeout=12) as response:
             payload = json.loads(response.read().decode("utf-8", "replace"))
         if not isinstance(payload, dict) or not isinstance(payload.get("records"), list):
             raise ValueError("Injury feed JSON has an invalid schema.")
@@ -847,13 +847,19 @@ def _load_official_injury_feed():
         _INJURY_FEED_CACHE.update({"at": now, "data": data})
         return data
     except Exception as exc:
+        # Never let a stale warm-instance cache masquerade as a current report.
         if cached is not None:
-            return cached
+            try:
+                cached_age = float(cached.get("meta", {}).get("age_minutes"))
+            except (TypeError, ValueError):
+                cached_age = float("inf")
+            if math.isfinite(cached_age) and 0 <= cached_age <= 180:
+                return cached
         return {
             "lookup": {},
             "records": [],
             "meta": {"source": _INJURY_SOURCE_LABEL, "status": "unavailable", "record_count": 0,
-                     "error": type(exc).__name__},
+                     "error": type(exc).__name__, "detail": str(exc)[:240]},
         }
 
 def _clear_official_injury_fields(prop):
