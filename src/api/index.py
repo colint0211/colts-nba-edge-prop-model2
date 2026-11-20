@@ -1053,7 +1053,7 @@ def _gamelog_records(athlete_id, field, label, season):
         if idx < 0 or idx >= len(stats):
             continue
         raw = str(stats[idx]).replace(",", "").strip()
-        if field in ("fieldGoalsAttempted", "freeThrowsAttempted") and "-" in raw:
+        if field in ("fieldGoalsAttempted", "freeThrowsAttempted", "threePointFieldGoalsAttempted") and "-" in raw:
             raw = raw.split("-", 1)[1].strip()
         elif field in ("fieldGoalsMade", "freeThrowsMade", "threePointsMade") and "-" in raw:
             raw = raw.split("-", 1)[0].strip()
