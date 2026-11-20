@@ -24,7 +24,7 @@
 <div class="stat"><div class="statlabel">Win rate</div><div id="histWinRate" class="num">—</div></div>
 <div class="stat"><div class="statlabel">Net units</div><div id="histProfit" class="num">—</div></div>
 </div>
-<div class="sectionhint">All-time record from these saved Top 5 selections</div>
+<div class="sectionhint">All-time record from these saved Top 3 selections</div>
 <div class="history-summary">
 <div class="stat"><div class="statlabel">Settled picks</div><div id="allHistCount" class="num">—</div></div>
 <div class="stat"><div class="statlabel">Wins / losses</div><div id="allHistRecord" class="num">—</div></div>
@@ -703,7 +703,7 @@ async function loadPastPlays(){
     renderPastPlays();renderAllTimeTopThree();
   }catch(e){
     el('historyStatusText').textContent='Could not load Top 3 results: '+String(e.message||e);
-    el('historyRows').innerHTML='<tr><td colspan="11">Top 5 results are temporarily unavailable.</td></tr>';
+    el('historyRows').innerHTML='<tr><td colspan="11">Top 3 results are temporarily unavailable.</td></tr>';
   }
 }
 async function recordResult(btn){
