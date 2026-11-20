@@ -1897,6 +1897,17 @@ def _bp_fetch_props(market, limit=50):
             return cached[1], "stale-cache"
         raise HTTPException(status_code=502, detail="Could not retrieve " + market + " prop lines from BettingPros.") from exc
 
+# Do not promote heavily juiced prices into the actionable Top 3.
+# Maximum permitted negative price is -190; positive prices remain eligible.
+MAX_NEGATIVE_PRICE = -190
+
+def _price_passes_selection(odds):
+    try:
+        value = float(odds)
+    except (TypeError, ValueError, OverflowError):
+        return False
+    return math.isfinite(value) and value != 0 and (value > 0 or value >= MAX_NEGATIVE_PRICE)
+
 def _american_probability(odds):
     try:
         value = float(odds)
@@ -2654,7 +2665,7 @@ def _snapshot_daily_market_top5(market, props):
                 continue
             if prop.get("play_grade") is None:
                 continue
-            if prop.get("best_side") not in ("OVER", "UNDER") or prop.get("best_odds") is None:
+            if prop.get("best_side") not in ("OVER", "UNDER") or not _price_passes_selection(prop.get("best_odds")):
                 continue
             eligible.append(prop)
         eligible.sort(key=lambda item: (
@@ -2748,7 +2759,7 @@ def _revalidate_frozen_market_candidates(market, candidates, injury_feed):
             continue
         if p.get("play_grade") is None:
             continue
-        if p.get("best_side") not in ("OVER","UNDER") or p.get("best_odds") is None:
+        if p.get("best_side") not in ("OVER","UNDER") or not _price_passes_selection(p.get("best_odds")):
             continue
         eligible.append(p)
     selected=[]; seen=set()
@@ -2762,7 +2773,7 @@ def _revalidate_frozen_market_candidates(market, candidates, injury_feed):
             passed=False; reason="Negative review failed safely: "+type(exc).__name__
             p["negative_review"]={"status":"review_failed","reason":reason}
         p["post_selection_reviewed"]=True
-        if passed and p.get("best_side") in ("OVER","UNDER") and float(p.get("expected_value_pct") or 0)>0:
+        if passed and p.get("best_side") in ("OVER","UNDER") and _price_passes_selection(p.get("best_odds")) and float(p.get("expected_value_pct") or 0)>0:
             selected.append(p)
             if len(selected)==5: break
     selected_keys={(_norm_player_name(p.get("player")),str(p.get("game") or "").casefold()) for p in selected}
