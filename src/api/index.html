@@ -424,7 +424,7 @@ function liveTickerHtml(p){
   const resultHtml=settledGrade
     ?'<div class="mini-label" style="margin-top:6px">Final result: <span class="grade '+(settledGrade==="HIT"?"hit":settledGrade==="MISS"?"miss":"push")+'">'+(settledGrade==="HIT"?"✓ HIT":settledGrade==="MISS"?"✕ MISS":"PUSH")+'</span></div>'
     :pace
-      ?'<div class="mini-label" style="margin-top:6px">Live outlook: <span class="grade '+outlookClass+'">'+(pace.verdict==="ON PACE TO HIT"?'ON PACE TO <span style="color:var(--green);font-weight:900">HIT</span>':pace.verdict==="ON PACE TO MISS"?'ON PACE TO <span style="color:var(--red);font-weight:900">MISS</span>':"TOO CLOSE")+'</span></div>'
+      ?'<div class="mini-label" style="margin-top:6px">Live outlook: <span style="font-weight:950;color:'+(pace.verdict==="ON PACE TO HIT"?"#47e0a1":pace.verdict==="ON PACE TO MISS"?"#ff7e8a":"#ffd27a")+' !important">'+(pace.verdict==="ON PACE TO HIT"?"ON PACE TO HIT":pace.verdict==="ON PACE TO MISS"?"ON PACE TO MISS":"TOO CLOSE")+"</span></div>"
       :'';
   const paceHtml=pace
     ?'<div class="mini-value">'+num(pace.projected,1)+' '+label+' projected</div><div class="mini-label">'+num(pace.current,0)+' '+label+' in '+num(pace.minutes,1)+' min · '+num(pace.gameMinutesLeft,1)+' game min left · '+num(pace.remainingPlayerMinutes,1)+' expected player min left</div>'
