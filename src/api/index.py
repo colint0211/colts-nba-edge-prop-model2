@@ -3098,7 +3098,10 @@ def proprietary_market_board(market: str = "points", rebuild_ppp: bool = False):
         frozen_slate = prediction_ledger.get_daily_slate(market, today_et)
     except Exception:
         frozen_slate = None
-    if frozen_slate and frozen_slate.get("candidates") and not rebuild_ppp:
+    ppp_snapshot_stale = bool(market == "points" and frozen_slate and frozen_slate.get("candidates")
+                              and any(not isinstance(p, dict) or not isinstance(p.get("ppp_calculation"), dict)
+                                      for p in (frozen_slate.get("candidates") or [])))
+    if frozen_slate and frozen_slate.get("candidates") and not rebuild_ppp and not ppp_snapshot_stale:
         frozen_props = [dict(p) for p in (frozen_slate.get("candidates") or []) if isinstance(p, dict)]
         # Re-run today's targeted injury/workload gate even for an already-frozen
         # snapshot. The original source lines remain intact; unsafe picks are
@@ -3123,7 +3126,11 @@ def proprietary_market_board(market: str = "points", rebuild_ppp: bool = False):
             "injury_feed": injury_feed.get("meta", {}),
             "balldontlie": {key: value for key, value in bdl_games.items() if key != "games"},
         })
-    if cached_board and now - cached_board[0] < _BP_BOARD_TTL_SECONDS and not rebuild_ppp:
+    cached_has_ppp = bool(cached_board and (market != "points" or all(
+        isinstance(p, dict) and isinstance(p.get("ppp_calculation"), dict)
+        for p in (cached_board[1].get("props") or [])
+    )))
+    if cached_board and now - cached_board[0] < _BP_BOARD_TTL_SECONDS and not rebuild_ppp and cached_has_ppp:
         cached_result = _json_safe(cached_board[1])
         for cached_prop in cached_result.get("props") or []:
             _apply_balldontlie_game(cached_prop, bdl_games)
@@ -3252,6 +3259,7 @@ def proprietary_market_board(market: str = "points", rebuild_ppp: bool = False):
         "market": market,
         "source": "ESPN player possession PPP + 3PM count-rate model; DraftKings-only prices via PropLine",
         "rebuild_ppp": bool(rebuild_ppp),
+        "replaced_stale_ppg_snapshot": bool(ppp_snapshot_stale),
         "ppp_verified_count": sum(1 for row in output if market == "points" and isinstance(row.get("ppp_calculation"), dict)),
         "ppp_missing_count": sum(1 for row in output if market == "points" and not isinstance(row.get("ppp_calculation"), dict)),
         "blend": "Independent proprietary probability; DraftKings/FanDuel prices used only for EV and market-relative edge",
@@ -3265,7 +3273,7 @@ def proprietary_market_board(market: str = "points", rebuild_ppp: bool = False):
         "injury_feed": injury_feed.get("meta", {}),
         "balldontlie": {key: value for key, value in bdl_games.items() if key != "games"},
     }
-    frozen_candidates = None if rebuild_ppp else _snapshot_daily_market_top5(market, output)
+    frozen_candidates = None if (rebuild_ppp or ppp_snapshot_stale) else _snapshot_daily_market_top5(market, output)
     if frozen_candidates is not None:
         result["props"] = frozen_candidates
         result["line_count"] = len(frozen_candidates)
