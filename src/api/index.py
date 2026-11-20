@@ -1249,6 +1249,7 @@ def _player_ppp_context(athlete_id, matchup, projected_minutes=None):
     if len(chosen) < 5:
         return None
 
+    chosen.sort(key=lambda row: row["date"])
     total_possessions = sum(r["possessions"] for r in chosen)
     total_points = sum(r["ppp"] * r["possessions"] for r in chosen)
     total_minutes = sum(r["minutes"] for r in chosen)
@@ -1780,6 +1781,10 @@ def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, ma
         "ppp_method": ppp_context.get("method") if market == "points" and ppp_context else None,
         "recent5_ppp": round(ppp_recent, 4) if market == "points" and ppp_recent is not None else None,
         "long_run_ppp": round(ppp_long, 4) if market == "points" and ppp_long is not None else None,
+        "ppp_minutes_band": ppp_context.get("minutes_band") if market == "points" and ppp_context else None,
+        "ppp_minutes_band_games": ppp_context.get("minutes_band_games") if market == "points" and ppp_context else None,
+        "ppp_minutes_bands_used": ppp_context.get("minutes_bands_used") if market == "points" and ppp_context else None,
+        "ppp_minutes_band_diagnostics": ppp_context.get("minutes_band_diagnostics") if market == "points" and ppp_context else None,
         "ppp_scaled_history_mean_for_variance": round(long_mean, 2) if market == "points" else None
     }
 
