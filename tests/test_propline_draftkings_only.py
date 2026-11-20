@@ -1,6 +1,8 @@
 import json
 import os
 import unittest
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from urllib.parse import parse_qs, urlparse
 from unittest.mock import patch
 
@@ -40,6 +42,7 @@ class DraftKingsOnlyPropLineTests(unittest.TestCase):
     def test_fanduel_quotes_are_ignored_even_when_they_are_better(self):
         events = [{
             "id": "game-1",
+            "commence_time": "2026-11-14T00:00:00Z",
             "away_team": "New York Knicks",
             "home_team": "Indiana Pacers",
             "bookmakers": [
@@ -83,6 +86,51 @@ class DraftKingsOnlyPropLineTests(unittest.TestCase):
         self.assertEqual(props[0]["best_over_book"], "DraftKings")
         self.assertEqual(props[0]["best_under_book"], "DraftKings")
         self.assertEqual(props[0]["market_books"], ["DraftKings"])
+        self.assertEqual(props[0]["commence_time"], "2026-11-14T00:00:00Z")
+
+    def test_filter_rejects_past_and_wrong_date_events(self):
+        now_utc = datetime(2026, 11, 20, 12, 5, tzinfo=timezone.utc)
+        props = [
+            {"event_id": "tonight", "commence_time": "2026-11-21T00:00:00Z"},
+            {"event_id": "yesterday", "commence_time": "2026-11-20T02:00:00Z"},
+            {"event_id": "tomorrow", "commence_time": "2026-11-21T23:00:00Z"},
+            {"event_id": "missing"},
+            {"event_id": "naive", "commence_time": "2026-11-20T20:00:00"},
+        ]
+
+        filtered = index._filter_props_for_slate(
+            props, "2026-11-20", now_utc=now_utc
+        )
+
+        self.assertEqual([row["event_id"] for row in filtered], ["tonight"])
+
+    def test_empty_or_stale_board_is_not_reported_as_frozen(self):
+        now_et = datetime(2026, 11, 20, 7, 5, tzinfo=ZoneInfo("America/New_York"))
+        with patch("src.api.index.datetime") as mock_datetime:
+            mock_datetime.now.return_value = now_et
+            with patch.object(index, "_active_nba_slate_date", return_value="2026-11-20"):
+                with patch.object(index.prediction_ledger, "initialize"):
+                    with patch.object(index.prediction_ledger, "get_daily_slate", return_value=None):
+                        with patch.object(index.prediction_ledger, "freeze_daily_slate") as freeze:
+                            result = index._snapshot_daily_market_top5("points", [
+                                {"player": "old-game-player", "commence_time": "2026-11-20T02:00:00Z"}
+                            ])
+
+        self.assertIsNone(result)
+        freeze.assert_not_called()
+
+    def test_empty_board_is_not_frozen(self):
+        now_et = datetime(2026, 11, 20, 7, 5, tzinfo=ZoneInfo("America/New_York"))
+        with patch("src.api.index.datetime") as mock_datetime:
+            mock_datetime.now.return_value = now_et
+            with patch.object(index, "_active_nba_slate_date", return_value="2026-11-20"):
+                with patch.object(index.prediction_ledger, "initialize"):
+                    with patch.object(index.prediction_ledger, "get_daily_slate", return_value=None):
+                        with patch.object(index.prediction_ledger, "freeze_daily_slate") as freeze:
+                            result = index._snapshot_daily_market_top5("points", [])
+
+        self.assertIsNone(result)
+        freeze.assert_not_called()
 
 
 if __name__ == "__main__":
