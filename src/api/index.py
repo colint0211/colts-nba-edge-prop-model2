@@ -2745,6 +2745,19 @@ def _revalidate_frozen_market_candidates(market, candidates, injury_feed):
     )
     eligible = []
     for p in ordered:
+        # Frozen candidates are re-checked against the current ESPN roster and
+        # their actual matchup before they can remain actionable.
+        roster_id, roster_team = _espn_roster_player_id(p.get("player"), _team_codes_from_game(p.get("game") or ""))
+        stored_team = _canonical_team_code(p.get("team"))
+        stored_athlete = str(p.get("athlete_id") or "").strip()
+        if (not roster_id or not roster_team or not stored_team or
+                roster_team != stored_team or (stored_athlete and roster_id != stored_athlete)):
+            p["team_verification"] = {
+                "status": "failed",
+                "reason": "Current ESPN roster identity/team does not match the frozen player and matchup."
+            }
+            continue
+        p["team_verification"] = {"status": "verified", "source": "ESPN team roster"}
         if p.get("recommendation") not in ("VALUE CANDIDATE", "LEAN / VERIFY"):
             continue
         # Mixed current/prior-season samples must undergo the workload review.
@@ -2855,11 +2868,18 @@ def proprietary_market_board(market: str = "points"):
             event_matchup = raw.get("game") or ""
             team_codes = _team_codes_from_game(event_matchup)
             roster_athlete_id, roster_team = _espn_roster_player_id(name, team_codes)
-            athlete_id = roster_athlete_id or _espn_player_id(name)
-            if not athlete_id:
-                failures.append(name + ": ESPN player match unavailable")
+            # Team is a model input, not display metadata: require an ESPN roster
+            # identity on one of the two teams in this exact matchup. Never let
+            # an unverified PropLine team override the roster or drive opponent PPP.
+            if not roster_athlete_id or not roster_team:
+                failures.append(name + ": ESPN roster/team verification unavailable; excluded")
                 continue
-            resolved_team = _canonical_team_code(raw.get("team")) or roster_team or ""
+            raw_team = _canonical_team_code(raw.get("team"))
+            if raw_team and raw_team != roster_team:
+                failures.append(name + ": PropLine team conflicts with ESPN roster (" + raw_team + " vs " + roster_team + "); excluded")
+                continue
+            athlete_id = roster_athlete_id
+            resolved_team = roster_team
             values, sample_label, player_minutes = _player_history(athlete_id, field, label)
             team_for_dvp = resolved_team
             event_matchup = raw.get("game") or ""
