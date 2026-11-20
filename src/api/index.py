@@ -4047,14 +4047,18 @@ async def api_proxy(path: str, request: FastRequest):
                             continue
                         try:
                             values, sample_label, player_minutes = _player_history(athlete_id, "points", "PTS")
-                            matchup_adjustment = _dvp_matchup_adjustment(athlete_id, roster_team, prop.get("game"), "points", prop.get("player"))
-                            team_context_adjustment = _team_factor_prop_adjustment(roster_team, prop.get("game"), "points")
+                            ppp_context = _player_ppp_context(athlete_id, prop.get("game"), _projected_minutes(player_minutes))
+                            ppp_context = _apply_opponent_defensive_ppp(ppp_context, roster_team, prop.get("game")) if ppp_context else None
+                            if not ppp_context:
+                                prop["model_status"] = "unprojected"
+                                prop["reason"] = "Verified player PPP, player possessions, or opponent defensive PPP unavailable; no PPG fallback permitted."
+                                continue
                             model = _simulate_market(
                                 values, float(prop["line"]), prop.get("over_odds"),
                                 prop.get("under_odds"),
                                 _norm_player_name(prop.get("player")) + "points",
-                                minutes=player_minutes, market="points", matchup_adjustment=matchup_adjustment,
-                                team_context_adjustment=team_context_adjustment
+                                minutes=player_minutes, market="points", matchup_adjustment=None,
+                                team_context_adjustment=None, ppp_context=ppp_context
                             )
                             if not model:
                                 # Never leave an upstream projection/probability on a row
