@@ -592,7 +592,7 @@ function allModelEV(){
       best_side:String(p.best_side||'').toUpperCase(),
       expected_value_pct:p.expected_value_pct??p.expected_profit_per_100??null,
       expected_profit_per_100:p.expected_profit_per_100??p.expected_value_pct??null
-    }));
+    })).filter(p=>Number(p.market_weight)===0);
     all.push(...rankEV(marketRows));
   }
   const unique=new Map();
@@ -631,7 +631,10 @@ function render(){
     .slice(0,3);
   el('count').textContent=list.length+' of the 3 highest-ranked approved plays';
   if(!list.length){
-    el('cards').innerHTML='<div class="empty">No verified, approved positive-EV plays across points and 3-pointers made right now. No forced picks.</div>';
+    const frozenOldModel=[...(data||[]),...(Array.isArray(bpCache.threes)?bpCache.threes:[])].some(p=>p&&Number(p.market_weight)!==0);
+    el('cards').innerHTML='<div class="empty">'+(frozenOldModel
+      ?'Today’s slate is already locked under the previous probability blend. Those picks remain unchanged for settlement; no new plays will be issued from that snapshot. The independent model and DraftKings-only pricing take effect with the next 7:00 a.m. slate.'
+      :'No verified, approved positive-EV plays across points and 3-pointers made right now. No forced picks.')+'</div>';
     return;
   }
   el('cards').innerHTML=list.map((p,i)=>p.market==='points'?card(p,i):bpLineCard(p,i)).join('');
