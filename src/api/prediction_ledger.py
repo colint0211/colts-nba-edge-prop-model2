@@ -508,12 +508,22 @@ def save_daily_top_five(rows, market, slate_date):
             """
             SELECT player, event, event_id
             FROM nba_predictions
-            WHERE market=%s AND snapshot->>'daily_top5'='true'
+            WHERE market=%s AND snapshot->>'daily_top3'='true'
               AND snapshot->>'slate_date'=%s
             ORDER BY id
             """,
             (market, slate_date),
         ).fetchall()
+        total_rows = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM nba_predictions
+            WHERE market IN ('points', 'threes')
+              AND snapshot->>'daily_top3'='true'
+              AND snapshot->>'slate_date'=%s
+            """,
+            (slate_date,),
+        ).fetchone()[0]
     existing_keys = {
         (
             str(player or "").strip().casefold(),
@@ -521,9 +531,9 @@ def save_daily_top_five(rows, market, slate_date):
         )
         for player, event, event_id in existing_rows
     }
-    remaining = max(0, 5 - len(existing_rows))
+    remaining = max(0, 3 - int(total_rows or 0))
     if remaining == 0:
-        return {"saved": 0, "skipped": len(rows or []), "already_saved": True, "filled": 5}
+        return {"saved": 0, "skipped": len(rows or []), "already_saved": True, "filled": int(total_rows or 0)}
     selected = []
     selected_keys = set()
     for row in (rows or []):
@@ -539,6 +549,7 @@ def save_daily_top_five(rows, market, slate_date):
             continue
         item["market"] = market
         item["daily_top5"] = True
+        item["daily_top3"] = True
         item["slate_date"] = slate_date
         selected.append(item)
         selected_keys.add(key)
@@ -546,7 +557,7 @@ def save_daily_top_five(rows, market, slate_date):
             break
     result = save_predictions(selected, market)
     result["already_saved"] = bool(existing_rows)
-    result["filled"] = min(5, len(existing_rows) + result.get("saved", 0))
+    result["filled"] = min(3, int(total_rows or 0) + result.get("saved", 0))
     return result
 
 
@@ -569,7 +580,7 @@ def deactivate_unsettled_daily_top_five(slate_date):
 
 
 def list_daily_top_five(slate_date, market="all"):
-    clauses = ["snapshot->>'daily_top5'='true'", "snapshot->>'slate_date'=%s", "market IN ('points', 'threes')"]
+    clauses = ["snapshot->>'daily_top3'='true'", "snapshot->>'daily_top5'='true'", "snapshot->>'slate_date'=%s", "market IN ('points', 'threes')"]
     args = [str(slate_date)]
     if market and market != "all":
         clauses.append("market=%s")
@@ -608,7 +619,7 @@ def daily_top_five_metrics():
                    COUNT(*) FILTER (WHERE outcome='PUSH'),
                    COALESCE(SUM(profit_units), 0)
             FROM nba_predictions
-            WHERE snapshot->>'daily_top5'='true' AND settled_at IS NOT NULL AND market IN ('points', 'threes')
+            WHERE snapshot->>'daily_top3'='true' AND settled_at IS NOT NULL AND market IN ('points', 'threes')
             """
         ).fetchone()
         markets = conn.execute(
@@ -618,7 +629,7 @@ def daily_top_five_metrics():
                    COUNT(*) FILTER (WHERE outcome='PUSH'),
                    COALESCE(SUM(profit_units), 0)
             FROM nba_predictions
-            WHERE snapshot->>'daily_top5'='true' AND settled_at IS NOT NULL
+            WHERE snapshot->>'daily_top3'='true' AND settled_at IS NOT NULL AND market IN ('points', 'threes')
             GROUP BY market ORDER BY market
             """
         ).fetchall()
