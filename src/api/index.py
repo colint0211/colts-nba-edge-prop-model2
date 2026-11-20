@@ -2783,6 +2783,11 @@ def _revalidate_frozen_market_candidates(market, candidates, injury_feed):
             }
             continue
         p["team_verification"] = {"status": "verified", "source": "ESPN team roster"}
+        # The immutable slate can predate the neutral-matchup grading fix.
+        # Rebuild the directional grade from the frozen model components before
+        # deciding eligibility; otherwise every frozen candidate with missing
+        # positional-defense data is silently excluded forever.
+        _apply_directional_play_grade(p)
         if p.get("recommendation") not in ("VALUE CANDIDATE", "LEAN / VERIFY"):
             continue
         # Mixed current/prior-season samples must undergo the workload review.
