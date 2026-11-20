@@ -3046,6 +3046,25 @@ def _revalidate_frozen_market_candidates(market, candidates, injury_feed):
     ))
     return ordered
 
+@app.get("/api/ppp-diagnostic")
+def ppp_diagnostic(player: str = "Stephen Curry"):
+    athlete_id = _espn_player_id(player)
+    if not athlete_id:
+        return JSONResponse({"player": player, "error": "ESPN athlete match unavailable"}, status_code=404)
+    fields = {
+        "points": ("points", "PTS"), "fga": ("fieldGoalsAttempted", "FGA"),
+        "fta": ("freeThrowsAttempted", "FTA"), "turnovers": ("turnovers", "TO"),
+        "minutes": ("minutes", "MIN"),
+    }
+    report = {}
+    for key, (field, label) in fields.items():
+        records = _gamelog_records(athlete_id, field, label, 2027)
+        report[key] = {"field": field, "label": label, "count": len(records), "sample": records[:2]}
+    history, sample = _player_possession_history(athlete_id)
+    return JSONResponse({"player": player, "athlete_id": athlete_id, "fields": report,
+                         "aligned_ppp_games": len(history), "sample_label": sample,
+                         "sample": history[-3:]})
+
 @app.get("/api/proprietary-market-board")
 def proprietary_market_board(market: str = "points", rebuild_ppp: bool = False):
     market = market.lower().strip()
