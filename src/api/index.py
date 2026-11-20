@@ -2859,129 +2859,147 @@ def proprietary_market_board(market: str = "points"):
     props = _propline_market_props(events, market)
     field, label = STAT_FIELDS[market]
     output, failures = [], []
-    for raw in props:
-        name = raw.get("player")
-        if not name:
-            continue
-        try:
-            line = float(raw.get("line"))
-            quote = _propline_quote(raw)
-            event_matchup = raw.get("game") or ""
-            team_codes = _team_codes_from_game(event_matchup)
-            roster_athlete_id, roster_team = _espn_roster_player_id(name, team_codes)
-            # Team is a model input, not display metadata: require an ESPN roster
-            # identity on one of the two teams in this exact matchup. Never let
-            # an unverified PropLine team override the roster or drive opponent PPP.
-            if not roster_athlete_id or not roster_team:
-                failures.append(name + ": ESPN roster/team verification unavailable; excluded")
+    def _process_market_prop(raw):
+        local_output, local_failures = [], []
+        for raw in [raw]:
+            name = raw.get("player")
+            if not name:
                 continue
-            raw_team = _canonical_team_code(raw.get("team"))
-            if raw_team and raw_team != roster_team:
-                failures.append(name + ": PropLine team conflicts with ESPN roster (" + raw_team + " vs " + roster_team + "); excluded")
-                continue
-            athlete_id = roster_athlete_id
-            resolved_team = roster_team
-            values, sample_label, player_minutes = _player_history(athlete_id, field, label)
-            team_for_dvp = resolved_team
-            event_matchup = raw.get("game") or ""
-            ppp_context = None
-            if market == "points":
-                ppp_context = _player_ppp_context(athlete_id, event_matchup, _projected_minutes(player_minutes))
-                ppp_context = _apply_opponent_defensive_ppp(ppp_context, team_for_dvp, event_matchup) if ppp_context else None
-                if not ppp_context:
-                    failures.append(name + ": verified PPP, player possessions, or opponent defensive PPP unavailable")
+            try:
+                line = float(raw.get("line"))
+                quote = _propline_quote(raw)
+                event_matchup = raw.get("game") or ""
+                team_codes = _team_codes_from_game(event_matchup)
+                roster_athlete_id, roster_team = _espn_roster_player_id(name, team_codes)
+                # Team is a model input, not display metadata: require an ESPN roster
+                # identity on one of the two teams in this exact matchup. Never let
+                # an unverified PropLine team override the roster or drive opponent PPP.
+                if not roster_athlete_id or not roster_team:
+                    local_failures.append(name + ": ESPN roster/team verification unavailable; excluded")
                     continue
-                matchup_adjustment = None
-                team_context_adjustment = None
-            else:
-                matchup_adjustment = _dvp_matchup_adjustment(athlete_id, team_for_dvp, event_matchup, market, name)
-                team_context_adjustment = _team_factor_prop_adjustment(team_for_dvp, event_matchup, market)
-            minutes_conditioned_profile = (
-                _minutes_conditioned_threes(athlete_id, _projected_minutes(player_minutes))
-                if market == "threes" else None
-            )
-            if market == "threes" and not minutes_conditioned_profile:
-                failures.append(name + ": insufficient paired minutes/3PA/3PM history for minutes-band projection")
-                continue
-            simulation_values = ppp_context["projected_points_history"] if market == "points" else values
-            model = _simulate_market(
-                simulation_values, line, None, None, _norm_player_name(name) + market,
-                minutes=player_minutes, market=market,
-                matchup_adjustment=matchup_adjustment,
-                team_context_adjustment=team_context_adjustment,
-                ppp_context=ppp_context,
-                minutes_conditioned_profile=minutes_conditioned_profile,
-            )
-            if not model:
-                failures.append(name + ": fewer than five valid game logs")
-                continue
-            model = _apply_historical_calibration(model, market)
-            if quote:
-                model = _score_blended_market(model, quote)
-                model = _apply_directional_play_grade(model)
-            else:
-                model["recommendation"] = "PASS"
-                model["expected_value_pct"] = None
-                model["best_side"] = None
-                model["best_probability"] = None
-                model["best_odds"] = None
-                model["edge_pp"] = None
-                model["blend_method"] = "No verified two-sided DraftKings quote; no bet rating"
-
-            sample_size = int(model.get("sample_size") or len(values))
-            if sample_size < 8:
-                model["confidence"] = "low"
-                model["recommendation"] = "PASS"
-                model["expected_value_pct"] = None
-                model["best_side"] = None
-                model["best_probability"] = None
-                model["best_odds"] = None
-                model["edge_pp"] = None
-                model["probability_note"] = (
-                    "Projection only: fewer than 8 verified regular-season games. "
-                    "EV ranking is disabled until the sample grows."
+                raw_team = _canonical_team_code(raw.get("team"))
+                if raw_team and raw_team != roster_team:
+                    local_failures.append(name + ": PropLine team conflicts with ESPN roster (" + raw_team + " vs " + roster_team + "); excluded")
+                    continue
+                athlete_id = roster_athlete_id
+                resolved_team = roster_team
+                values, sample_label, player_minutes = _player_history(athlete_id, field, label)
+                team_for_dvp = resolved_team
+                event_matchup = raw.get("game") or ""
+                ppp_context = None
+                if market == "points":
+                    ppp_context = _player_ppp_context(athlete_id, event_matchup, _projected_minutes(player_minutes))
+                    ppp_context = _apply_opponent_defensive_ppp(ppp_context, team_for_dvp, event_matchup) if ppp_context else None
+                    if not ppp_context:
+                        local_failures.append(name + ": verified PPP, player possessions, or opponent defensive PPP unavailable")
+                        continue
+                    matchup_adjustment = None
+                    team_context_adjustment = None
+                else:
+                    matchup_adjustment = _dvp_matchup_adjustment(athlete_id, team_for_dvp, event_matchup, market, name)
+                    team_context_adjustment = _team_factor_prop_adjustment(team_for_dvp, event_matchup, market)
+                minutes_conditioned_profile = (
+                    _minutes_conditioned_threes(athlete_id, _projected_minutes(player_minutes))
+                    if market == "threes" else None
                 )
-            elif model.get("projected_minutes") is not None and float(model["projected_minutes"]) < 15.0:
-                model["confidence"] = "low"
-                model["recommendation"] = "PASS"
-                model["expected_value_pct"] = None
-                model["best_side"] = None
-                model["best_probability"] = None
-                model["best_odds"] = None
-                model["edge_pp"] = None
-                model["probability_note"] = (
-                    "Projection only: projected playing time is below 15 minutes. "
-                    "EV ranking is disabled because a low-minute role is too volatile."
+                if market == "threes" and not minutes_conditioned_profile:
+                    local_failures.append(name + ": insufficient paired minutes/3PA/3PM history for minutes-band projection")
+                    continue
+                simulation_values = ppp_context["projected_points_history"] if market == "points" else values
+                model = _simulate_market(
+                    simulation_values, line, None, None, _norm_player_name(name) + market,
+                    minutes=player_minutes, market=market,
+                    matchup_adjustment=matchup_adjustment,
+                    team_context_adjustment=team_context_adjustment,
+                    ppp_context=ppp_context,
+                    minutes_conditioned_profile=minutes_conditioned_profile,
                 )
-            else:
-                model.setdefault("confidence", "provisional")
+                if not model:
+                    local_failures.append(name + ": fewer than five valid game logs")
+                    continue
+                model = _apply_historical_calibration(model, market)
+                if quote:
+                    model = _score_blended_market(model, quote)
+                    model = _apply_directional_play_grade(model)
+                else:
+                    model["recommendation"] = "PASS"
+                    model["expected_value_pct"] = None
+                    model["best_side"] = None
+                    model["best_probability"] = None
+                    model["best_odds"] = None
+                    model["edge_pp"] = None
+                    model["blend_method"] = "No verified two-sided DraftKings quote; no bet rating"
+    
+                sample_size = int(model.get("sample_size") or len(values))
+                if sample_size < 8:
+                    model["confidence"] = "low"
+                    model["recommendation"] = "PASS"
+                    model["expected_value_pct"] = None
+                    model["best_side"] = None
+                    model["best_probability"] = None
+                    model["best_odds"] = None
+                    model["edge_pp"] = None
+                    model["probability_note"] = (
+                        "Projection only: fewer than 8 verified regular-season games. "
+                        "EV ranking is disabled until the sample grows."
+                    )
+                elif model.get("projected_minutes") is not None and float(model["projected_minutes"]) < 15.0:
+                    model["confidence"] = "low"
+                    model["recommendation"] = "PASS"
+                    model["expected_value_pct"] = None
+                    model["best_side"] = None
+                    model["best_probability"] = None
+                    model["best_odds"] = None
+                    model["edge_pp"] = None
+                    model["probability_note"] = (
+                        "Projection only: projected playing time is below 15 minutes. "
+                        "EV ranking is disabled because a low-minute role is too volatile."
+                    )
+                else:
+                    model.setdefault("confidence", "provisional")
+    
+                market_prop = {
+                    "player": name,
+                    "team": resolved_team,
+                    "game": event_matchup,
+                    "market": market,
+                    "line": line,
+                    "over_odds": raw.get("over_odds"),
+                    "under_odds": raw.get("under_odds"),
+                    "sample_label": sample_label,
+                    "athlete_id": athlete_id,
+                    "games_used": len(values),
+                    "event_id": raw.get("event_id"),
+                    "line_source": "DraftKings/FanDuel via PropLine",
+                    "line_updated_at": raw.get("last_update"),
+                    "bookmaker_link": raw.get("bookmaker_link"),
+                    "market_books": raw.get("market_books") or ["Sportsbook"],
+                    "position": (matchup_adjustment or {}).get("position"),
+                    "defense_vs_position": matchup_adjustment,
+                    **model,
+                }
+                # Injury and return-to-play review is deliberately deferred until
+                # after this market's provisional Top 5 has been ranked.
+                _apply_balldontlie_game(market_prop, bdl_games)
+                local_output.append(market_prop)
+            except Exception as exc:
+                local_failures.append(name + ": " + type(exc).__name__ + ": " + str(exc)[:180])
+    
+        return local_output, local_failures
 
-            market_prop = {
-                "player": name,
-                "team": resolved_team,
-                "game": event_matchup,
-                "market": market,
-                "line": line,
-                "over_odds": raw.get("over_odds"),
-                "under_odds": raw.get("under_odds"),
-                "sample_label": sample_label,
-                "athlete_id": athlete_id,
-                "games_used": len(values),
-                "event_id": raw.get("event_id"),
-                "line_source": "DraftKings/FanDuel via PropLine",
-                "line_updated_at": raw.get("last_update"),
-                "bookmaker_link": raw.get("bookmaker_link"),
-                "market_books": raw.get("market_books") or ["Sportsbook"],
-                "position": (matchup_adjustment or {}).get("position"),
-                "defense_vs_position": matchup_adjustment,
-                **model,
-            }
-            # Injury and return-to-play review is deliberately deferred until
-            # after this market's provisional Top 5 has been ranked.
-            _apply_balldontlie_game(market_prop, bdl_games)
-            output.append(market_prop)
-        except Exception as exc:
-            failures.append(name + ": " + type(exc).__name__ + ": " + str(exc)[:180])
+    # Player histories and roster lookups are network-bound. Process a bounded
+    # batch concurrently so both market endpoints finish within Vercel's limit.
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    output, failures = [], []
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        futures = [pool.submit(_process_market_prop, raw) for raw in props if raw.get("player")]
+        for future in as_completed(futures):
+            try:
+                player_output, player_failures = future.result()
+                output.extend(player_output)
+                failures.extend(player_failures)
+            except Exception as exc:
+                failures.append("Worker failure: " + type(exc).__name__ + ": " + str(exc)[:180])
 
     output.sort(key=lambda row: (
         row.get("expected_value_pct") is None,
