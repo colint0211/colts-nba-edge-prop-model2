@@ -1209,7 +1209,8 @@ def _player_ppp_context(athlete_id, matchup, projected_minutes=None):
     minutes = float(projected_minutes) if projected_minutes is not None else _projected_minutes([r["minutes"] for r in rows])
     if minutes is None or minutes <= 0:
         return None
-    return {"player_ppp": ppp, "projected_player_possessions": poss_per_min * minutes,
+    return {"player_ppp": ppp, "ppp_history": [r["ppp"] for r in rows],
+            "projected_player_possessions": poss_per_min * minutes,
             "projected_minutes": minutes, "sample_size": len(rows), "used_prior_season": used_prior,
             "method": "recency-weighted player PPP × projected player possessions",
             "source": "ESPN PTS / (FGA + 0.44 × FTA + turnovers)"}
@@ -1511,7 +1512,7 @@ def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, ma
         "edge_pp": None,
         "recommendation": "VALUE CANDIDATE" if best and best[0] > 0.05 else ("LEAN / VERIFY" if best and best[0] > 0 else "PASS"),
         "model_components": ["recency-weighted history", "10-game form signal", "minutes adjustment" if valid_minutes else "minutes unavailable; no adjustment", "defense-vs-position matchup adjustment" if isinstance(matchup_adjustment, dict) and matchup_adjustment.get("available", True) else "defense-vs-position unavailable; no adjustment", "team pace + Four Factors + shot-profile adjustment" if isinstance(team_context_adjustment, dict) and team_context_adjustment.get("available") else "team factor context unavailable; no adjustment", "20% empirical history + 80% negative-binomial count distribution"],
-        "model_method": "recency-weighted count-rate projection with Gamma-Poisson overdispersion; provisional pending out-of-sample calibration",
+        "model_method": "player PPP × projected player possessions × opponent defensive PPP, with Gamma-Poisson count variance" if market == "points" else "recency-weighted count-rate projection with Gamma-Poisson overdispersion; provisional pending out-of-sample calibration",
         "sample_size": n, "long_run_mean": round(long_mean, 2), "recent5_mean": round(recent5_mean, 2),
         "recent10_mean": round(recent10_mean, 2), "weighted_mean": round(weighted_mean, 2),
         "distribution_std_dev": round(std_dev, 2), "minute_adjustment_factor": round(minute_factor, 3),
