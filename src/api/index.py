@@ -2919,7 +2919,7 @@ def _lock_daily_top_three(slate_date, replace_unsettled=False):
             except (TypeError, ValueError, OverflowError):
                 continue
             if (not math.isfinite(ev) or ev < 2.0 or edge < 2.0
-                    or sample < 10 or minutes < 15 or p.get("play_grade") is None
+                    or sample < 10 or minutes < 15
                     or p.get("best_side") not in ("OVER", "UNDER")):
                 continue
             p["_ranking_ev"] = ev
