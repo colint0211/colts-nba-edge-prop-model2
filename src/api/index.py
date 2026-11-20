@@ -677,7 +677,7 @@ def _dvp_matchup_adjustment(athlete_id,player_team,game,market,player_name=None)
   factor=1.0
   position_names={"PG":"Point Guard","SG":"Shooting Guard","SF":"Small Forward","PF":"Power Forward","C":"Center","G":"Guard (PG/SG blended)","F":"Forward (SF/PF blended)"}
   stat_labels={"points":"points","rebounds":"rebounds","assists":"assists","steals":"steals","threes":"3-pointers made"}
-  stat_units={"points":"PPG","rebounds":"RPG","assists":"APG","steals":"SPG","threes":"3PM"}
+  stat_units={"points":"PPP","rebounds":"RPG","assists":"APG","steals":"SPG","threes":"3PM"}
   season=_DVP_STAT_CACHE.get(stat,{}).get("season") or "season not identified"
   position_method="PG/SG 50/50 blend" if espn_position=="G" else "SF/PF 50/50 blend" if espn_position=="F" else "Individual listed position"
   blend_weights={position_keys[0]:1.0} if len(position_keys)==1 else {position_keys[0]:0.5,position_keys[1]:0.5}
@@ -1149,7 +1149,7 @@ def _player_history(athlete_id, field, label):
     ]
     if any(row.get("date") for row in history_stats):
         history_stats.sort(key=lambda row: row.get("date") or "")
-    # Retain the full regular-season sample so the matchup comparison uses true season PPG/RPG/3PM, not only the last 25 games.
+    # Retain the full regular-season sample so the matchup comparison uses true season stat totals for variance and 3PM, not only the last 25 games.
     history_stats = history_stats[-82:]
 
     # Minutes are used only when verified by event ID or exact game date.
@@ -1161,6 +1161,88 @@ def _player_history(athlete_id, field, label):
     minutes = [b["value"] for _, b in paired]
     sample_label = "2026-27 + 2025-26 limited fallback" if used_prior else "2026-27 regular season"
     return values, sample_label, minutes
+
+def _player_ppp_context(athlete_id, matchup, projected_minutes=None):
+    """Build points projection from player PPP and used possessions, not PPG."""
+    fields = (("points", "PTS", "points"), ("fieldGoalsAttempted", "FGA", "fga"),
+              ("freeThrowsAttempted", "FTA", "fta"), ("turnovers", "TO", "turnovers"),
+              ("minutes", "MIN", "minutes"))
+    season_rows = {}
+    for season in (2027, 2026):
+        maps = {}
+        for field, label, key in fields:
+            try:
+                records = _gamelog_records(athlete_id, field, label, season)
+            except Exception:
+                records = []
+            indexed = {}
+            for row in records:
+                event = str(row.get("event_id") or "").strip()
+                date = str(row.get("date") or "")[:10]
+                identity = ("event", event) if event else (("date", date) if date else None)
+                if identity:
+                    indexed[identity] = row.get("value")
+            maps[key] = indexed
+        common = set.intersection(*(set(maps[k]) for k in ("points", "fga", "fta", "turnovers", "minutes")))
+        rows = []
+        for key in common:
+            try:
+                pts, fga, fta, tov, mins = (float(maps[k][key]) for k in ("points", "fga", "fta", "turnovers", "minutes"))
+                possessions = fga + 0.44 * fta + tov
+                if mins > 0 and possessions > 0 and pts >= 0:
+                    rows.append({"date": key[1], "ppp": pts / possessions,
+                                 "possessions_per_minute": possessions / mins, "minutes": mins})
+            except (TypeError, ValueError, ZeroDivisionError):
+                continue
+        rows.sort(key=lambda row: row["date"])
+        season_rows[season] = rows
+    current, prior = season_rows[2027], season_rows[2026]
+    used_prior = len(current) < 5 and bool(prior)
+    rows = ((prior[-8:] if used_prior else []) + current)[-82:]
+    if len(rows) < 4:
+        return None
+    def weighted_mean(values):
+        weights = [math.exp(-0.075 * (len(values)-1-i)) for i in range(len(values))]
+        return sum(v*w for v, w in zip(values, weights)) / sum(weights)
+    ppp = weighted_mean([r["ppp"] for r in rows])
+    poss_per_min = weighted_mean([r["possessions_per_minute"] for r in rows])
+    minutes = float(projected_minutes) if projected_minutes is not None else _projected_minutes([r["minutes"] for r in rows])
+    if minutes is None or minutes <= 0:
+        return None
+    return {"player_ppp": ppp, "projected_player_possessions": poss_per_min * minutes,
+            "projected_minutes": minutes, "sample_size": len(rows), "used_prior_season": used_prior,
+            "method": "recency-weighted player PPP × projected player possessions",
+            "source": "ESPN PTS / (FGA + 0.44 × FTA + turnovers)"}
+
+
+def _apply_opponent_defensive_ppp(context, player_team, matchup):
+    """Adjust player PPP for opponent defensive points allowed per possession."""
+    if not isinstance(context, dict):
+        return None
+    codes = _team_codes_from_game(matchup)
+    team = _canonical_team_code(player_team)
+    if len(codes) != 2 or not team or team not in codes:
+        return None
+    opponent = next(code for code in codes if code != team)
+    teams = game_model._team_ratings().get("teams") or {}
+    league_rows = [r for r in teams.values() if r.get("drtg") is not None and float(r.get("drtg") or 0) > 0]
+    opp = teams.get(opponent)
+    if not opp or opp.get("drtg") is None or len(league_rows) < 20:
+        return None
+    league_drtg = sum(float(r["drtg"]) for r in league_rows) / len(league_rows)
+    opponent_drtg = float(opp["drtg"])
+    if league_drtg <= 0 or opponent_drtg <= 0:
+        return None
+    defensive_ppp = opponent_drtg / 100.0
+    league_defensive_ppp = league_drtg / 100.0
+    factor = defensive_ppp / league_defensive_ppp
+    result = dict(context)
+    result.update({"opponent": opponent, "opponent_defensive_ppp": defensive_ppp,
+                   "league_defensive_ppp": league_defensive_ppp, "opponent_defense_factor": factor,
+                   "expected_points": context["player_ppp"] * context["projected_player_possessions"] * factor,
+                   "defense_source": "NBA team defensive rating / 100"})
+    return result
+
 
 def _odds_profit(win_probability, loss_probability, odds):
     if odds is None:
@@ -1278,7 +1360,7 @@ def _apply_directional_play_grade(model):
     return model
 
 
-def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, market="", matchup_adjustment=None, team_context_adjustment=None):
+def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, market="", matchup_adjustment=None, team_context_adjustment=None, ppp_context=None):
     """Project count stats with an overdispersed count model; never truncate the upper tail at the observed maximum."""
     clean = [float(v) for v in values if v is not None and math.isfinite(float(v)) and float(v) >= 0]
     if len(clean) < 4:
@@ -1292,6 +1374,11 @@ def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, ma
     weighted_mean = sum(v*w for v,w in zip(clean,weights)) / sum(weights)
     form_weight = min(0.30, len(recent10)/(len(recent10)+20.0))
     target_mean = (1.0-form_weight)*long_mean + form_weight*weighted_mean
+    # For points, the expected mean is exclusively PPP × player possessions × opponent defensive PPP.
+    if market == "points":
+        if not isinstance(ppp_context, dict) or ppp_context.get("expected_points") is None:
+            return None
+        target_mean = float(ppp_context["expected_points"])
 
     valid_minutes = []
     for item in (minutes or []):
@@ -1306,13 +1393,14 @@ def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, ma
     minute_factor = 1.0
     if projected_min is not None and baseline_min and baseline_min > 0 and len(valid_minutes) >= 8:
         minute_factor = max(0.85, min(1.15, projected_min / baseline_min))
-        target_mean *= minute_factor
+        if market != "points":
+            target_mean *= minute_factor
 
     matchup_factor = 1.0
     positional_discrepancy = None
     directional_discrepancy_pct = 0.0
     matchup_grade = 50.0
-    if isinstance(matchup_adjustment, dict) and matchup_adjustment.get("available", True):
+    if market != "points" and isinstance(matchup_adjustment, dict) and matchup_adjustment.get("available", True):
         try:
             allowed = float(matchup_adjustment.get("allowed_per_game"))
             if math.isfinite(allowed) and long_mean > 0:
@@ -1329,7 +1417,7 @@ def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, ma
             matchup_factor = 1.0
 
     team_context_factor = 1.0
-    if isinstance(team_context_adjustment, dict) and team_context_adjustment.get("available"):
+    if market != "points" and isinstance(team_context_adjustment, dict) and team_context_adjustment.get("available"):
         try:
             candidate=float(team_context_adjustment.get("factor",1.0))
             if math.isfinite(candidate):
@@ -1434,7 +1522,16 @@ def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, ma
         "baseline_minutes": round(baseline_min, 1) if baseline_min is not None else None,
         "minutes_method": "55% recent-5 median / 30% recent-10 median / 15% recent-20 median; adjustment capped at +/-15%",
         "count_dispersion_k": round(dispersion_k, 2),
-        "calibration_status": "uncalibrated"
+        "calibration_status": "uncalibrated",
+        "projection_basis": "PPP × projected player possessions × opponent defensive PPP" if market == "points" else "recency-weighted player game-log count model",
+        "player_ppp": round(float(ppp_context["player_ppp"]), 4) if market == "points" and ppp_context else None,
+        "projected_player_possessions": round(float(ppp_context["projected_player_possessions"]), 2) if market == "points" and ppp_context else None,
+        "opponent_defensive_ppp": round(float(ppp_context["opponent_defensive_ppp"]), 4) if market == "points" and ppp_context else None,
+        "league_defensive_ppp": round(float(ppp_context["league_defensive_ppp"]), 4) if market == "points" and ppp_context else None,
+        "opponent_defense_factor": round(float(ppp_context["opponent_defense_factor"]), 4) if market == "points" and ppp_context else None,
+        "ppp_expected_points": round(float(ppp_context["expected_points"]), 2) if market == "points" and ppp_context else None,
+        "ppp_sample_size": ppp_context.get("sample_size") if market == "points" and ppp_context else None,
+        "ppp_method": ppp_context.get("method") if market == "points" and ppp_context else None
     }
 
 _BP_OFFERS_CACHE = {}
@@ -2492,13 +2589,24 @@ def proprietary_market_board(market: str = "points"):
             values, sample_label, player_minutes = _player_history(athlete_id, field, label)
             team_for_dvp = resolved_team
             event_matchup = raw.get("game") or ""
-            matchup_adjustment = _dvp_matchup_adjustment(athlete_id, team_for_dvp, event_matchup, market, name)
-            team_context_adjustment = _team_factor_prop_adjustment(team_for_dvp, event_matchup, market)
+            ppp_context = None
+            if market == "points":
+                ppp_context = _player_ppp_context(athlete_id, event_matchup, _projected_minutes(player_minutes))
+                ppp_context = _apply_opponent_defensive_ppp(ppp_context, team_for_dvp, event_matchup) if ppp_context else None
+                if not ppp_context:
+                    failures.append(name + ": verified PPP, player possessions, or opponent defensive PPP unavailable")
+                    continue
+                matchup_adjustment = None
+                team_context_adjustment = None
+            else:
+                matchup_adjustment = _dvp_matchup_adjustment(athlete_id, team_for_dvp, event_matchup, market, name)
+                team_context_adjustment = _team_factor_prop_adjustment(team_for_dvp, event_matchup, market)
             model = _simulate_market(
                 values, line, None, None, _norm_player_name(name) + market,
                 minutes=player_minutes, market=market,
                 matchup_adjustment=matchup_adjustment,
                 team_context_adjustment=team_context_adjustment,
+                ppp_context=ppp_context,
             )
             if not model:
                 failures.append(name + ": fewer than five valid game logs")
@@ -3729,9 +3837,18 @@ async def model_recalculate(request: FastRequest):
             raise HTTPException(status_code=400, detail="Odds are outside the supported range.")
         field, label = ("points", "PTS") if market == "points" else STAT_FIELDS[market]
         values, sample_label, minutes = _player_history(athlete_id, field, label)
-        matchup_adjustment = _dvp_matchup_adjustment(athlete_id, payload.get("team"), payload.get("game"), market, player)
-        team_context_adjustment = _team_factor_prop_adjustment(payload.get("team"), payload.get("game"), market)
-        model = _simulate_market(values, line, None, None, _norm_player_name(player) + market + "custom", minutes=minutes, market=market, matchup_adjustment=matchup_adjustment, team_context_adjustment=team_context_adjustment)
+        ppp_context = None
+        if market == "points":
+            ppp_context = _player_ppp_context(athlete_id, payload.get("game"), _projected_minutes(minutes))
+            ppp_context = _apply_opponent_defensive_ppp(ppp_context, payload.get("team"), payload.get("game")) if ppp_context else None
+            if not ppp_context:
+                raise HTTPException(status_code=503, detail="Verified PPP and opponent defensive PPP data are required; no PPG fallback is permitted.")
+            matchup_adjustment = None
+            team_context_adjustment = None
+        else:
+            matchup_adjustment = _dvp_matchup_adjustment(athlete_id, payload.get("team"), payload.get("game"), market, player)
+            team_context_adjustment = _team_factor_prop_adjustment(payload.get("team"), payload.get("game"), market)
+        model = _simulate_market(values, line, None, None, _norm_player_name(player) + market + "custom", minutes=minutes, market=market, matchup_adjustment=matchup_adjustment, team_context_adjustment=team_context_adjustment, ppp_context=ppp_context)
         if not model:
             raise HTTPException(status_code=422, detail="Not enough verified game-log history to recalculate this player.")
         over_raw, under_raw = _american_probability(over_odds), _american_probability(under_odds)
