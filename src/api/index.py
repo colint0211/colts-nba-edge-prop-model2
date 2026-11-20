@@ -1485,12 +1485,13 @@ def _minutes_conditioned_threes(athlete_id, projected_minutes):
         output.sort(key=lambda row: row["date"])
         return output
 
-    rows = paired_season(2027)
-    source = "2026-27 regular season"
-    if len(rows) < 8:
-        prior = paired_season(2026)[-8:]
-        rows = prior + rows
-        source = "2026-27 plus limited 2025-26 fallback"
+    # Always blend the current season with a meaningful prior-season sample.
+    # Do not let a small early-season shooting heater become the player's true
+    # 3P% baseline merely because the current season has reached eight games.
+    current_rows = paired_season(2027)
+    prior_rows = paired_season(2026)[-30:]
+    rows = prior_rows + current_rows
+    source = "2026-27 plus last 30 games of 2025-26"
     rows = rows[-82:]
     if len(rows) < 8:
         return None
