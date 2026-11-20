@@ -550,6 +550,24 @@ def save_daily_top_five(rows, market, slate_date):
     return result
 
 
+def deactivate_unsettled_daily_top_five(slate_date):
+    """Retire prior unsettled daily selections without deleting their audit history."""
+    with _connect() as conn:
+        cursor = conn.execute(
+            """
+            UPDATE nba_predictions
+            SET fingerprint = fingerprint || ':superseded:' || id::text,
+                snapshot = jsonb_set(snapshot, '{daily_top5}', 'false'::jsonb, true)
+            WHERE snapshot->>'daily_top5'='true'
+              AND snapshot->>'slate_date'=%s
+              AND market IN ('points', 'threes')
+              AND settled_at IS NULL
+            """,
+            (str(slate_date),),
+        )
+        return int(cursor.rowcount or 0)
+
+
 def list_daily_top_five(slate_date, market="all"):
     clauses = ["snapshot->>'daily_top5'='true'", "snapshot->>'slate_date'=%s", "market IN ('points', 'threes')"]
     args = [str(slate_date)]
