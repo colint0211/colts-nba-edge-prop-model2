@@ -3096,6 +3096,7 @@ def ppp_diagnostic(player: str = "Stephen Curry"):
                          "aligned_ppp_games": len(history), "sample_label": sample,
                          "sample": history[-3:]})
 
+@app.get("/api/rebuild-daily-top3")  # TEMPORARY: remove after one verified rebuild
 @app.post("/api/rebuild-daily-top3")
 def rebuild_daily_top_three():
     """Rebuild both markets from fresh feeds and replace only unsettled Top 3 rows."""
