@@ -389,7 +389,7 @@ function livePace(p){
   return {current,minutes,gameMinutesLeft,remainingPlayerMinutes,projected,margin,verdict,label};
 }
 function liveTickerHtml(p){
-  const g=gameFor(p)||{},value=liveStatValue(p),pace=livePace(p);
+  const st=playerLive(p)||{},g=gameFor(p)||{},value=liveStatValue(p),pace=livePace(p);
   const market=String(p.market||"points").toLowerCase();
   const label=({points:"PTS",threes:"3PM"})[market]||"STAT";
   const line=Number(p.line),validLine=Number.isFinite(line);
@@ -397,6 +397,15 @@ function liveTickerHtml(p){
   const score=g.away_score!=null&&g.home_score!=null?g.away+" "+g.away_score+" – "+g.home_score+" "+g.home:(g.away&&g.home?g.away+" @ "+g.home:"Score unavailable");
   const status=g.state==="in"?"LIVE · "+(g.period?"Q"+g.period:"")+(g.clock&&g.clock!=="0:00"?" · "+g.clock+" left":""):g.status||"Waiting for game";
   const liveValue=value==null?"—":num(value,0);
+  const rawMinutes=st.minutes_played??st.minutesPlayed??st.minutes??st.min??st.minutes_used;
+  let minutes=null;
+  if(typeof rawMinutes==="number"&&Number.isFinite(rawMinutes))minutes=rawMinutes;
+  else{
+    const ms=String(rawMinutes??"").trim(),mm=ms.match(/^(\d+):(\d{2})$/),mn=Number(ms);
+    if(mm)minutes=Number(mm[1])+Number(mm[2])/60;
+    else if(ms!==""&&Number.isFinite(mn))minutes=mn;
+  }
+  const minutesText=minutes==null?"—":num(minutes,1)+" min";
   const settledGrade=grade(p);
   const outlookClass=pace?(pace.verdict==="ON PACE TO HIT"?"hit":pace.verdict==="ON PACE TO MISS"?"miss":"push"):"";
   const resultHtml=settledGrade
@@ -406,9 +415,9 @@ function liveTickerHtml(p){
       :'';
   const paceHtml=pace
     ?'<div class="mini-value">'+num(pace.projected,1)+' '+label+' projected</div><div class="mini-label">'+num(pace.current,0)+' '+label+' in '+num(pace.minutes,1)+' min · '+num(pace.gameMinutesLeft,1)+' game min left · '+num(pace.remainingPlayerMinutes,1)+' expected player min left</div>'
-    :'<div class="mini-value">'+(g.state==="in"?"Calculating live pace":"Waiting for live game")+'</div><div class="mini-label">Pace estimate appears when the matching stat, player minutes and game clock are available.</div>';
+    :'<div class="mini-value">'+(g.state==="in"?"Live pace unavailable":"Waiting for live game")+'</div><div class="mini-label">A pace estimate needs the player’s live stat, minutes and game clock.</div>';
   return '<div class="scorebox"><div><div class="score-label">Live game score</div><div class="score">'+esc(score)+'</div></div><div class="game-status">'+(g.state==="in"?'<span class="live-dot"></span>':'')+esc(status)+'</div></div>'+
-    '<div class="statline" style="margin-top:10px"><div class="mini"><div class="mini-label">Live '+esc(bpMarketLabel(market))+' / prop line</div><div class="mini-value">'+liveValue+' <span>/ '+(validLine?num(line):"—")+' '+label+'</span></div><div class="progress"><span style="width:'+progress+'%"></span></div>'+resultHtml+'</div><div class="mini"><div class="mini-label">Live pace / outlook</div>'+paceHtml+'</div></div>';
+    '<div class="statline" style="margin-top:10px"><div class="mini"><div class="mini-label">Live '+esc(bpMarketLabel(market))+' / prop line</div><div class="mini-value">'+liveValue+' <span>/ '+(validLine?num(line):"—")+' '+label+'</span></div><div class="mini-label">Player minutes: <b>'+minutesText+'</b></div><div class="progress"><span style="width:'+progress+'%"></span></div>'+resultHtml+'</div><div class="mini"><div class="mini-label">Live pace / outlook</div>'+paceHtml+'</div></div>';
 }
 function dvpSummary(p){
   const d=p.defense_vs_position;
@@ -445,27 +454,21 @@ function balldontlieSummary(p){
   return '<div class="card-bottom"><span>Schedule cross-check: <b>BALLDONTLIE</b></span><span>'+esc(detail)+'</span></div>';
 }
 function card(p,i){
-  const g=gameFor(p),gr=grade(p),pts=liveStatValue(p);
-  const line=Number(p.line),progress=pts==null||!Number.isFinite(line)||line<=0?0:Math.max(0,Math.min(100,pts/line*100));
-  const fallback=isFallback(p);
+  const gr=grade(p),fallback=isFallback(p);
   const shownRecommendation=fallback?'PASS · FALLBACK':(p.recommendation||p.model_status||'—');
   const d=fallback?'pass':p.recommendation==='VALUE CANDIDATE'?'value':p.recommendation==='LEAN / VERIFY'?'lean':'pass';
-  const score=g?(g.away_score!=null&&g.home_score!=null?g.away+' '+g.away_score+' – '+g.home_score+' '+g.home:g.away+' @ '+g.home):'Score unavailable';
-  const liveText=g&&g.state==='in'?'<span class="live-dot"></span>'+esc((g.period?'Q'+g.period:'LIVE')+(g.clock&&g.clock!=='0:00'?' · '+g.clock+' left':'')):esc(g?g.status:'Game status unavailable');
-  const pace=livePace(p);
-  const paceHtml=pace?'<div class="statline" style="margin-top:10px"><div class="mini"><div class="mini-label">Live '+esc(pace.label)+' pace</div><div class="mini-value">'+num(pace.projected,1)+' '+esc(pace.label)+' projected</div><div class="mini-label">'+num(pace.current,0)+' '+esc(pace.label)+' in '+num(pace.minutes,1)+' min · '+num(pace.gameMinutesLeft,1)+' game min left · '+num(pace.remainingPlayerMinutes,1)+' expected player min left</div></div><div class="mini"><div class="mini-label">Live bet outlook</div><div class="mini-value">'+esc(pace.verdict)+'</div><div class="mini-label">'+(pace.margin>=0?'+':'')+num(pace.margin,1)+' vs '+num(p.line,1)+' line</div></div></div>':'<div class="mini" style="margin-top:10px"><div class="mini-label">Live pace</div><div class="mini-value">Waiting for live minutes and game clock</div><div class="mini-label">Pace estimate appears when the matching live stat, player minutes and game clock are available.</div></div>';
-  const gradeHtml=gr?'<span class="grade '+(gr==='HIT'?'hit':gr==='MISS'?'miss':'push')+'">'+(gr==='HIT'?'✓ HIT':gr==='MISS'?'✕ MISS':'PUSH')+'</span>':'<span>Pending</span>';
   const side=String(p.best_side||'').toUpperCase();
   const ev=Number(p.expected_value_pct??p.expected_profit_per_100);
   const approved=p.post_selection_reviewed===true&&['OVER','UNDER'].includes(side)&&Number.isFinite(ev)&&ev>0&&p.negative_review&&['clear','under_value'].includes(p.negative_review.status)&&!p.injury_blocked&&!p.injury_flag;
   const marketLabel=bpMarketLabel(p.market||'points').toUpperCase();
   const action=approved?'PLAY '+side+' '+p.line+' '+marketLabel:side+' '+p.line+' '+marketLabel+' · NO BET — NOT APPROVED';
+  const gradeHtml=gr?'<span class="grade '+(gr==='HIT'?'hit':gr==='MISS'?'miss':'push')+'">'+(gr==='HIT'?'✓ HIT':gr==='MISS'?'✕ MISS':'PUSH')+'</span>':'<span>Pending</span>';
   return '<article class="player-card '+d+'"><div class="player-top"><div><div class="player-name">'+esc((i+1)+'. '+p.player+(p.roster_team?' ('+p.roster_team+')':''))+'</div><div class="matchup">'+esc(p.game||'Matchup unavailable')+' · '+esc(p.sample_label||'Projection unavailable')+'</div></div><span class="decision '+d+'">'+esc(shownRecommendation)+'</span></div>'+
   '<div class="card-bottom" style="font-size:1.08em;padding:12px;border:2px solid currentColor;border-radius:10px;margin:10px 0"><b>'+esc(action)+'</b></div>'+
-  '<div class="scorebox"><div><div class="score-label">Live game score</div><div class="score">'+esc(score)+'</div></div><div class="game-status">'+liveText+'</div></div>'+
-  '<div class="statline"><div class="mini"><div class="mini-label">Live '+esc(({points:'points',threes:'3-pointers made'})[p.market]||'stat')+' / prop line</div><div class="mini-value">'+(pts==null?'—':pts)+' <span>/ '+num(p.line)+' '+esc(({points:'pts',rebounds:'reb',assists:'ast',steals:'stl',threes:'3PM'})[p.market]||'stat')+'</span></div><div class="progress"><span style="width:'+progress+'%"></span></div></div><div class="mini"><div class="mini-label">Pre-game model projection</div><div class="mini-value">'+num(p.projection)+' <span>'+esc(({points:'pts',rebounds:'reb',assists:'ast',steals:'stl',threes:'3PM'})[p.market]||'stat')+'</span></div><div class="mini-label">'+num(p.best_probability)+'% best-side probability</div></div></div>'+sideValueHtml(p)+paceHtml+
+  liveTickerHtml(p)+
+  '<div class="statline"><div class="mini"><div class="mini-label">Pre-game model projection</div><div class="mini-value">'+num(p.projection)+' <span>'+esc(({points:'pts',threes:'3PM'})[p.market]||'stat')+'</span></div><div class="mini-label">'+num(p.best_probability)+'% best-side probability</div></div><div class="mini"><div class="mini-label">Model edge</div><div class="mini-value">'+num(p.edge_pp,1)+' <span>pp</span></div><div class="mini-label">Expected value '+(p.expected_value_pct==null?'—':num(p.expected_value_pct,2)+'%')+'</div></div></div>'+sideValueHtml(p)+
   '<div class="card-bottom"><span>Pick: <b>'+esc(p.best_side||'—')+'</b> · '+num(p.edge_pp)+' pp edge</span><span class="ev">'+(p.expected_profit_per_100==null?'—':'$'+num(p.expected_profit_per_100,2)+' EV')+'</span></div>'+
-  '<div class="card-bottom"><span>Odds O '+esc(p.over_odds??'—')+' / U '+esc(p.under_odds??'—')+'</span><span>'+gradeHtml+'</span></div>'+injurySummary(p)+balldontlieSummary(p)+lineEditor(p)+reasoning(p)+reasoning(p)+'</article>';
+  '<div class="card-bottom"><span>Odds O '+esc(p.over_odds??'—')+' / U '+esc(p.under_odds??'—')+'</span><span>'+gradeHtml+'</span></div>'+injurySummary(p)+balldontlieSummary(p)+dvpSummary(p)+lineEditor(p)+reasoning(p)+'</article>';
 }
 function bpNorm(p,m){
   const pr=p.projection||{},participant=p.participant||{},playerObj=participant.player||{},event=p.event||{},over=p.over||{},under=p.under||{};
