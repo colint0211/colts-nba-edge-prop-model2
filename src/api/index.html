@@ -453,6 +453,12 @@ function balldontlieSummary(p){
   const detail=[status,phase,score].filter(Boolean).join(' · ');
   return '<div class="card-bottom"><span>Schedule cross-check: <b>BALLDONTLIE</b></span><span>'+esc(detail)+'</span></div>';
 }
+function playerIdentityHtml(p){
+  const position=String(p.position||p.player_position||p.position_abbreviation||p.pos||'').trim();
+  const team=String(p.roster_team||p.team||'').trim();
+  const details=[position,team].filter(Boolean).join(' · ');
+  return details?' <span style="color:var(--muted);font-size:13px;font-weight:700">('+esc(details)+')</span>':'';
+}
 function expectedMinutesHtml(p){
   const raw=p.projected_minutes??p.expected_minutes??p.minutes_projection??p.projectedMinutes??p.expectedMinutes;
   const value=Number(raw);
@@ -469,7 +475,7 @@ function card(p,i){
   const marketLabel=bpMarketLabel(p.market||'points').toUpperCase();
   const action=approved?'PLAY '+side+' '+p.line+' '+marketLabel:side+' '+p.line+' '+marketLabel+' · NO BET — NOT APPROVED';
   const gradeHtml=gr?'<span class="grade '+(gr==='HIT'?'hit':gr==='MISS'?'miss':'push')+'">'+(gr==='HIT'?'✓ HIT':gr==='MISS'?'✕ MISS':'PUSH')+'</span>':'<span>Pending</span>';
-  return '<article class="player-card '+d+'"><div class="player-top"><div><div class="player-name">'+esc((i+1)+'. '+p.player+(p.roster_team?' ('+p.roster_team+')':''))+'</div><div class="matchup">'+esc(p.game||'Matchup unavailable')+' · '+esc(p.sample_label||'Projection unavailable')+'</div></div><span class="decision '+d+'">'+esc(shownRecommendation)+'</span></div>'+
+  return '<article class="player-card '+d+'"><div class="player-top"><div><div class="player-name">'+esc((i+1)+'. '+p.player)+playerIdentityHtml(p)+'</div><div class="matchup">'+esc(p.game||'Matchup unavailable')+' · '+esc(p.sample_label||'Projection unavailable')+'</div></div><span class="decision '+d+'">'+esc(shownRecommendation)+'</span></div>'+
   '<div class="card-bottom" style="font-size:1.08em;padding:12px;border:2px solid currentColor;border-radius:10px;margin:10px 0"><b>'+esc(action)+'</b></div>'+
   expectedMinutesHtml(p)+liveTickerHtml(p)+
   '<div class="statline"><div class="mini"><div class="mini-label">Pre-game model projection</div><div class="mini-value">'+num(p.projection)+' <span>'+esc(({points:'pts',threes:'3PM'})[p.market]||'stat')+'</span></div><div class="mini-label">'+num(p.best_probability)+'% best-side probability</div></div><div class="mini"><div class="mini-label">Model edge</div><div class="mini-value">'+num(p.edge_pp,1)+' <span>pp</span></div><div class="mini-label">Expected value '+(p.expected_value_pct==null?'—':num(p.expected_value_pct,2)+'%')+'</div></div></div>'+
@@ -561,7 +567,7 @@ function bpLineCard(p,i){
   const ev=Number(p.expected_value_pct??p.expected_profit_per_100);
   const approved=p.post_selection_reviewed===true&&['OVER','UNDER'].includes(side)&&Number.isFinite(ev)&&ev>0&&p.negative_review&&['clear','under_value'].includes(p.negative_review.status)&&!p.injury_blocked&&!p.injury_flag;
   const action=approved?'PLAY '+side+' '+p.line+' '+label.toUpperCase():((['OVER','UNDER'].includes(side)?side+' '+p.line+' '+label.toUpperCase():'NO SIDE SELECTED')+' · NO BET — NOT APPROVED');
-  return '<article class="player-card '+cls+'"><div class="player-top"><div><div class="player-name">'+esc((i+1)+'. '+p.player+(p.team?' ('+p.team+')':''))+'</div><div class="matchup">'+esc(p.game||'NBA player prop')+' · Proprietary ESPN game-log model · DraftKings odds</div></div><span class="decision '+cls+'">'+esc(p.recommendation||'PASS')+'</span></div>'+
+  return '<article class="player-card '+cls+'"><div class="player-top"><div><div class="player-name">'+esc((i+1)+'. '+p.player)+playerIdentityHtml(p)+'</div><div class="matchup">'+esc(p.game||'NBA player prop')+' · Proprietary ESPN game-log model · DraftKings odds</div></div><span class="decision '+cls+'">'+esc(p.recommendation||'PASS')+'</span></div>'+
     '<div class="scorebox"><div><div class="score-label">'+esc(label)+' line</div><div class="score">'+esc(p.line)+'</div></div><div class="game-status">Over '+esc(odds(p.overOdds??p.over_odds))+'<br>Under '+esc(odds(p.underOdds??p.under_odds))+'</div></div>'+expectedMinutesHtml(p)+
     '<div class="statline"><div class="mini"><div class="mini-label">Our projection</div><div class="mini-value">'+num(p.projection,2)+'</div><div class="mini-label">'+esc(p.sample_label||'Game-log sample')+'</div></div><div class="mini"><div class="mini-label">Over / Under / Push</div><div class="mini-value">'+num(p.over_probability,1)+'% / '+num(p.under_probability,1)+'%</div><div class="mini-label">Push '+num(p.push_probability,1)+'%</div></div></div>'+sideValueHtml(p)+liveTickerHtml(p)+
     '<div class="card-bottom" style="font-size:1.08em;padding:12px;border:2px solid currentColor;border-radius:10px;margin:10px 0"><b>'+esc(action)+'</b></div>'+
