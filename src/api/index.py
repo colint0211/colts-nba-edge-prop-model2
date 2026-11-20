@@ -2822,8 +2822,7 @@ def _revalidate_frozen_market_candidates(market, candidates, injury_feed):
         if key not in selected_keys and p.get("negative_review") is None:
             p["negative_review"]={"status":"not_reviewed","reason":"Not selected for targeted post-selection review"}
     for rank,p in enumerate(selected,1): p["selection_rank"]=rank
-    if selected:
-        # Do not append replacement picks to the legacy per-market Top 5 ledger.
+    # Do not append replacement picks to the legacy per-market Top 5 ledger.
     ordered.sort(key=lambda p: (0 if (_norm_player_name(p.get("player")),str(p.get("game") or "").casefold()) in selected_keys else 1,-float(p.get("expected_value_pct") or -1e9)))
     return ordered
 
