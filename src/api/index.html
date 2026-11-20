@@ -255,7 +255,9 @@ async function load(refresh=false){
       simulations:p.simulations
     })).filter(p=>p.player&&p.line!=null);
     await loadCustomLines();data=board.daily_frozen?data:await applySavedOverrides(data,'points');
-    dailyFrozenMarkets.points=Boolean(board.daily_frozen);
+    const currentSlateDate=localDateKey(new Date());
+    if(dailyBoardDate!==currentSlateDate){dailyBoardDate=currentSlateDate;dailyFrozenMarkets={points:false,threes:false};bpCache={};}
+    dailyFrozenMarkets.points=Boolean(board.daily_frozen&&board.daily_slate_date===currentSlateDate);
     await loadBP('threes');
     maybeRecordDailyTopThree();
     el('ng').textContent=schedule.schedule_game_count??'—';
@@ -516,7 +518,7 @@ async function loadBP(m){
     if(!r.ok)throw Error(d.detail||d.error||'Proprietary model request failed');
     const normalizedRows=(d.props||[]).map(p=>({...p,overOdds:p.over_odds,underOdds:p.under_odds,ev:p.expected_value_pct==null?null:Number(p.expected_value_pct)/100,expected_value_pct:p.expected_value_pct??p.expected_profit_per_100??null,expected_profit_per_100:p.expected_profit_per_100??p.expected_value_pct??null,model_status:'projected',best_side:String(p.best_side||'').toUpperCase(),best_probability:p.best_probability,market:m,simulations:p.simulations})).filter(p=>p.player&&p.line!=null);
     bpCache[m]=d.daily_frozen?normalizedRows:await applySavedOverrides(normalizedRows,m);
-    dailyFrozenMarkets[m]=Boolean(d.daily_frozen);
+    dailyFrozenMarkets[m]=Boolean(d.daily_frozen&&d.daily_slate_date===localDateKey(new Date()));
     bpLoading[m]=false;render();renderFull();
     maybeRecordDailyTopThree();
   }catch(e){bpLoading[m]=false;bpCache[m]={error:e.message};render();renderFull()}
@@ -636,7 +638,7 @@ function render(){
 }
 function renderFull(){ return; }
 let pastPlayRows=[],dailyTop3Metrics={};
-let dailyFrozenMarkets={points:false,threes:false},dailyTop3SaveDate='';
+let dailyFrozenMarkets={points:false,threes:false},dailyTop3SaveDate='',dailyBoardDate='';
 function localDateKey(date){
   const y=date.getFullYear(),m=String(date.getMonth()+1).padStart(2,'0'),d=String(date.getDate()).padStart(2,'0');
   return y+'-'+m+'-'+d;
@@ -650,7 +652,7 @@ async function recordDailyTopThree(rows,slateDate){
 }
 function maybeRecordDailyTopThree(){
   const slateDate=localDateKey(new Date());
-  if(dailyTop3SaveDate===slateDate||!dailyFrozenMarkets.points||!dailyFrozenMarkets.threes)return;
+  if(dailyTop3SaveDate===slateDate||dailyBoardDate!==slateDate||!dailyFrozenMarkets.points||!dailyFrozenMarkets.threes)return;
   const picks=allModelEV().slice(0,3);
   // Do not backfill today's official record from a frozen board created with
   // the old sportsbook-blended probabilities. New official picks must use
