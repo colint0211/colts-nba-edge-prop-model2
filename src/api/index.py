@@ -1179,7 +1179,7 @@ def _player_ppp_context(athlete_id, matchup, projected_minutes=None):
             for row in records:
                 event = str(row.get("event_id") or "").strip()
                 date = str(row.get("date") or "")[:10]
-                identity = ("event", event) if event else (("date", date) if date else None)
+                identity = ("date", date) if date else (("event", event) if event else None)
                 if identity:
                     indexed[identity] = row.get("value")
             maps[key] = indexed
