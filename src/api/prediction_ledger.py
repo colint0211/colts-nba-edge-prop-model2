@@ -805,7 +805,7 @@ def save_daily_top_three(rows, slate_date):
     """Save the first immutable Top 3 overall across points and threes for a slate."""
     import re
     slate_date = str(slate_date or "").strip()
-    if not re.fullmatch(r"\\d{4}-\\d{2}-\\d{2}", slate_date):
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", slate_date):
         raise ValueError("Invalid slate date")
 
     with _connect() as conn:
