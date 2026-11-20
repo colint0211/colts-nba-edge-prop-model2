@@ -2331,7 +2331,7 @@ def _propline_market_props(events, market):
             if not isinstance(bookmaker, dict):
                 continue
             bookmaker_key = str(bookmaker.get("key") or "").lower()
-            if bookmaker_key not in ("draftkings", "fanduel"):
+            if bookmaker_key != "draftkings":
                 continue
             for market_row in bookmaker.get("markets") or []:
                 if not isinstance(market_row, dict) or market_row.get("key") != market_key:
@@ -2562,7 +2562,7 @@ def _post_selection_negative_review(prop, market, injury_feed):
                 "under_probability": under_raw / mass,
                 "over_odds": over_odds,
                 "under_odds": under_odds,
-                "books_used": prop.get("market_books") or ["DraftKings/FanDuel via PropLine"],
+                "books_used": prop.get("market_books") or ["DraftKings via PropLine"],
                 "over_book": "PropLine",
                 "under_book": "PropLine",
             }
@@ -2996,7 +2996,7 @@ def proprietary_market_board(market: str = "points"):
                     "athlete_id": athlete_id,
                     "games_used": len(values),
                     "event_id": raw.get("event_id"),
-                    "line_source": "DraftKings/FanDuel via PropLine",
+                    "line_source": "DraftKings via PropLine",
                     "line_updated_at": raw.get("last_update"),
                     "bookmaker_link": raw.get("bookmaker_link"),
                     "market_books": raw.get("market_books") or ["Sportsbook"],
@@ -3037,8 +3037,8 @@ def proprietary_market_board(market: str = "points"):
         pass
     result = {
         "market": market,
-        "source": "ESPN game-log distribution + DraftKings/FanDuel odds via PropLine",
-        "blend": "Independent proprietary probability; DraftKings/FanDuel prices used only for EV and market-relative edge",
+        "source": "ESPN game-log distribution + DraftKings odds via PropLine",
+        "blend": "Independent proprietary probability; DraftKings prices used only for EV; proprietary probabilities remain independent",
         "line_count": len(props),
         "projected_count": len(output),
         "props": output,
