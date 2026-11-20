@@ -196,7 +196,9 @@ function isEligibleEV(p){
   const reviewPassed=p.post_selection_reviewed===true&&p.negative_review
     &&['clear','under_value'].includes(p.negative_review.status);
   const ev=Number(p.expected_value_pct??p.expected_profit_per_100);
-  return reviewPassed&&sample>=8&&Number.isFinite(ev)&&ev>0
+  const odds=Number(p.best_odds);
+  const pricePass=Number.isFinite(odds)&&odds!==0&&(odds>0||odds>=-190);
+  return reviewPassed&&sample>=8&&Number.isFinite(ev)&&ev>0&&pricePass
     &&!p.injury_blocked&&!p.injury_flag
     &&(p.best_side==='OVER'||p.best_side==='UNDER');
 }
