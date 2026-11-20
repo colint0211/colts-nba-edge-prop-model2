@@ -172,6 +172,8 @@ def save_predictions(rows, market=None):
                 ]
                 if prediction.get("daily_top5"):
                     identity_parts.extend(["daily_top5", str(prediction.get("slate_date") or "")])
+                if prediction.get("daily_top3"):
+                    identity_parts.extend(["daily_top3", str(prediction.get("slate_date") or "")])
             identity = "|".join(identity_parts)
             fingerprint = hashlib.sha256(identity.encode("utf-8")).hexdigest()
             snapshot = json.dumps(
@@ -796,4 +798,134 @@ def get_daily_slate(market, slate_date):
         "market": market, "slate_date": slate_date,
         "candidates": candidates if isinstance(candidates, list) else [],
         "created_at": row[1].isoformat() if row[1] else None,
+    }
+
+
+def save_daily_top_three(rows, slate_date):
+    """Save the first immutable Top 3 overall across points and threes for a slate."""
+    import re
+    slate_date = str(slate_date or "").strip()
+    if not re.fullmatch(r"\\d{4}-\\d{2}-\\d{2}", slate_date):
+        raise ValueError("Invalid slate date")
+
+    with _connect() as conn:
+        existing = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM nba_predictions
+            WHERE snapshot->>'daily_top3'='true'
+              AND snapshot->>'slate_date'=%s
+              AND market IN ('points', 'threes')
+            """,
+            (slate_date,),
+        ).fetchone()[0]
+    if existing:
+        return {"saved": 0, "skipped": len(rows or []), "already_saved": True, "filled": existing}
+
+    selected = []
+    seen = set()
+    for rank, row in enumerate((rows or [])[:3], 1):
+        if not isinstance(row, dict):
+            continue
+        item = dict(row)
+        market = str(item.get("market") or "").strip().lower()
+        player = str(item.get("player") or "").strip()
+        event = str(item.get("event_id") or item.get("game_id") or item.get("game") or "").strip()
+        key = (market, player.casefold(), event.casefold())
+        if market not in ("points", "threes") or not player or key in seen:
+            continue
+        item["market"] = market
+        item["daily_top3"] = True
+        item["daily_top3_rank"] = rank
+        item["slate_date"] = slate_date
+        selected.append(item)
+        seen.add(key)
+
+    result = save_predictions(selected)
+    result["already_saved"] = False
+    result["filled"] = result.get("saved", 0)
+    return result
+
+
+def list_daily_top_three(slate_date, market="all"):
+    clauses = [
+        "snapshot->>'daily_top3'='true'",
+        "snapshot->>'slate_date'=%s",
+        "market IN ('points', 'threes')",
+    ]
+    args = [str(slate_date)]
+    if market and market != "all":
+        clauses.append("market=%s")
+        args.append(market)
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, market, player, team, event, line, side, odds,
+                   blended_probability, projection, created_at,
+                   outcome, actual_value, profit_units, snapshot
+            FROM nba_predictions
+            WHERE """ + " AND ".join(clauses) + """
+            ORDER BY COALESCE((snapshot->>'daily_top3_rank')::int, 99), id
+            """,
+            args,
+        ).fetchall()
+    output = []
+    for row in rows:
+        snapshot = row[14]
+        if isinstance(snapshot, str):
+            try:
+                snapshot = json.loads(snapshot)
+            except (TypeError, ValueError):
+                snapshot = {}
+        output.append({
+            "id": row[0], "market": row[1], "player": row[2], "team": row[3],
+            "game": row[4], "line": row[5], "side": row[6], "odds": row[7],
+            "probability_pct": round(row[8] * 100, 2), "projection": row[9],
+            "created_at": row[10].isoformat() if row[10] else None,
+            "outcome": row[11], "actual_value": row[12], "profit_units": row[13],
+            "slate_date": str(slate_date),
+            "daily_top3_rank": snapshot.get("daily_top3_rank") if isinstance(snapshot, dict) else None,
+        })
+    return output
+
+
+def daily_top_three_metrics():
+    with _connect() as conn:
+        totals = conn.execute(
+            """
+            SELECT COUNT(*), COUNT(*) FILTER (WHERE outcome='WIN'),
+                   COUNT(*) FILTER (WHERE outcome='LOSS'),
+                   COUNT(*) FILTER (WHERE outcome='PUSH'),
+                   COALESCE(SUM(profit_units), 0)
+            FROM nba_predictions
+            WHERE snapshot->>'daily_top3'='true'
+              AND settled_at IS NOT NULL
+              AND market IN ('points', 'threes')
+            """
+        ).fetchone()
+        markets = conn.execute(
+            """
+            SELECT market, COUNT(*) FILTER (WHERE outcome='WIN'),
+                   COUNT(*) FILTER (WHERE outcome='LOSS'),
+                   COUNT(*) FILTER (WHERE outcome='PUSH'),
+                   COALESCE(SUM(profit_units), 0)
+            FROM nba_predictions
+            WHERE snapshot->>'daily_top3'='true' AND settled_at IS NOT NULL
+            GROUP BY market ORDER BY market
+            """
+        ).fetchall()
+    total, wins, losses, pushes, profit = totals
+    decisions = wins + losses
+    return {
+        "settled": total, "wins": wins, "losses": losses, "pushes": pushes,
+        "win_rate_pct": round(wins / decisions * 100, 1) if decisions else None,
+        "net_units": round(float(profit or 0), 2),
+        "by_market": {
+            name: {
+                "wins": mw, "losses": ml, "pushes": mp, "settled": mw + ml + mp,
+                "win_rate_pct": round(mw / (mw + ml) * 100, 1) if mw + ml else None,
+                "net_units": round(float(mpft or 0), 2),
+            }
+            for name, mw, ml, mp, mpft in markets
+        },
     }
