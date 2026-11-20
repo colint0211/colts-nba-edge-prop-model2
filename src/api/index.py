@@ -2737,7 +2737,7 @@ def _snapshot_daily_market_top5(market, props):
                     if side in ("OVER", "UNDER") and line is not None
                     else "NO PLAY"
                 )
-            prediction_ledger.save_daily_top_five(selected, market, slate_date)
+            # Official tracking is now the three best plays across both active markets.
             # Keep selected picks first in the frozen board; leave the remaining
             # market candidates available as a replacement audit trail.
             selected_keys = {
@@ -2823,7 +2823,7 @@ def _revalidate_frozen_market_candidates(market, candidates, injury_feed):
             p["negative_review"]={"status":"not_reviewed","reason":"Not selected for targeted post-selection review"}
     for rank,p in enumerate(selected,1): p["selection_rank"]=rank
     if selected:
-        prediction_ledger.save_daily_top_five(selected,market,_active_nba_slate_date())
+        # Do not append replacement picks to the legacy per-market Top 5 ledger.
     ordered.sort(key=lambda p: (0 if (_norm_player_name(p.get("player")),str(p.get("game") or "").casefold()) in selected_keys else 1,-float(p.get("expected_value_pct") or -1e9)))
     return ordered
 
@@ -4103,6 +4103,33 @@ def get_daily_top5(slate_date: str, market: str = "all"):
         })
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Daily Top 5 history is temporarily unavailable.") from exc
+
+
+@app.post("/api/model/daily-top3")
+async def save_daily_top3(request: FastRequest):
+    try:
+        payload = await request.json()
+        prediction_ledger.initialize()
+        result = prediction_ledger.save_daily_top_three(
+            payload.get("props") or [], payload.get("slate_date")
+        )
+        return JSONResponse(result)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Could not save daily Top 3 picks.") from exc
+
+
+@app.get("/api/model/daily-top3")
+def get_daily_top3(slate_date: str, market: str = "all"):
+    try:
+        prediction_ledger.initialize()
+        return JSONResponse({
+            "predictions": prediction_ledger.list_daily_top_three(slate_date, market),
+            "all_time": prediction_ledger.daily_top_three_metrics(),
+        })
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Daily Top 3 history is temporarily unavailable.") from exc
 
 
 @app.get("/api/model/ledger")
