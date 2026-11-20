@@ -1481,7 +1481,15 @@ def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, ma
     if positional_discrepancy is not None and long_mean > 0:
         directional_discrepancy_pct = (positional_discrepancy / long_mean * 100.0) * (1.0 if selected_side == "OVER" else -1.0 if selected_side == "UNDER" else 0.0)
         matchup_grade = max(0.0, min(100.0, 50.0 + directional_discrepancy_pct * 2.5))
-    form_grade = max(0.0, min(100.0, 50.0 + ((recent5_mean - long_mean) / max(long_mean, 0.1)) * 250.0))
+    if market == "points" and isinstance(ppp_context, dict) and ppp_context.get("ppp_history"):
+        ppp_history = ppp_context["ppp_history"]
+        ppp_recent = sum(ppp_history[-5:]) / len(ppp_history[-5:])
+        ppp_long = sum(ppp_history) / len(ppp_history)
+        form_grade = max(0.0, min(100.0, 50.0 + ((ppp_recent - ppp_long) / max(ppp_long, 0.01)) * 250.0))
+    else:
+        ppp_recent = None
+        ppp_long = None
+        form_grade = max(0.0, min(100.0, 50.0 + ((recent5_mean - long_mean) / max(long_mean, 0.1)) * 250.0))
     minutes_grade = max(0.0, min(100.0, 50.0 + (minute_factor - 1.0) * 250.0))
     pace_ratio = (team_context_adjustment or {}).get("pace_ratio") if isinstance(team_context_adjustment, dict) else None
     try:
@@ -1531,7 +1539,10 @@ def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, ma
         "opponent_defense_factor": round(float(ppp_context["opponent_defense_factor"]), 4) if market == "points" and ppp_context else None,
         "ppp_expected_points": round(float(ppp_context["expected_points"]), 2) if market == "points" and ppp_context else None,
         "ppp_sample_size": ppp_context.get("sample_size") if market == "points" and ppp_context else None,
-        "ppp_method": ppp_context.get("method") if market == "points" and ppp_context else None
+        "ppp_method": ppp_context.get("method") if market == "points" and ppp_context else None,
+        "recent5_ppp": round(ppp_recent, 4) if market == "points" and ppp_recent is not None else None,
+        "long_run_ppp": round(ppp_long, 4) if market == "points" and ppp_long is not None else None,
+        "historical_points_mean_for_variance_only": round(long_mean, 2) if market == "points" else None
     }
 
 _BP_OFFERS_CACHE = {}
@@ -2251,10 +2262,18 @@ def _post_selection_negative_review(prop, market, injury_feed):
         adjusted_values = [max(0.0, float(value) * factor) for value in values]
         over_odds = prop.get("over_odds")
         under_odds = prop.get("under_odds")
+        ppp_context = None
+        if market == "points":
+            adjusted_minutes = (recent_median * factor) if recent_median is not None else None
+            ppp_context = _player_ppp_context(athlete_id, prop.get("game"), adjusted_minutes)
+            ppp_context = _apply_opponent_defensive_ppp(ppp_context, prop.get("team"), prop.get("game")) if ppp_context else None
+            if not ppp_context:
+                prop["negative_review"] = {"status": "inconclusive", "reason": "PPP workload recalculation unavailable; no PPG fallback permitted"}
+                return False, prop["negative_review"]["reason"]
         adjusted = _simulate_market(
             adjusted_values, float(prop.get("line")), over_odds, under_odds,
             _norm_player_name(prop.get("player")) + market + "negative-review",
-            minutes=[], market=market, matchup_adjustment=None,
+            minutes=[], market=market, matchup_adjustment=None, ppp_context=ppp_context,
         )
         if adjusted and over_odds is not None and under_odds is not None:
             adjusted = _apply_historical_calibration(adjusted, market)
