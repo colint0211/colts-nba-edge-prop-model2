@@ -1053,7 +1053,9 @@ def _gamelog_records(athlete_id, field, label, season):
         if idx < 0 or idx >= len(stats):
             continue
         raw = str(stats[idx]).replace(",", "").strip()
-        if field == "threePointsMade" and "-" in raw:
+        if field in ("fieldGoalsAttempted", "freeThrowsAttempted") and "-" in raw:
+            raw = raw.split("-", 1)[1].strip()
+        elif field in ("fieldGoalsMade", "freeThrowsMade", "threePointsMade") and "-" in raw:
             raw = raw.split("-", 1)[0].strip()
         try:
             value = float(raw)
@@ -1164,8 +1166,10 @@ def _player_history(athlete_id, field, label):
 
 def _player_ppp_context(athlete_id, matchup, projected_minutes=None):
     """Build points projection from player PPP and used possessions, not PPG."""
-    fields = (("points", "PTS", "points"), ("fieldGoalsAttempted", "FGA", "fga"),
-              ("freeThrowsAttempted", "FTA", "fta"), ("turnovers", "TO", "turnovers"),
+    # ESPN's gamelog exposes attempts inside the FG / FT made-attempted
+    # composite fields (for example, "12-24"), not standalone FGA / FTA labels.
+    fields = (("points", "PTS", "points"), ("fieldGoalsAttempted", "FG", "fga"),
+              ("freeThrowsAttempted", "FT", "fta"), ("turnovers", "TO", "turnovers"),
               ("minutes", "MIN", "minutes"))
     season_rows = {}
     for season in (2027, 2026):
