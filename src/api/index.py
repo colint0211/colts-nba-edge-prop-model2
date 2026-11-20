@@ -1405,27 +1405,35 @@ def _team_factor_prop_adjustment(player_team, game, market):
 
 
 def _apply_directional_play_grade(model):
-    """Grade the matchup in the direction of the selected side after odds are blended."""
+    """Grade a quoted play; use a neutral matchup score when positional defense is unavailable."""
     if not isinstance(model, dict):
         return model
     defense = model.get("defense_vs_position") or {}
     discrepancy_pct = defense.get("player_vs_allowed_pct")
     side = str(model.get("best_side") or "").upper()
-    if discrepancy_pct is None or side not in ("OVER", "UNDER"):
+    if side not in ("OVER", "UNDER"):
         model["matchup_grade"] = None
         model["play_grade"] = None
         return model
     try:
-        directional = float(discrepancy_pct) * (1.0 if side == "OVER" else -1.0)
-        matchup_grade = max(0.0, min(100.0, 50.0 + directional * 2.5))
+        # Missing positional-defense data must not silently disqualify every play.
+        # A neutral 50 is used only for the unavailable component; all other
+        # independent form, minutes and pace grades remain active.
+        if discrepancy_pct is None:
+            directional = None
+            matchup_grade = 50.0
+        else:
+            directional = float(discrepancy_pct) * (1.0 if side == "OVER" else -1.0)
+            matchup_grade = max(0.0, min(100.0, 50.0 + directional * 2.5))
         form_grade = float(model.get("form_grade") if model.get("form_grade") is not None else 50.0)
         minutes_grade = float(model.get("minutes_grade") if model.get("minutes_grade") is not None else 50.0)
         pace_grade = float(model.get("pace_grade") if model.get("pace_grade") is not None else 50.0)
-        model["directional_discrepancy_pct"] = round(directional, 2)
+        model["directional_discrepancy_pct"] = round(directional, 2) if directional is not None else None
         model["matchup_grade"] = round(matchup_grade, 1)
         model["play_grade"] = round(0.50 * matchup_grade + 0.25 * form_grade + 0.15 * minutes_grade + 0.10 * pace_grade, 1)
+        model["play_grade_note"] = "Neutral matchup component used because positional defense data was unavailable." if discrepancy_pct is None else "Directional positional-defense matchup grade applied."
     except (TypeError, ValueError, OverflowError):
-        model["matchup_grade"] = None
+        model["matchup_grade"] = 50.0
         model["play_grade"] = None
     return model
 
