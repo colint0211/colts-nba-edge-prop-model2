@@ -1411,7 +1411,14 @@ def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, ma
             weighted_minutes = sum(float(row["minutes"])*w for row,w in zip(valid_ppp,ppp_weights))
             weighted_used_per_min = weighted_possessions / weighted_minutes if weighted_minutes > 0 else 0.0
             player_ppp = weighted_points / weighted_possessions if weighted_possessions > 0 else 0.0
-            expected_used = projected_min * weighted_used_per_min
+            pace_volume_factor = 1.0
+            if isinstance(team_context_adjustment, dict) and team_context_adjustment.get("available"):
+                try:
+                    pace_ratio = float(team_context_adjustment.get("pace_ratio") or 1.0)
+                    pace_volume_factor = max(0.94, min(1.06, 1.0 + 0.10 * (pace_ratio - 1.0)))
+                except (TypeError, ValueError, OverflowError):
+                    pace_volume_factor = 1.0
+            expected_used = projected_min * weighted_used_per_min * pace_volume_factor
             positional_factor = 1.0
             if isinstance(matchup_adjustment, dict) and matchup_adjustment.get("available"):
                 allowed, league_pos = matchup_adjustment.get("allowed_per_100_possessions"), matchup_adjustment.get("league_position_average_per_100")
@@ -1448,6 +1455,7 @@ def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, ma
                     "expected_player_possessions_used": round(expected_used, 2),
                     "possessions_used_formula": "FGA + 0.44*FTA + turnovers",
                     "possessions_rate_per_minute": round(weighted_used_per_min, 4),
+                    "pace_volume_factor": round(pace_volume_factor, 4),
                     "ppp_sample_games": len(valid_ppp), "ppp_positional_factor": round(positional_factor, 4),
                     "ppp_team_efficiency_factor": round(team_efficiency_factor, 4),
                 }
@@ -1494,7 +1502,7 @@ def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, ma
             matchup_factor = 1.0
 
     team_context_factor = 1.0
-    if isinstance(team_context_adjustment, dict) and team_context_adjustment.get("available"):
+    if not ppp_mode and isinstance(team_context_adjustment, dict) and team_context_adjustment.get("available"):
         try:
             candidate=float(team_context_adjustment.get("factor",1.0))
             if math.isfinite(candidate):
@@ -3039,7 +3047,7 @@ def _revalidate_frozen_market_candidates(market, candidates, injury_feed):
     return ordered
 
 @app.get("/api/proprietary-market-board")
-def proprietary_market_board(market: str = "points"):
+def proprietary_market_board(market: str = "points", rebuild_ppp: bool = False):
     market = market.lower().strip()
     if market not in ACTIVE_PROP_MARKETS:
         raise HTTPException(status_code=404, detail="Active model markets are points and threes.")
@@ -3053,7 +3061,7 @@ def proprietary_market_board(market: str = "points"):
         frozen_slate = prediction_ledger.get_daily_slate(market, today_et)
     except Exception:
         frozen_slate = None
-    if frozen_slate and frozen_slate.get("candidates"):
+    if frozen_slate and frozen_slate.get("candidates") and not rebuild_ppp:
         frozen_props = [dict(p) for p in (frozen_slate.get("candidates") or []) if isinstance(p, dict)]
         # Re-run today's targeted injury/workload gate even for an already-frozen
         # snapshot. The original source lines remain intact; unsafe picks are
@@ -3078,7 +3086,7 @@ def proprietary_market_board(market: str = "points"):
             "injury_feed": injury_feed.get("meta", {}),
             "balldontlie": {key: value for key, value in bdl_games.items() if key != "games"},
         })
-    if cached_board and now - cached_board[0] < _BP_BOARD_TTL_SECONDS:
+    if cached_board and now - cached_board[0] < _BP_BOARD_TTL_SECONDS and not rebuild_ppp:
         cached_result = _json_safe(cached_board[1])
         for cached_prop in cached_result.get("props") or []:
             _apply_balldontlie_game(cached_prop, bdl_games)
@@ -3205,7 +3213,10 @@ def proprietary_market_board(market: str = "points"):
         pass
     result = {
         "market": market,
-        "source": "ESPN game-log distribution + DraftKings-only odds via PropLine",
+        "source": "ESPN player possession PPP + 3PM count-rate model; DraftKings-only prices via PropLine",
+        "rebuild_ppp": bool(rebuild_ppp),
+        "ppp_verified_count": sum(1 for row in output if market == "points" and isinstance(row.get("ppp_calculation"), dict)),
+        "ppp_missing_count": sum(1 for row in output if market == "points" and not isinstance(row.get("ppp_calculation"), dict)),
         "blend": "Independent proprietary probability; DraftKings/FanDuel prices used only for EV and market-relative edge",
         "line_count": len(props),
         "projected_count": len(output),
@@ -3217,7 +3228,7 @@ def proprietary_market_board(market: str = "points"):
         "injury_feed": injury_feed.get("meta", {}),
         "balldontlie": {key: value for key, value in bdl_games.items() if key != "games"},
     }
-    frozen_candidates = _snapshot_daily_market_top5(market, output)
+    frozen_candidates = None if rebuild_ppp else _snapshot_daily_market_top5(market, output)
     if frozen_candidates is not None:
         result["props"] = frozen_candidates
         result["line_count"] = len(frozen_candidates)
