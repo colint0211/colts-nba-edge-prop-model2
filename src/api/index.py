@@ -1428,8 +1428,6 @@ def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, ma
                     raw_factor = float(team_context_adjustment.get("factor") or 1.0)
                     pace_factor = 1.0 + 0.10 * (pace_ratio - 1.0)
                     team_efficiency_factor = max(0.94, min(1.06, raw_factor / pace_factor if pace_factor > 0 else 1.0))
-                    if ratio > 0:
-                        team_efficiency_factor = max(0.94, min(1.06, 0.5 * team_efficiency_factor + 0.5 * (1.0 + 0.20 * (ratio - 1.0))))
                 except (TypeError, ValueError, OverflowError):
                     team_efficiency_factor = 1.0
             adjusted_ppp = player_ppp * positional_factor * team_efficiency_factor
@@ -2544,8 +2542,9 @@ def _post_selection_negative_review(prop, market, injury_feed):
         adjusted = _simulate_market(
             adjusted_values, float(prop.get("line")), over_odds, under_odds,
             _norm_player_name(prop.get("player")) + market + "negative-review",
-            minutes=[], market=market, matchup_adjustment=None,
-            ppp_history=[dict(row, points=float(row["points"])*factor) for row in _player_possession_history(athlete_id)[0]] if market == "points" else None,
+            minutes=[float(row["minutes"])*factor for row in _player_possession_history(athlete_id)[0]] if market == "points" else [],
+            market=market, matchup_adjustment=None,
+            ppp_history=[dict(row, points=float(row["points"])*factor, minutes=float(row["minutes"])*factor) for row in _player_possession_history(athlete_id)[0]] if market == "points" else None,
         )
         if adjusted and over_odds is not None and under_odds is not None:
             adjusted = _apply_historical_calibration(adjusted, market)
