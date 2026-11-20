@@ -1884,6 +1884,7 @@ def _propline_market_props(events, market):
                         "player": player_text,
                         "team": team,
                         "game": matchup,
+                        "commence_time": event.get("commence_time"),
                         "event_id": event_id,
                         "line": point,
                         "over_odds": None,
@@ -1920,6 +1921,42 @@ def _propline_market_props(events, market):
         output.append(row)
     output.sort(key=lambda row: (row.get("game") or "", row.get("player") or ""))
     return output
+
+
+def _filter_props_for_slate(props, slate_date, now_utc=None):
+    """Keep only props for future games on the requested Eastern slate date.
+
+    PropLine can retain markets for yesterday's games in its response. A quote
+    timestamp alone does not prove that its game is still pregame, so missing,
+    malformed, past, or wrong-date commence times are rejected.
+    """
+    slate_date = str(slate_date or "").strip()
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", slate_date):
+        return []
+    now_utc = now_utc or datetime.now(timezone.utc)
+    if now_utc.tzinfo is None:
+        now_utc = now_utc.replace(tzinfo=timezone.utc)
+    now_utc = now_utc.astimezone(timezone.utc)
+    filtered = []
+    for prop in props or []:
+        if not isinstance(prop, dict):
+            continue
+        raw_start = prop.get("commence_time")
+        if not raw_start:
+            continue
+        try:
+            start = datetime.fromisoformat(str(raw_start).strip().replace("Z", "+00:00"))
+            if start.tzinfo is None:
+                continue
+            start_utc = start.astimezone(timezone.utc)
+            if start_utc <= now_utc:
+                continue
+            if start_utc.astimezone(ZoneInfo("America/New_York")).date().isoformat() != slate_date:
+                continue
+        except (TypeError, ValueError, OverflowError):
+            continue
+        filtered.append(prop)
+    return filtered
 
 
 def _propline_quote(prop):
@@ -2259,6 +2296,11 @@ def _snapshot_daily_market_top5(market, props):
             return existing_slate["candidates"]
         if now_et.hour < 7:
             return None
+        props = _filter_props_for_slate(
+            props, slate_date, now_et.astimezone(timezone.utc)
+        )
+        if not props:
+            return None
         calibration_rows = []
         for prop in props or []:
             if not isinstance(prop, dict) or prop.get("best_side") not in ("OVER", "UNDER"):
@@ -2283,7 +2325,7 @@ def _snapshot_daily_market_top5(market, props):
         for item in ordered:
             _apply_projection_side_guard(item)
         if not ordered:
-            return []
+            return None
         frozen = prediction_ledger.freeze_daily_slate(market, slate_date, ordered)
         candidates = [dict(p) for p in (frozen.get("candidates") or []) if isinstance(p, dict)]
         injury_feed = _load_official_injury_feed()
@@ -2491,6 +2533,11 @@ def proprietary_market_board(market: str = "rebounds"):
         })
     if cached_board and now - cached_board[0] < _BP_BOARD_TTL_SECONDS:
         cached_result = _json_safe(cached_board[1])
+        cached_result["props"] = _filter_props_for_slate(
+            cached_result.get("props") or [], today_et
+        )
+        cached_result["line_count"] = len(cached_result["props"])
+        cached_result["projected_count"] = len(cached_result["props"])
         for cached_prop in cached_result.get("props") or []:
             _apply_projection_side_guard(cached_prop)
             _apply_balldontlie_game(cached_prop, bdl_games)
@@ -2505,7 +2552,9 @@ def proprietary_market_board(market: str = "rebounds"):
         return JSONResponse(cached_result)
 
     events, props_source, quota = _propline_fetch_events()
-    props = _propline_market_props(events, market)
+    props = _filter_props_for_slate(
+        _propline_market_props(events, market), today_et
+    )
     field, label = STAT_FIELDS[market]
     output, failures = [], []
     for raw in props:
@@ -2587,6 +2636,7 @@ def proprietary_market_board(market: str = "rebounds"):
                 "athlete_id": athlete_id,
                 "games_used": len(values),
                 "event_id": raw.get("event_id"),
+                "commence_time": raw.get("commence_time"),
                 "line_source": "DraftKings/FanDuel via PropLine",
                 "line_updated_at": raw.get("last_update"),
                 "bookmaker_link": raw.get("bookmaker_link"),
