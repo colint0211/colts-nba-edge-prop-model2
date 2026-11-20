@@ -2,7 +2,7 @@
 :root{color-scheme:dark;--bg:#07111f;--panel:#101d30;--panel2:#14243a;--line:#263a53;--text:#eff6ff;--muted:#9aacc3;--green:#47e0a1;--red:#ff7e8a;--gold:#ffd27a}*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at top,#132b46 0%,var(--bg) 55%);color:var(--text);font:14px/1.45 system-ui,-apple-system,Segoe UI,sans-serif}header{padding:24px clamp(14px,4vw,42px);background:rgba(8,18,32,.86);border-bottom:1px solid var(--line)}main{max-width:1440px;margin:auto;padding:22px clamp(12px,3vw,30px) 44px}.headrow{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap}h1{font-size:clamp(23px,4vw,34px);letter-spacing:-.7px;margin:0;font-weight:850}.brand{color:var(--green)}p,.muted,small{color:var(--muted)}.bar,.controls,.tabs{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin:16px 0}.pill,button,input,select{padding:10px 12px;background:var(--panel2);color:inherit;border:1px solid var(--line);border-radius:10px}button{cursor:pointer;font-weight:750}button:hover{border-color:var(--green)}button.active{background:#123c32;border-color:#2d9876;color:var(--green)}.statuspill{border-radius:999px;padding:7px 11px;background:#102b2a;border:1px solid #215b50;color:var(--green);font-size:12px;font-weight:800}.statrow{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:11px}.stat{padding:15px;background:linear-gradient(145deg,#14243a,#0e1a2c);border:1px solid var(--line);border-radius:15px}.statlabel{color:var(--muted);font-size:12px}.num{font-size:27px;font-weight:850;margin-top:3px}.sectiontitle{font-size:19px;font-weight:850;margin:25px 0 5px}.sectionhint{color:var(--muted);font-size:12px;margin-bottom:12px}.games{display:flex;flex-wrap:wrap;gap:7px}.game{padding:7px 10px;border:1px solid var(--line);border-radius:9px;background:#0f1d30;color:#dbe8f9;font-size:12px}.game.live{border-color:#2c8d6b;background:#102e2a}.controls input{flex:1;min-width:180px}.cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:13px}.player-card{min-width:0;padding:16px;background:linear-gradient(145deg,#14253b,#0c1828);border:1px solid var(--line);border-radius:16px;box-shadow:0 10px 30px #0002;position:relative;overflow:hidden}.player-card:before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:#38506d}.player-card.value:before{background:var(--green)}.player-top{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.player-name{font-size:17px;font-weight:850;line-height:1.2}.matchup{font-size:12px;color:var(--muted);margin-top:5px}.decision{font-size:10px;font-weight:850;letter-spacing:.4px;border-radius:999px;padding:5px 8px;background:#27354a;color:#dce7f5;white-space:nowrap}.decision.value{background:#103c30;color:var(--green)}.decision.lean{background:#3b3020;color:var(--gold)}.decision.pass{background:#3b2029;color:var(--red)}.scorebox{display:flex;justify-content:space-between;align-items:center;gap:10px;margin:15px 0 12px;padding:11px 12px;background:#091625;border:1px solid #20354d;border-radius:12px}.score-label{font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);font-weight:850}.score{font-size:16px;font-weight:900;white-space:nowrap}.game-status{font-size:11px;color:var(--muted);text-align:right}.live-dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--green);margin-right:5px;vertical-align:middle}.statline{display:grid;grid-template-columns:1fr 1fr;gap:10px}.mini{background:#15263c;border:1px solid #293e58;border-radius:12px;padding:11px}.mini-label{font-size:11px;color:var(--muted)}.mini-value{font-size:23px;font-weight:900;margin-top:2px}.mini-value span{font-size:12px;color:var(--muted);font-weight:700}.progress{height:5px;border-radius:99px;background:#263950;overflow:hidden;margin-top:8px}.progress>span{display:block;height:100%;background:linear-gradient(90deg,#31c98c,#8af0c5);border-radius:99px;width:0}.card-bottom{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;border-top:1px solid #243850;margin-top:13px;padding-top:11px;font-size:12px;color:var(--muted)}.grade{font-weight:900}.grade.hit{color:var(--green)}.grade.miss{color:var(--red)}.empty{padding:28px;border:1px dashed var(--line);border-radius:14px;text-align:center;color:var(--muted);grid-column:1/-1}.ev{font-size:17px;font-weight:900;color:var(--green)}.footer{font-size:12px;margin-top:22px;color:var(--muted)}@media(max-width:1050px){.cards{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:650px){header{padding:18px 14px}main{padding:16px 11px 32px}.statrow{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.stat{padding:12px}.num{font-size:23px}.cards{grid-template-columns:1fr;gap:10px}.player-card{padding:14px}.sectiontitle{margin-top:20px}.tabs button{flex:1;min-width:28%}}
 .reasoning{margin-top:12px;border:1px solid #2a4058;border-radius:11px;background:#0b1727;padding:10px 12px}.reasoning summary{cursor:pointer;font-weight:800;color:#cde3ff}.reasoning-body{padding-top:9px;color:var(--muted);font-size:12px}.reasoning-body div{margin:5px 0}.reasoning-body b{color:var(--text)}.reason-warning{color:var(--gold)!important}.history-table-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:13px;margin-top:12px}.history-table{width:100%;border-collapse:collapse;min-width:760px;font-size:12px}.history-table th,.history-table td{padding:10px 11px;text-align:left;border-bottom:1px solid #243850;white-space:nowrap}.history-table th{color:var(--muted);font-weight:800;background:#0b1727}.history-table tr:last-child td{border-bottom:0}.history-status{font-weight:900}.history-status.win{color:var(--green)}.history-status.loss{color:var(--red)}.history-status.push{color:var(--gold)}.history-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px;margin:12px 0}.history-summary .stat{padding:11px}.history-summary .num{font-size:21px}.history-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.history-actions input,.history-actions select{min-width:130px}@media(max-width:650px){.history-summary{grid-template-columns:repeat(2,minmax(0,1fr))}}</style></head><body><header><div class="headrow"><div><h1><span class="brand">COLT'S</span> NBA EDGE</h1><p style="margin:6px 0 0">NBA player prop value board · live game scores · live player stats</p></div><span class="statuspill" id="status">LOADING SLATE</span></div><div class="bar"><button class="active" onclick="showYesterdayPlays()">Yesterday’s Plays</button><button onclick="document.getElementById('overallRecordPanel').scrollIntoView({behavior:'smooth',block:'start'})">Overall Record</button><button onclick="load(true)">↻ Refresh board</button><label style="display:flex;gap:7px;align-items:center;color:var(--muted);font-size:12px">Bankroll ($)<input id="bankroll" type="number" min="0" step="1" placeholder="Enter bankroll" style="width:145px" oninput="render();renderFull()"></label><span id="updated" class="muted">Loading today's games…</span><span id="liveUpdated" class="muted"></span></div></header><main>
 <section id="overallRecordPanel" style="margin:0 0 18px;padding:16px;border:2px solid #2d9876;border-radius:16px;background:linear-gradient(135deg,#12352f,#101d30);scroll-margin-top:12px">
-<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><div><div style="font-size:12px;font-weight:900;letter-spacing:1px;color:var(--green)">OFFICIAL ALL-TIME RECORD</div><div class="sectionhint" style="margin:4px 0 0">Settled official Top 5 picks only · pending picks excluded</div></div><button onclick="loadPastPlays()">↻ Update record</button></div>
+<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><div><div style="font-size:12px;font-weight:900;letter-spacing:1px;color:var(--green)">OFFICIAL ALL-TIME RECORD</div><div class="sectionhint" style="margin:4px 0 0">Settled official Top 3 picks only · pending picks excluded</div></div><button onclick="loadPastPlays()">↻ Update record</button></div>
 <div class="history-summary" style="margin-bottom:0">
 <div class="stat"><div class="statlabel">Settled picks</div><div id="allTopCount" class="num">Loading…</div></div>
 <div class="stat"><div class="statlabel">Wins – Losses</div><div id="allTopRecord" class="num">—</div></div>
@@ -11,15 +11,15 @@
 </div></section>
 <div class="statrow"><div class="stat"><div class="statlabel">Today's games</div><div id="ng" class="num">—</div></div><div class="stat"><div class="statlabel">Prop lines loaded</div><div id="nl" class="num">—</div></div><div class="stat"><div class="statlabel">Projections calculated</div><div id="np" class="num">—</div></div><div class="stat"><div class="statlabel">Positive EV candidates</div><div id="nv" class="num">—</div></div></div>
 
-<div class="sectiontitle" id="pastPlays">Daily Top 5 Results</div>
-<div class="sectionhint">Only the five official picks from each active category are tracked: Points and 3-Pointers Made. Each active category is locked once per slate day.</div>
+<div class="sectiontitle" id="pastPlays">Daily Top 3 Results</div>
+<div class="sectionhint">Only the three highest-ranked approved picks across Points and 3-Pointers Made are tracked. The slate is locked once per day.</div>
 <div class="history-actions">
 <label class="muted">Slate date <input class="pill" id="historyDate" type="date"></label>
 <select class="pill" id="historyMarket" onchange="renderPastPlays()"><option value="all">Both active markets</option><option value="points">Points</option><option value="threes">3-pointers made</option></select>
 <button onclick="loadPastPlays()">↻ Refresh results</button>
 </div>
 <div class="history-summary">
-<div class="stat"><div class="statlabel">Top 5 picks</div><div id="histCount" class="num">—</div></div>
+<div class="stat"><div class="statlabel">Top 3 picks</div><div id="histCount" class="num">—</div></div>
 <div class="stat"><div class="statlabel">Wins / losses</div><div id="histRecord" class="num">—</div></div>
 <div class="stat"><div class="statlabel">Win rate</div><div id="histWinRate" class="num">—</div></div>
 <div class="stat"><div class="statlabel">Net units</div><div id="histProfit" class="num">—</div></div>
@@ -31,8 +31,8 @@
 <div class="stat"><div class="statlabel">Win rate</div><div id="allHistWinRate" class="num">—</div></div>
 <div class="stat"><div class="statlabel">Net units</div><div id="allHistProfit" class="num">—</div></div>
 </div>
-<div id="historyStatusText" class="muted">Loading Top 5 results…</div>
-<div class="history-table-wrap"><table class="history-table"><thead><tr><th>Market</th><th>Player</th><th>Team</th><th>Matchup</th><th>Pick</th><th>Line</th><th>Odds</th><th>Projection</th><th>Actual</th><th>Result</th><th>Net units</th></tr></thead><tbody id="historyRows"><tr><td colspan="11">Loading Top 5 results…</td></tr></tbody></table></div>
+<div id="historyStatusText" class="muted">Loading Top 3 results…</div>
+<div class="history-table-wrap"><table class="history-table"><thead><tr><th>Market</th><th>Player</th><th>Team</th><th>Matchup</th><th>Pick</th><th>Line</th><th>Odds</th><th>Projection</th><th>Actual</th><th>Result</th><th>Net units</th></tr></thead><tbody id="historyRows"><tr><td colspan="11">Loading Top 3 results…</td></tr></tbody></table></div>
 <div class="sectiontitle">Today's scoreboard</div><div id="games" class="games"><span class="muted">Loading games…</span></div>
 <div class="sectiontitle" id="topTitle">Top 3 Plays</div><div class="sectionhint" id="topHint">The three highest-ranked approved positive-EV plays across points and 3-pointers made, ranked together.</div>
 <div class="controls"><input class="pill" id="search" placeholder="Search player or matchup" oninput="render()"><span id="count" class="muted"></span></div><div id="cards" class="cards"><div class="empty">Calculating today's best plays…</div></div>
@@ -225,9 +225,9 @@ function rankEV(a){
 function setMarket(m){
   market=m;
   document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('active',b.dataset.market===m));
-  const labels={ev:'Top 5 EV Plays',points:'Top 5 Points',threes:'Top 5 3-Pointers Made'};
-  el('topTitle').textContent=labels[m]||'Top 5 Plays';
-  el('topHint').textContent=m==='points'?'Top five proprietary points projections.':m==='ev'?'Top five positive-EV plays ranked across points and three-pointers made.':'Proprietary '+bpMarketLabel(m)+' projections, probabilities and EV. DraftKings lines via PropLine; projections remain model-generated.';
+  const labels={ev:'Top 3 EV Plays',points:'Top 3 Points',threes:'Top 3 3-Pointers Made'};
+  el('topTitle').textContent=labels[m]||'Top 3 Plays';
+  el('topHint').textContent=m==='points'?'Top three proprietary points projections.':m==='ev'?'Top three positive-EV plays ranked across points and three-pointers made.':'Proprietary '+bpMarketLabel(m)+' projections, probabilities and EV. DraftKings lines via PropLine; projections remain model-generated.';
   el('fullHint').textContent=m==='ev'?'All positive-EV candidates across the two active markets.':m==='points'?'All proprietary points props.':'All proprietary '+bpMarketLabel(m)+' projections using DraftKings lines via PropLine.';
   render();renderFull();
   if(m==='ev')loadBP('threes');
@@ -255,8 +255,9 @@ async function load(refresh=false){
       simulations:p.simulations
     })).filter(p=>p.player&&p.line!=null);
     await loadCustomLines();data=board.daily_frozen?data:await applySavedOverrides(data,'points');
-    if(board.daily_frozen)await recordDailyTopFive('points',rankEV(data).slice(0,5));
-    loadBP('threes');
+    dailyFrozenMarkets.points=Boolean(board.daily_frozen);
+    await loadBP('threes');
+    maybeRecordDailyTopThree();
     el('ng').textContent=schedule.schedule_game_count??'—';
     el('nl').textContent=board.line_count??data.length;
     el('np').textContent=board.projected_count??data.length;
@@ -342,7 +343,7 @@ function reasoning(p){
     rows.push('<div><b>Game environment:</b> No verified pace ratio was available; no pace claim is used in this explanation.</div>');
   }
   rows.push('<div><b>Sample and reliability:</b> '+(p.games_used??p.sample_size??'—')+' games used. '+esc(p.confidence||'Provisional')+' confidence. Model probabilities remain provisional until enough settled picks are available for calibration.</div>');
-  if(isFallback(p))rows.push('<div class="reason-warning"><b>Fallback safeguard:</b> This projection uses previous-season data. It is shown for context only and is excluded from Top 5 EV.</div>');
+  if(isFallback(p))rows.push('<div class="reason-warning"><b>Fallback safeguard:</b> This projection uses previous-season data. It is shown for context only and is excluded from Top 3 EV.</div>');
   if(p.reason)rows.push('<div><b>Model note:</b> '+esc(p.reason)+'.</div>');
   return '<details class="reasoning" open><summary>Why this play? Player production, positional defense &amp; game context</summary><div class="reasoning-body">'+rows.join('')+'</div></details>';
 }
@@ -515,9 +516,9 @@ async function loadBP(m){
     if(!r.ok)throw Error(d.detail||d.error||'Proprietary model request failed');
     const normalizedRows=(d.props||[]).map(p=>({...p,overOdds:p.over_odds,underOdds:p.under_odds,ev:p.expected_value_pct==null?null:Number(p.expected_value_pct)/100,expected_value_pct:p.expected_value_pct??p.expected_profit_per_100??null,expected_profit_per_100:p.expected_profit_per_100??p.expected_value_pct??null,model_status:'projected',best_side:String(p.best_side||'').toUpperCase(),best_probability:p.best_probability,market:m,simulations:p.simulations})).filter(p=>p.player&&p.line!=null);
     bpCache[m]=d.daily_frozen?normalizedRows:await applySavedOverrides(normalizedRows,m);
-    const dailyPicks=rankEV(bpCache[m]).slice(0,5);
-    if(d.daily_frozen)await recordDailyTopFive(m,dailyPicks);
+    dailyFrozenMarkets[m]=Boolean(d.daily_frozen);
     bpLoading[m]=false;render();renderFull();
+    maybeRecordDailyTopThree();
   }catch(e){bpLoading[m]=false;bpCache[m]={error:e.message};render();renderFull()}
 }
 function lineEditor(p){
@@ -634,20 +635,32 @@ function render(){
   el('cards').innerHTML=list.map((p,i)=>p.market==='points'?card(p,i):bpLineCard(p,i)).join('');
 }
 function renderFull(){ return; }
-let pastPlayRows=[],dailyTop5Metrics={};
+let pastPlayRows=[],dailyTop3Metrics={};
+let dailyFrozenMarkets={points:false,threes:false},dailyTop3SaveDate='';
 function localDateKey(date){
   const y=date.getFullYear(),m=String(date.getMonth()+1).padStart(2,'0'),d=String(date.getDate()).padStart(2,'0');
   return y+'-'+m+'-'+d;
 }
 function historyMarketName(m){return ({points:'Points',threes:'3-pointers made'})[m]||m||'—'}
-async function recordDailyTopFive(m,rows){
-  const picks=(rows||[]).slice(0,5);if(!picks.length)return;
+async function recordDailyTopThree(rows,slateDate){
+  const picks=(rows||[]).slice(0,3);if(!picks.length)return;
   try{
-    await fetch('/api/model/daily-top5',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({market:m,slate_date:localDateKey(new Date()),props:picks}),cache:'no-store'});
-  }catch(e){console.warn('Daily Top 5 snapshot could not be saved:',e)}
+    await fetch('/api/model/daily-top3',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({slate_date:slateDate,props:picks}),cache:'no-store'});
+  }catch(e){console.warn('Daily Top 3 snapshot could not be saved:',e)}
 }
-function renderAllTimeTopFive(){
-  const a=dailyTop5Metrics||{},wins=Number(a.wins||0),losses=Number(a.losses||0),settled=Number(a.settled||0);
+function maybeRecordDailyTopThree(){
+  const slateDate=localDateKey(new Date());
+  if(dailyTop3SaveDate===slateDate||!dailyFrozenMarkets.points||!dailyFrozenMarkets.threes)return;
+  const picks=allModelEV().slice(0,3);
+  // Do not backfill today's official record from a frozen board created with
+  // the old sportsbook-blended probabilities. New official picks must use
+  // independent model probabilities and DraftKings-only prices.
+  if(!picks.length||picks.some(p=>Number(p.market_weight)!==0))return;
+  dailyTop3SaveDate=slateDate;
+  recordDailyTopThree(picks,slateDate);
+}
+function renderAllTimeTopThree(){
+  const a=dailyTop3Metrics||{},wins=Number(a.wins||0),losses=Number(a.losses||0),settled=Number(a.settled||0);
   const record=wins+' – '+losses+(a.pushes?' / '+a.pushes+'P':'');
   const rate=a.win_rate_pct==null?'0.0%':num(a.win_rate_pct,1)+'%';
   const profit=(Number(a.net_units)>0?'+':'')+num(a.net_units||0,2)+'u';
@@ -669,9 +682,9 @@ function renderPastPlays(){
   el('historyRows').innerHTML=rows.length?rows.map(p=>{
     const result=p.outcome||'PENDING',cls=result==='WIN'?'win':result==='LOSS'?'loss':result==='PUSH'?'push':'';
     return '<tr><td>'+esc(historyMarketName(p.market))+'</td><td><b>'+esc(p.player)+'</b></td><td>'+esc(p.team||'—')+'</td><td>'+esc(p.game||'—')+'</td><td>'+esc(p.side||'—')+'</td><td>'+num(p.line,1)+'</td><td>'+(p.odds>0?'+':'')+esc(p.odds??'—')+'</td><td>'+num(p.projection,1)+'</td><td>'+num(p.actual_value,1)+'</td><td class="history-status '+cls+'">'+result+'</td><td>'+(p.profit_units==null?'—':(p.profit_units>0?'+':'')+num(p.profit_units,2)+'u')+'</td></tr>';
-  }).join(''):'<tr><td colspan="11">No Top 5 picks saved for this slate date yet.</td></tr>';
+  }).join(''):'<tr><td colspan="11">No Top 3 picks saved for this slate date yet.</td></tr>';
   const pending=rows.filter(p=>!p.outcome).length;
-  el('historyStatusText').textContent=rows.length+' official Top 5 picks · '+(rows.length-pending)+' settled · '+pending+' pending. Maximum 25 picks per slate.';
+  el('historyStatusText').textContent=rows.length+' official Top 3 picks · '+(rows.length-pending)+' settled · '+pending+' pending. Maximum 3 picks per slate.';
 }
 function showYesterdayPlays(){
   const date=new Date();date.setDate(date.getDate()-1);
@@ -680,16 +693,16 @@ function showYesterdayPlays(){
   loadPastPlays();
 }
 async function loadPastPlays(){
-  el('historyStatusText').textContent='Loading Top 5 results…';
+  el('historyStatusText').textContent='Loading Top 3 results…';
   try{
     const date=el('historyDate').value||localDateKey(new Date());
-    const r=await fetch('/api/model/daily-top5?slate_date='+encodeURIComponent(date)+'&market=all&ts='+Date.now(),{cache:'no-store'});
-    const d=await r.json();if(!r.ok)throw Error(d.detail||'Top 5 results unavailable');
+    const r=await fetch('/api/model/daily-top3?slate_date='+encodeURIComponent(date)+'&market=all&ts='+Date.now(),{cache:'no-store'});
+    const d=await r.json();if(!r.ok)throw Error(d.detail||'Top 3 results unavailable');
     pastPlayRows=Array.isArray(d.predictions)?d.predictions:[];
-    dailyTop5Metrics=d.all_time||{};
-    renderPastPlays();renderAllTimeTopFive();
+    dailyTop3Metrics=d.all_time||{};
+    renderPastPlays();renderAllTimeTopThree();
   }catch(e){
-    el('historyStatusText').textContent='Could not load Top 5 results: '+String(e.message||e);
+    el('historyStatusText').textContent='Could not load Top 3 results: '+String(e.message||e);
     el('historyRows').innerHTML='<tr><td colspan="11">Top 5 results are temporarily unavailable.</td></tr>';
   }
 }
