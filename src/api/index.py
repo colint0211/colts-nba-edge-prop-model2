@@ -1440,20 +1440,29 @@ def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, ma
 
     target_mean = max(0.05, target_mean)
     distribution = [max(0.0, v * (target_mean / long_mean)) if long_mean > 0 else v for v in clean]
-    empirical_variance = sum((v - sum(distribution)/len(distribution))**2 for v in distribution) / max(1, n-1)
 
-    # NBA box-score stats are counts. An eight-game sample can have a tiny
-    # observed variance and no outcomes above the historical maximum. That is
-    # not evidence that the true upper tail is nearly impossible. Use a
-    # Gamma-Poisson (negative-binomial) distribution with at least Poisson
-    # variance, and shrink noisy dispersion estimates toward a conservative
-    # prior until a larger sample is available.
+    # Estimate player-specific dispersion from the most recent 30 games,
+    # with exponential recency weights. Shrink the noisy estimate toward
+    # Poisson variance; this prevents tiny early-season samples from creating
+    # implausibly narrow or explosive tails.
+    variance_window = distribution[-30:]
+    variance_weights = [math.exp(-0.075 * (len(variance_window)-1-i)) for i in range(len(variance_window))]
+    variance_weight_sum = max(1e-9, sum(variance_weights))
+    variance_mean = sum(v*w for v, w in zip(variance_window, variance_weights)) / variance_weight_sum
+    weighted_variance = sum(w*(v-variance_mean)**2 for v, w in zip(variance_window, variance_weights)) / variance_weight_sum
+    variance_reliability = len(variance_window) / (len(variance_window) + 12.0)
+    empirical_variance = variance_reliability * weighted_variance + (1.0-variance_reliability) * target_mean
+
+    # Compare Poisson and negative-binomial dispersion for each player. When
+    # observed variance does not materially exceed the mean, use Poisson;
+    # otherwise use a Gamma-Poisson negative-binomial with a shrunk k estimate.
     excess_variance = max(0.0, empirical_variance - target_mean)
     raw_dispersion = min(30.0, max(4.0, target_mean**2 / excess_variance)) if excess_variance > 1e-9 else 30.0
     prior_dispersion = 15.0
-    dispersion_k = max(4.0, min(30.0, (n/(n+12.0))*raw_dispersion + (12.0/(n+12.0))*prior_dispersion))
-    model_variance = target_mean + (target_mean**2 / dispersion_k)
-    std_dev = math.sqrt(model_variance)
+    dispersion_k = max(4.0, min(30.0, variance_reliability*raw_dispersion + (1.0-variance_reliability)*prior_dispersion))
+    distribution_model = "negative_binomial" if excess_variance > max(0.05, target_mean*0.05) else "poisson"
+    model_variance = target_mean + (target_mean**2 / dispersion_k) if distribution_model == "negative_binomial" else target_mean
+    std_dev = math.sqrt(max(0.01, model_variance))
 
     rng = random.Random(str(seed) + "|" + str(line) + "|" + str(market))
     sims = 60000
@@ -1473,9 +1482,11 @@ def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, ma
     for _ in range(sims):
         if rng.random() < empirical_weight:
             sample = distribution[rng.randrange(len(distribution))]
-        else:
+        elif distribution_model == "negative_binomial":
             latent_rate = rng.gammavariate(dispersion_k, target_mean / dispersion_k)
             sample = poisson_draw(latent_rate)
+        else:
+            sample = poisson_draw(target_mean)
         if abs(sample - line) < 1e-9:
             push += 1
         elif sample > line:
@@ -1522,8 +1533,8 @@ def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, ma
         "expected_value_pct": round(best[0]*100, 2) if best else None,
         "edge_pp": None,
         "recommendation": "VALUE CANDIDATE" if best and best[0] > 0.05 else ("LEAN / VERIFY" if best and best[0] > 0 else "PASS"),
-        "model_components": ["recency-weighted history", "10-game form signal", "minutes adjustment" if valid_minutes else "minutes unavailable; no adjustment", "defense-vs-position matchup adjustment" if isinstance(matchup_adjustment, dict) and matchup_adjustment.get("available", True) else "defense-vs-position unavailable; no adjustment", "team pace + Four Factors + shot-profile adjustment" if isinstance(team_context_adjustment, dict) and team_context_adjustment.get("available") else "team factor context unavailable; no adjustment", "20% empirical history + 80% negative-binomial count distribution"],
-        "model_method": "player PPP × projected player possessions × opponent defensive PPP, with Gamma-Poisson count variance" if market == "points" else "recency-weighted count-rate projection with Gamma-Poisson overdispersion; provisional pending out-of-sample calibration",
+        "model_components": ["recency-weighted history", "10-game form signal", "minutes adjustment" if valid_minutes else "minutes unavailable; no adjustment", "defense-vs-position matchup adjustment" if isinstance(matchup_adjustment, dict) and matchup_adjustment.get("available", True) else "defense-vs-position unavailable; no adjustment", "team pace + Four Factors + shot-profile adjustment" if isinstance(team_context_adjustment, dict) and team_context_adjustment.get("available") else "team factor context unavailable; no adjustment", "20% empirical history + player-specific Poisson or negative-binomial count distribution"],
+        "model_method": "player PPP × projected player possessions × opponent defensive PPP, with player-specific count dispersion" if market == "points" else "recency-weighted count-rate projection with player-specific Poisson/NB dispersion; provisional pending out-of-sample calibration",
         "sample_size": n, "long_run_mean": round(long_mean, 2), "recent5_mean": round(recent5_mean, 2),
         "recent10_mean": round(recent10_mean, 2), "weighted_mean": round(weighted_mean, 2),
         "distribution_std_dev": round(std_dev, 2), "minute_adjustment_factor": round(minute_factor, 3),
@@ -1542,6 +1553,12 @@ def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, ma
         "baseline_minutes": round(baseline_min, 1) if baseline_min is not None else None,
         "minutes_method": "55% recent-5 median / 30% recent-10 median / 15% recent-20 median; adjustment capped at +/-15%",
         "count_dispersion_k": round(dispersion_k, 2),
+        "variance_window_games": len(variance_window),
+        "weighted_empirical_variance": round(weighted_variance, 3),
+        "variance_reliability_weight": round(variance_reliability, 3),
+        "distribution_model": distribution_model,
+        "ev_sanity_flag": bool(best and best[0] > 0.25),
+        "ev_sanity_note": "Extreme EV above 25%: verify player identity, line, odds, injury status, and probability inputs." if best and best[0] > 0.25 else None,
         "calibration_status": "uncalibrated",
         "projection_basis": "PPP × projected player possessions × opponent defensive PPP" if market == "points" else "recency-weighted player game-log count model",
         "player_ppp": round(float(ppp_context["player_ppp"]), 4) if market == "points" and ppp_context else None,
