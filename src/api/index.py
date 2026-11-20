@@ -2844,20 +2844,19 @@ def pre_pick_context(slate_date: str = None):
     })
 
 
-def _lock_daily_top_three(slate_date):
-    """Rank Points and Threes together after injury/rotation repricing of the full pool."""
+def _lock_daily_top_three(slate_date, replace_unsettled=False):
+    """Rank Points and Threes together; optionally replace only unsettled official picks."""
     markets = ("points", "threes")
-    # Once even one official pick exists, the slate is immutable. Never rerun
-    # the risk review or change ranks/prices on a later browser refresh.
     existing_picks = prediction_ledger.list_daily_top_five(slate_date, "all")
-    if existing_picks:
-        return {
-            "locked": True,
-            "selected": len(existing_picks),
-            "saved": 0,
-            "already_locked": True,
-            "picks": existing_picks,
-        }
+    if existing_picks and not replace_unsettled:
+        return {"locked": True, "selected": len(existing_picks), "saved": 0,
+                "already_locked": True, "picks": existing_picks}
+    if existing_picks and replace_unsettled:
+        settled = [p for p in existing_picks if p.get("outcome") in ("WIN", "LOSS", "PUSH")]
+        if settled:
+            return {"locked": True, "selected": len(existing_picks), "saved": 0,
+                    "already_locked": True, "replacement_blocked": "A prior pick is already settled; settled records are immutable.",
+                    "picks": existing_picks}
     slates = {}
     for market in markets:
         slate = prediction_ledger.get_daily_slate(market, slate_date)
@@ -2992,6 +2991,13 @@ def _lock_daily_top_three(slate_date):
             "relevant_news_articles": news_context.get("news_articles", [])[:10],
         }
 
+    replaced_previous = 0
+    if replace_unsettled and existing_picks and selected:
+        replaced_previous = prediction_ledger.deactivate_unsettled_daily_top_five(slate_date)
+        if replaced_previous != len(existing_picks):
+            return {"locked": False, "reason": "concurrent_ledger_change",
+                    "message": "Previous picks were not replaced because the ledger changed during the refresh."}
+
     saved = 0
     for market in markets:
         market_rows = [p for p in selected if p["market"] == market]
@@ -3017,7 +3023,8 @@ def _lock_daily_top_three(slate_date):
         ))
         prediction_ledger.update_daily_slate_candidates(market, slate_date, rows)
 
-    return {"locked": True, "selected": len(selected), "saved": saved, "picks": selected}
+    return {"locked": True, "selected": len(selected), "saved": saved,
+            "replaced_previous": replaced_previous, "picks": selected}
 
 def _snapshot_daily_market_top5(market, props):
     """Freeze a market's candidate pool; lock only after both markets are available."""
@@ -3082,6 +3089,45 @@ def ppp_diagnostic(player: str = "Stephen Curry"):
     return JSONResponse({"player": player, "athlete_id": athlete_id, "fields": report,
                          "aligned_ppp_games": len(history), "sample_label": sample,
                          "sample": history[-3:]})
+
+@app.post("/api/rebuild-daily-top3")
+def rebuild_daily_top_three():
+    """Rebuild both markets from fresh feeds and replace only unsettled Top 3 rows."""
+    slate_date = _active_nba_slate_date()
+    boards = {}
+    for market in ("points", "threes"):
+        response = proprietary_market_board(market=market, rebuild_ppp=True)
+        if getattr(response, "status_code", 200) >= 400:
+            return JSONResponse({"ok": False, "market": market, "error": "Fresh market rebuild failed."}, status_code=502)
+        payload = json.loads(response.body.decode("utf-8"))
+        props = payload.get("props") or []
+        if not props:
+            return JSONResponse({"ok": False, "market": market, "error": "No fresh projections returned; existing picks were preserved.",
+                                 "unavailable": payload.get("unavailable", [])}, status_code=503)
+        if market == "points" and int(payload.get("ppp_verified_count") or 0) == 0:
+            return JSONResponse({"ok": False, "error": "PPP verification returned zero players; existing picks were preserved."}, status_code=503)
+        boards[market] = props
+
+    prediction_ledger.initialize()
+    for market, rows in boards.items():
+        candidates = [dict(p, market=market, daily_top3=False, daily_top5=False) for p in rows]
+        current = prediction_ledger.get_daily_slate(market, slate_date)
+        if current:
+            prediction_ledger.update_daily_slate_candidates(market, slate_date, candidates)
+        else:
+            prediction_ledger.freeze_daily_slate(market, slate_date, candidates)
+
+    result = _lock_daily_top_three(slate_date, replace_unsettled=True)
+    return JSONResponse({
+        "ok": bool(result.get("locked") and result.get("selected")),
+        "slate_date": slate_date,
+        "points_projection_count": len(boards["points"]),
+        "threes_projection_count": len(boards["threes"]),
+        "ppp_verified_count": sum(1 for p in boards["points"] if isinstance(p.get("ppp_calculation"), dict)),
+        "replaced_previous": result.get("replaced_previous", 0),
+        "selection": result,
+    })
+
 
 @app.get("/api/proprietary-market-board")
 def proprietary_market_board(market: str = "points", rebuild_ppp: bool = False):
