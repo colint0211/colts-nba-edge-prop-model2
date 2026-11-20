@@ -1001,7 +1001,26 @@ def _gamelog_records(athlete_id, field, label, season):
         return []
     labels = payload.get("labels") or []
     names = payload.get("names") or payload.get("statNames") or []
-    default_index = labels.index(label) if isinstance(labels, list) and label in labels else -1
+    field_aliases = {
+        "fieldGoalsAttempted": (("FG",), ("fieldGoals", "fieldGoalAttempts")),
+        "freeThrowsAttempted": (("FT",), ("freeThrows", "freeThrowAttempts")),
+    }
+    def stat_index(stat_labels, stat_names):
+        if isinstance(stat_labels, list) and label in stat_labels:
+            return stat_labels.index(label), "direct"
+        if isinstance(stat_names, list) and field in stat_names:
+            return stat_names.index(field), "direct"
+        alias_labels, alias_names = field_aliases.get(field, ((), ()))
+        if isinstance(stat_labels, list):
+            for alias in alias_labels:
+                if alias in stat_labels:
+                    return stat_labels.index(alias), "attempts_from_made_attempted"
+        if isinstance(stat_names, list):
+            for alias in alias_names:
+                if alias in stat_names:
+                    return stat_names.index(alias), "attempts_from_made_attempted"
+        return -1, "direct"
+    default_index, default_parse = stat_index(labels, names)
     source_rows = []
     season_types = payload.get("seasonTypes") or []
 
@@ -1037,9 +1056,7 @@ def _gamelog_records(athlete_id, field, label, season):
                 continue
             cat_labels = category.get("labels") or labels
             cat_names = category.get("names") or names
-            idx = cat_labels.index(label) if isinstance(cat_labels, list) and label in cat_labels else -1
-            if idx < 0 and isinstance(cat_names, list) and field in cat_names:
-                idx = cat_names.index(field)
+            idx, _ = stat_index(cat_labels, cat_names)
             events = category.get("events") or []
             if isinstance(events, dict):
                 events = list(events.values())
@@ -1060,13 +1077,14 @@ def _gamelog_records(athlete_id, field, label, season):
         if not isinstance(stats, list):
             continue
         idx = row_index if row_index >= 0 else default_index
-        if idx < 0 and isinstance(names, list) and len(names) == len(stats) and field in names:
-            idx = names.index(field)
         if idx < 0 or idx >= len(stats):
             continue
         raw = str(stats[idx]).replace(",", "").strip()
         if field == "threePointsMade" and "-" in raw:
             raw = raw.split("-", 1)[0].strip()
+        elif field in ("fieldGoalsAttempted", "freeThrowsAttempted") and "-" in raw:
+            # ESPN's common-v3 gamelog exposes FG and FT as made-attempted strings.
+            raw = raw.rsplit("-", 1)[-1].strip()
         try:
             value = float(raw)
         except (TypeError, ValueError):
