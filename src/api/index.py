@@ -1025,9 +1025,25 @@ def _gamelog_records(athlete_id, field, label, season):
                 continue
             cat_labels = category.get("labels") or labels
             cat_names = category.get("names") or names
-            idx = cat_labels.index(label) if isinstance(cat_labels, list) and label in cat_labels else -1
+            # ESPN publishes 3-pointers as one made-attempted composite field
+            # (for example, "4-10") labelled "3PT". There is no separate
+            # "3PA" column in this gamelog schema. Resolve the same composite
+            # column for attempts, then split the right-hand value below.
+            label_candidates = [label]
+            if field == "threePointFieldGoalsAttempted":
+                label_candidates.extend(["3PT", "3PM"])
+            idx = next(
+                (cat_labels.index(candidate) for candidate in label_candidates
+                 if isinstance(cat_labels, list) and candidate in cat_labels),
+                -1,
+            )
             if idx < 0 and isinstance(cat_names, list) and field in cat_names:
                 idx = cat_names.index(field)
+            if idx < 0 and field == "threePointFieldGoalsAttempted" and isinstance(cat_names, list):
+                for alias in ("threePointsMade", "threePointFieldGoalsMade"):
+                    if alias in cat_names:
+                        idx = cat_names.index(alias)
+                        break
             events = category.get("events") or []
             if isinstance(events, dict):
                 events = list(events.values())
