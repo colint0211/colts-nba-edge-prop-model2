@@ -1372,7 +1372,151 @@ def _apply_directional_play_grade(model):
     return model
 
 
-def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, market="", matchup_adjustment=None, team_context_adjustment=None, ppp_context=None):
+def _minutes_conditioned_threes(athlete_id, projected_minutes):
+    """Estimate 3PA and 3PM from game logs in the player's projected-minute band."""
+    try:
+        projected = float(projected_minutes)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(projected) or projected < 15:
+        return None
+
+    def paired_season(season):
+        made = _gamelog_records(athlete_id, "threePointsMade", "3PT", season)
+        attempted = _gamelog_records(athlete_id, "threePointFieldGoalsAttempted", "3PA", season)
+        mins = _gamelog_records(athlete_id, "minutes", "MIN", season)
+        def index_rows(rows):
+            by_event, by_date = {}, {}
+            for row in rows:
+                event_id = row.get("event_id")
+                date_key = str(row.get("date") or "")[:10]
+                if event_id:
+                    by_event[str(event_id)] = row
+                if date_key:
+                    by_date.setdefault(date_key, []).append(row)
+            return by_event, by_date
+        made_event, made_date = index_rows(made)
+        att_event, att_date = index_rows(attempted)
+        min_event, min_date = index_rows(mins)
+        output, used = [], set()
+        for stat in made:
+            event_id = str(stat.get("event_id") or "")
+            date_key = str(stat.get("date") or "")[:10]
+            att = att_event.get(event_id) if event_id else None
+            minute = min_event.get(event_id) if event_id else None
+            if not att and date_key:
+                att = next(iter(att_date.get(date_key, [])), None)
+            if not minute and date_key:
+                minute = next(iter(min_date.get(date_key, [])), None)
+            if not att or not minute:
+                continue
+            try:
+                m, a, mins_value = float(stat["value"]), float(att["value"]), float(minute["value"])
+            except (TypeError, ValueError, KeyError, OverflowError):
+                continue
+            if not all(math.isfinite(x) for x in (m, a, mins_value)):
+                continue
+            if mins_value <= 0 or mins_value > 60 or a < m or m < 0:
+                continue
+            identity = event_id or date_key
+            if not identity or identity in used:
+                continue
+            used.add(identity)
+            output.append({"minutes": mins_value, "made": m, "attempted": a,
+                           "date": str(stat.get("date") or "")})
+        output.sort(key=lambda row: row["date"])
+        return output
+
+    rows = paired_season(2027)
+    source = "2026-27 regular season"
+    if len(rows) < 8:
+        prior = paired_season(2026)[-8:]
+        rows = prior + rows
+        source = "2026-27 plus limited 2025-26 fallback"
+    rows = rows[-82:]
+    if len(rows) < 8:
+        return None
+
+    bands = [
+        ("under_15", "Under 15", lambda m: m < 15),
+        ("15_19", "15-19", lambda m: 15 <= m < 20),
+        ("20_24", "20-24", lambda m: 20 <= m < 25),
+        ("25_29", "25-29", lambda m: 25 <= m < 30),
+        ("30_34", "30-34", lambda m: 30 <= m < 35),
+        ("35_plus", "35+", lambda m: m >= 35),
+    ]
+    band_rows = {}
+    for key, label, predicate in bands:
+        sample = [row for row in rows if predicate(row["minutes"])]
+        total_min = sum(row["minutes"] for row in sample)
+        total_att = sum(row["attempted"] for row in sample)
+        total_made = sum(row["made"] for row in sample)
+        band_rows[key] = {
+            "band": label, "games": len(sample),
+            "avg_3pa": round(total_att / len(sample), 3) if sample else None,
+            "avg_3pm": round(total_made / len(sample), 3) if sample else None,
+            "attempts_per_minute": round(total_att / total_min, 5) if total_min else None,
+            "makes_per_minute": round(total_made / total_min, 5) if total_min else None,
+            "three_pct": total_made / total_att if total_att else None,
+        }
+
+    selected_index = next(
+        (i for i, (_, _, predicate) in enumerate(bands) if predicate(projected)),
+        None,
+    )
+    if selected_index is None:
+        return None
+    selected_key = bands[selected_index][0]
+    selected_rows = [row for row in rows if bands[selected_index][2](row["minutes"])]
+    # If the exact band is thin, add the closest adjacent minute bands until
+    # there are at least four observations. Never silently substitute all-game averages.
+    distance_order = sorted(
+        [i for i in range(len(bands)) if i != selected_index],
+        key=lambda i: abs(i - selected_index),
+    )
+    chosen = list(selected_rows)
+    used_band_indices = [selected_index]
+    for idx in distance_order:
+        if len(chosen) >= 4:
+            break
+        chosen.extend(row for row in rows if bands[idx][2](row["minutes"]))
+        used_band_indices.append(idx)
+    if len(chosen) < 4:
+        return None
+
+    total_min = sum(row["minutes"] for row in chosen)
+    total_att = sum(row["attempted"] for row in chosen)
+    total_made = sum(row["made"] for row in chosen)
+    if total_min <= 0 or total_att <= 0:
+        return None
+    attempts_per_minute = total_att / total_min
+    observed_pct = total_made / total_att
+    # Shrink small samples toward the player's full paired-history percentage.
+    all_att = sum(row["attempted"] for row in rows)
+    all_made = sum(row["made"] for row in rows)
+    prior_pct = all_made / all_att if all_att > 0 else observed_pct
+    reliability = total_att / (total_att + 30.0)
+    three_pct = reliability * observed_pct + (1.0 - reliability) * prior_pct
+    expected_3pa = attempts_per_minute * projected
+    expected_3pm = expected_3pa * three_pct
+    return {
+        "projected_minutes": round(projected, 2),
+        "selected_band": bands[selected_index][1],
+        "band_games": len(selected_rows),
+        "estimation_games": len(chosen),
+        "bands_used": [bands[i][1] for i in used_band_indices],
+        "expected_3pa": round(expected_3pa, 3),
+        "expected_3pm": round(expected_3pm, 3),
+        "attempts_per_minute": round(attempts_per_minute, 5),
+        "makes_per_minute": round(total_made / total_min, 5),
+        "three_point_percentage": round(three_pct, 4),
+        "all_bands": band_rows,
+        "source": source,
+        "method": "minutes-band 3PA/min × projected minutes × shrunk 3P%; adjacent bands used only when selected band has fewer than four games",
+    }
+
+
+def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, market="", matchup_adjustment=None, team_context_adjustment=None, ppp_context=None, minutes_conditioned_profile=None):
     """Project count stats with an overdispersed count model; never truncate the upper tail at the observed maximum."""
     clean = [float(v) for v in values if v is not None and math.isfinite(float(v)) and float(v) >= 0]
     if len(clean) < 4:
@@ -1407,6 +1551,13 @@ def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, ma
         minute_factor = max(0.85, min(1.15, projected_min / baseline_min))
         if market != "points":
             target_mean *= minute_factor
+
+    # Three-pointers are projected from actual attempts and makes at comparable
+    # playing-time levels, rather than scaling an all-minutes 3PM average.
+    if market == "threes":
+        if not isinstance(minutes_conditioned_profile, dict):
+            return None
+        target_mean = float(minutes_conditioned_profile["expected_3pm"])
 
     matchup_factor = 1.0
     positional_discrepancy = None
@@ -1552,6 +1703,7 @@ def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, ma
         "defense_vs_position": matchup_adjustment,
         "baseline_minutes": round(baseline_min, 1) if baseline_min is not None else None,
         "minutes_method": "55% recent-5 median / 30% recent-10 median / 15% recent-20 median; adjustment capped at +/-15%",
+        "minutes_conditioned_threes": minutes_conditioned_profile if market == "threes" else None,
         "count_dispersion_k": round(dispersion_k, 2),
         "variance_window_games": len(variance_window),
         "weighted_empirical_variance": round(weighted_variance, 3),
@@ -2650,6 +2802,13 @@ def proprietary_market_board(market: str = "points"):
             else:
                 matchup_adjustment = _dvp_matchup_adjustment(athlete_id, team_for_dvp, event_matchup, market, name)
                 team_context_adjustment = _team_factor_prop_adjustment(team_for_dvp, event_matchup, market)
+            minutes_conditioned_profile = (
+                _minutes_conditioned_threes(athlete_id, _projected_minutes(player_minutes))
+                if market == "threes" else None
+            )
+            if market == "threes" and not minutes_conditioned_profile:
+                failures.append(name + ": insufficient paired minutes/3PA/3PM history for minutes-band projection")
+                continue
             simulation_values = ppp_context["projected_points_history"] if market == "points" else values
             model = _simulate_market(
                 simulation_values, line, None, None, _norm_player_name(name) + market,
@@ -2657,6 +2816,7 @@ def proprietary_market_board(market: str = "points"):
                 matchup_adjustment=matchup_adjustment,
                 team_context_adjustment=team_context_adjustment,
                 ppp_context=ppp_context,
+                minutes_conditioned_profile=minutes_conditioned_profile,
             )
             if not model:
                 failures.append(name + ": fewer than five valid game logs")
@@ -3883,8 +4043,14 @@ async def model_recalculate(request: FastRequest):
         else:
             matchup_adjustment = _dvp_matchup_adjustment(athlete_id, payload.get("team"), payload.get("game"), market, player)
             team_context_adjustment = _team_factor_prop_adjustment(payload.get("team"), payload.get("game"), market)
+        minutes_conditioned_profile = (
+            _minutes_conditioned_threes(athlete_id, _projected_minutes(minutes))
+            if market == "threes" else None
+        )
+        if market == "threes" and not minutes_conditioned_profile:
+            raise HTTPException(status_code=422, detail="Insufficient paired minutes, 3PA and 3PM history for a minutes-band three-point projection.")
         simulation_values = ppp_context["projected_points_history"] if market == "points" else values
-        model = _simulate_market(simulation_values, line, None, None, _norm_player_name(player) + market + "custom", minutes=minutes, market=market, matchup_adjustment=matchup_adjustment, team_context_adjustment=team_context_adjustment, ppp_context=ppp_context)
+        model = _simulate_market(simulation_values, line, None, None, _norm_player_name(player) + market + "custom", minutes=minutes, market=market, matchup_adjustment=matchup_adjustment, team_context_adjustment=team_context_adjustment, ppp_context=ppp_context, minutes_conditioned_profile=minutes_conditioned_profile)
         if not model:
             raise HTTPException(status_code=422, detail="Not enough verified game-log history to recalculate this player.")
         over_raw, under_raw = _american_probability(over_odds), _american_probability(under_odds)
