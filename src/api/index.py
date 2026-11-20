@@ -1210,6 +1210,7 @@ def _player_ppp_context(athlete_id, matchup, projected_minutes=None):
     if minutes is None or minutes <= 0:
         return None
     return {"player_ppp": ppp, "ppp_history": [r["ppp"] for r in rows],
+            "possessions_per_minute_history": [r["possessions_per_minute"] for r in rows],
             "projected_player_possessions": poss_per_min * minutes,
             "projected_minutes": minutes, "sample_size": len(rows), "used_prior_season": used_prior,
             "method": "recency-weighted player PPP × projected player possessions",
@@ -1238,9 +1239,15 @@ def _apply_opponent_defensive_ppp(context, player_team, matchup):
     league_defensive_ppp = league_drtg / 100.0
     factor = defensive_ppp / league_defensive_ppp
     result = dict(context)
+    projected_points = context["player_ppp"] * context["projected_player_possessions"] * factor
+    projected_minutes = float(context["projected_minutes"])
     result.update({"opponent": opponent, "opponent_defensive_ppp": defensive_ppp,
                    "league_defensive_ppp": league_defensive_ppp, "opponent_defense_factor": factor,
-                   "expected_points": context["player_ppp"] * context["projected_player_possessions"] * factor,
+                   "expected_points": projected_points,
+                   "projected_points_history": [
+                       float(ppp_value) * float(poss_rate) * projected_minutes * factor
+                       for ppp_value, poss_rate in zip(context["ppp_history"], context["possessions_per_minute_history"])
+                   ],
                    "defense_source": "NBA team defensive rating / 100"})
     return result
 
@@ -1543,7 +1550,7 @@ def _simulate_market(values, line, over_odds, under_odds, seed, minutes=None, ma
         "ppp_method": ppp_context.get("method") if market == "points" and ppp_context else None,
         "recent5_ppp": round(ppp_recent, 4) if market == "points" and ppp_recent is not None else None,
         "long_run_ppp": round(ppp_long, 4) if market == "points" and ppp_long is not None else None,
-        "historical_points_mean_for_variance_only": round(long_mean, 2) if market == "points" else None
+        "ppp_scaled_history_mean_for_variance": round(long_mean, 2) if market == "points" else None
     }
 
 _BP_OFFERS_CACHE = {}
@@ -2271,8 +2278,9 @@ def _post_selection_negative_review(prop, market, injury_feed):
             if not ppp_context:
                 prop["negative_review"] = {"status": "inconclusive", "reason": "PPP workload recalculation unavailable; no PPG fallback permitted"}
                 return False, prop["negative_review"]["reason"]
+        simulation_values = ppp_context["projected_points_history"] if market == "points" else adjusted_values
         adjusted = _simulate_market(
-            adjusted_values, float(prop.get("line")), over_odds, under_odds,
+            simulation_values, float(prop.get("line")), over_odds, under_odds,
             _norm_player_name(prop.get("player")) + market + "negative-review",
             minutes=[], market=market, matchup_adjustment=None, ppp_context=ppp_context,
         )
@@ -2621,8 +2629,9 @@ def proprietary_market_board(market: str = "points"):
             else:
                 matchup_adjustment = _dvp_matchup_adjustment(athlete_id, team_for_dvp, event_matchup, market, name)
                 team_context_adjustment = _team_factor_prop_adjustment(team_for_dvp, event_matchup, market)
+            simulation_values = ppp_context["projected_points_history"] if market == "points" else values
             model = _simulate_market(
-                values, line, None, None, _norm_player_name(name) + market,
+                simulation_values, line, None, None, _norm_player_name(name) + market,
                 minutes=player_minutes, market=market,
                 matchup_adjustment=matchup_adjustment,
                 team_context_adjustment=team_context_adjustment,
@@ -3868,7 +3877,8 @@ async def model_recalculate(request: FastRequest):
         else:
             matchup_adjustment = _dvp_matchup_adjustment(athlete_id, payload.get("team"), payload.get("game"), market, player)
             team_context_adjustment = _team_factor_prop_adjustment(payload.get("team"), payload.get("game"), market)
-        model = _simulate_market(values, line, None, None, _norm_player_name(player) + market + "custom", minutes=minutes, market=market, matchup_adjustment=matchup_adjustment, team_context_adjustment=team_context_adjustment, ppp_context=ppp_context)
+        simulation_values = ppp_context["projected_points_history"] if market == "points" else values
+        model = _simulate_market(simulation_values, line, None, None, _norm_player_name(player) + market + "custom", minutes=minutes, market=market, matchup_adjustment=matchup_adjustment, team_context_adjustment=team_context_adjustment, ppp_context=ppp_context)
         if not model:
             raise HTTPException(status_code=422, detail="Not enough verified game-log history to recalculate this player.")
         over_raw, under_raw = _american_probability(over_odds), _american_probability(under_odds)
@@ -4055,7 +4065,7 @@ async def api_proxy(path: str, request: FastRequest):
                                 prop["reason"] = "Verified player PPP, player possessions, or opponent defensive PPP unavailable; no PPG fallback permitted."
                                 continue
                             model = _simulate_market(
-                                values, float(prop["line"]), prop.get("over_odds"),
+                                ppp_context["projected_points_history"], float(prop["line"]), prop.get("over_odds"),
                                 prop.get("under_odds"),
                                 _norm_player_name(prop.get("player")) + "points",
                                 minutes=player_minutes, market="points", matchup_adjustment=None,
