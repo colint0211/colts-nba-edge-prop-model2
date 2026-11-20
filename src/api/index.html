@@ -296,7 +296,7 @@ function positionDisplayName(position){
 }
 function reasoning(p){
   const market=String(p.market||'points').toLowerCase();
-  const labels={points:{name:'points',unit:'PPG'},threes:{name:'3-pointers made',unit:'3PM'}};
+  const labels={points:{name:'points',unit:'points'},threes:{name:'3-pointers made',unit:'3PM'}};
   const meta=labels[market]||{name:market,unit:'per game'};
   const fmt=(v,d=2)=>v==null||!Number.isFinite(Number(v))?'not available':num(v,d);
   const rows=[];
@@ -428,7 +428,7 @@ function dvpSummary(p){
   const sign=Number(d.adjustment_pct)>0?'+':'';
   const diff=Number(d.player_vs_allowed_difference);
   const diffText=Number.isFinite(diff)?(diff>0?'+':'')+num(diff,2):'—';
-  const unit=d.stat_unit||({points:'PPG',threes:'3PM'}[p.market]||'per game');
+  const unit=d.stat_unit||({points:'points',threes:'3PM'}[p.market]||'per game');
   const label=d.stat_label||({points:'points',threes:'3-pointers made'}[p.market]||p.market||'stat');
   const weights=d.blend_weights&&typeof d.blend_weights==='object'?Object.entries(d.blend_weights).map(([k,v])=>k+' '+Math.round(Number(v)*100)+'%').join(' / '):'';
   const positionMeta=[d.position_source||'Position source unavailable',d.position_confidence?d.position_confidence+' confidence':'',weights?'Blend: '+weights:''].filter(Boolean).join(' · ');
