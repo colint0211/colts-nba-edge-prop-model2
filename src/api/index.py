@@ -2260,7 +2260,7 @@ def _propline_fetch_events():
 
     params = urlencode({
         "markets": ",".join(_PROPLINE_MARKETS.values()),
-        "bookmakers": "draftkings,fanduel",
+        "bookmakers": "draftkings",
         "includeLinks": "true",
         "max_age": 300,
     })
@@ -2839,6 +2839,14 @@ def proprietary_market_board(market: str = "points"):
         today_et = _active_nba_slate_date()
         prediction_ledger.initialize()
         frozen_slate = prediction_ledger.get_daily_slate(market, today_et)
+        # A previously frozen slate is immutable only if it was built by the
+        # current independent-probability, DraftKings-only model. Replace legacy
+        # snapshots created by the old sportsbook blend; never touch prior dates.
+        if frozen_slate and frozen_slate.get("candidates"):
+            if prediction_ledger.discard_legacy_daily_slate(market, today_et):
+                frozen_slate = None
+                _BP_BOARD_CACHE.pop(market, None)
+                cached_board = None
     except Exception:
         frozen_slate = None
     if frozen_slate and frozen_slate.get("candidates"):
