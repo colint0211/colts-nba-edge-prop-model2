@@ -801,6 +801,53 @@ def get_daily_slate(market, slate_date):
     }
 
 
+
+def discard_legacy_daily_slate(market, slate_date):
+    """Delete only today's frozen board when it contains legacy blended/non-DK rows.
+
+    The delete is guarded by a row lock and is deliberately date-scoped. Valid
+    current-model snapshots and every prior slate remain untouched.
+    """
+    market = str(market or "").strip().lower()
+    slate_date = str(slate_date or "").strip()
+    if market not in ("points", "threes"):
+        raise ValueError("Only points and threes are active markets.")
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT candidates FROM nba_daily_slates WHERE market=%s AND slate_date=%s FOR UPDATE",
+            (market, slate_date),
+        ).fetchone()
+        if not row:
+            return False
+        candidates = row[0]
+        if isinstance(candidates, str):
+            candidates = json.loads(candidates)
+        if not isinstance(candidates, list) or not candidates:
+            return False
+
+        def is_legacy(candidate):
+            if not isinstance(candidate, dict):
+                return True
+            weight = str(candidate.get("market_weight", "")).strip()
+            method = str(candidate.get("blend_method") or "").lower()
+            books = candidate.get("market_books") or []
+            non_dk = any("draft" not in str(book).lower() for book in books)
+            return (
+                weight not in ("0", "0.0", "0.00")
+                or "shrinkage" in method
+                or "blend" in method
+                or non_dk
+            )
+
+        if not any(is_legacy(candidate) for candidate in candidates):
+            return False
+        conn.execute(
+            "DELETE FROM nba_daily_slates WHERE market=%s AND slate_date=%s",
+            (market, slate_date),
+        )
+        return True
+
+
 def save_daily_top_three(rows, slate_date):
     """Save the first immutable Top 3 overall across points and threes for a slate."""
     import re
