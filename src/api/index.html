@@ -128,12 +128,13 @@ function grade(p){
   const side=String(p.best_side).toUpperCase(),line=Number(p.line);
   if(!Number.isFinite(line))return null;
 
-  // An OVER is mathematically secured as soon as the live stat exceeds
-  // the line. Show HIT immediately; do not wait for the final buzzer.
-  // (A later official stat correction could still change the box score.)
-  if(side==='OVER'&&g.state==='in'&&value>line)return 'HIT';
+  // Live outcomes that are already mathematically decided must be shown
+  // immediately for BOTH sides. An UNDER is lost as soon as the live stat
+  // exceeds its line; it cannot recover later in the game.
+  if(g.state==='in'&&side==='OVER'&&value>line)return 'HIT';
+  if(g.state==='in'&&side==='UNDER'&&value>line)return 'MISS';
 
-  // Unders and unresolved overs remain pending until the game is final.
+  // Remaining outcomes stay pending until the game is final.
   if(g.state!=='post')return null;
   if(value===line)return 'PUSH';
   return (side==='OVER'?value>line:value<line)?'HIT':'MISS';
@@ -385,11 +386,24 @@ function livePace(p){
   const expectedTotalMinutes=Number.isFinite(modelMinutes)&&modelMinutes>minutes
     ?modelMinutes:Math.max(minutes,Math.min(36,minutes+gameMinutesLeft));
   const remainingPlayerMinutes=Math.max(0,Math.min(gameMinutesLeft,expectedTotalMinutes-minutes));
+  const side=String(p.best_side||"").toUpperCase();
+  const label=({points:"pts",threes:"3PM"})[market]||"stat";
+
+  // A live UNDER is irreversibly lost once the player is above the line.
+  // Do not project future production and misleadingly label it "on pace".
+  if(side==="UNDER"&&current>line){
+    return {current,minutes,gameMinutesLeft,remainingPlayerMinutes:0,
+      projected:current,margin:current-line,verdict:"UNDER ALREADY LOST",label,decided:true};
+  }
+  // An OVER is already secured once the live total exceeds the line.
+  if(side==="OVER"&&current>line){
+    return {current,minutes,gameMinutesLeft,remainingPlayerMinutes:0,
+      projected:current,margin:current-line,verdict:"OVER ALREADY HIT",label,decided:true};
+  }
   const projected=current+(current/minutes)*remainingPlayerMinutes;
   const margin=projected-line;
   const verdict=margin>=0.5?"ON PACE TO HIT":margin<=-0.5?"ON PACE TO MISS":"TOO CLOSE TO CALL";
-  const label=({points:"pts",threes:"3PM"})[market]||"stat";
-  return {current,minutes,gameMinutesLeft,remainingPlayerMinutes,projected,margin,verdict,label};
+  return {current,minutes,gameMinutesLeft,remainingPlayerMinutes,projected,margin,verdict,label,decided:false};
 }
 function liveTickerHtml(p){
   const st=playerLive(p)||{},g=gameFor(p)||{},value=liveStatValue(p),pace=livePace(p);
@@ -410,11 +424,11 @@ function liveTickerHtml(p){
   }
   const minutesText=minutes==null?"—":num(minutes,1)+" min";
   const settledGrade=grade(p);
-  const outlookClass=pace?(pace.verdict==="ON PACE TO HIT"?"hit":pace.verdict==="ON PACE TO MISS"?"miss":"push"):"";
+  const outlookClass=pace?(pace.verdict==="ON PACE TO HIT"||pace.verdict==="OVER ALREADY HIT"?"hit":pace.verdict==="ON PACE TO MISS"||pace.verdict==="UNDER ALREADY LOST"?"miss":"push"):"";
   const resultHtml=settledGrade
     ?'<div class="mini-label" style="margin-top:6px">Final result: <span class="grade '+(settledGrade==="HIT"?"hit":settledGrade==="MISS"?"miss":"push")+'">'+(settledGrade==="HIT"?"✓ HIT":settledGrade==="MISS"?"✕ MISS":"PUSH")+'</span></div>'
     :pace
-      ?'<div class="mini-label" style="margin-top:6px">Live outlook: <span class="grade '+outlookClass+'">'+(pace.verdict==="ON PACE TO HIT"?"ON PACE TO HIT":pace.verdict==="ON PACE TO MISS"?"ON PACE TO MISS":"TOO CLOSE")+'</span></div>'
+      ?'<div class="mini-label" style="margin-top:6px">Live outlook: <span class="grade '+outlookClass+'">'+(pace.verdict==="OVER ALREADY HIT"?"OVER ALREADY HIT":pace.verdict==="UNDER ALREADY LOST"?"UNDER ALREADY LOST":pace.verdict==="ON PACE TO HIT"?"ON PACE TO HIT":pace.verdict==="ON PACE TO MISS"?"ON PACE TO MISS":"TOO CLOSE")+'</span></div>'
       :'';
   const paceHtml=pace
     ?'<div class="mini-value">'+num(pace.projected,1)+' '+label+' projected</div><div class="mini-label">'+num(pace.current,0)+' '+label+' in '+num(pace.minutes,1)+' min · '+num(pace.gameMinutesLeft,1)+' game min left · '+num(pace.remainingPlayerMinutes,1)+' expected player min left</div>'
