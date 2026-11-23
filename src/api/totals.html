@@ -181,10 +181,12 @@ async function loadBacktest(){
    ["Training residual SD",train.total_residual_sd==null?null:n(train.total_residual_sd,2)+" pts"],
    ["Train-only correction",c.total_offset_points==null?null:n(c.total_offset_points,2)+" pts"],
    ["Raw holdout MAE",raw.total_mae==null?null:n(raw.total_mae,2)+" pts"],
-   ["Calibrated holdout MAE",adj.total_mae==null?null:n(adj.total_mae,2)+" pts"]
+   ["Calibrated holdout MAE",adj.total_mae==null?null:n(adj.total_mae,2)+" pts"],
+   ["Holdout probability Brier",c.holdout_probability_brier==null?null:n(c.holdout_probability_brier,4)],
+   ["Probability calibration error",c.holdout_probability_calibration_error==null?null:n(c.holdout_probability_calibration_error,3)]
   ];
   el("validationMetrics").innerHTML=metrics.map(x=>'<div class="stat"><div class="statlabel">'+x[0]+'</div><div class="num">'+(x[1]??"—")+'</div></div>').join("");
-  el("validationNote").textContent=(backtest.method||"Walk-forward validation")+". Training seasons: "+(c.training_seasons||"—")+". Untouched holdout: "+(c.holdout_season||"—")+". Calibration status: "+(c.status||"pending")+".";
+  el("validationNote").textContent=(backtest.method||"Walk-forward validation")+". Training seasons: "+(c.training_seasons||"—")+". Untouched holdout: "+(c.holdout_season||"—")+". Calibration status: "+(c.status||"pending")+". Probability metrics use fixed pseudo-lines around model projections because historical executable DraftKings totals are unavailable.";
   const warn=el("validationWarning");
   if(!c.validated){warn.style.display="block";warn.textContent="OFFICIAL PICKS ARE DISABLED. The training-only model calibration has not passed the predefined untouched-holdout gate. Projections remain research-only until bias and error checks pass.";}
   else{warn.style.display="none";}
