@@ -8,6 +8,7 @@ on:
     paths:
       - src/api/nba_historical_backtest.py
       - src/api/nba_live_aligned_backtest.py
+      - src/api/nba_totals_backtest.py
       - src/api/nba_historical_ats_backtest.py
       - src/api/nba_free_ats_backtest.py
       - src/api/game_model.py
@@ -15,6 +16,7 @@ on:
       - src/api/totals.html
       - src/api/index.py
       - tests/test_nba_totals.py
+      - tests/test_nba_totals_backtest.py
       - src/api/prediction_ledger.py
       - tests/test_game_model_player_impact.py
       - tests/test_historical_ats_backtest.py
@@ -75,6 +77,9 @@ jobs:
       - name: Run production-formula-aligned walk-forward validation
         run: python -m src.api.nba_live_aligned_backtest
 
+      - name: Run season-to-date NBA totals walk-forward validation
+        run: python -m src.api.nba_totals_backtest
+
       - name: Publish training-only NBA totals calibration snapshot
         shell: bash
         run: |
@@ -83,7 +88,7 @@ jobs:
           python - <<'PY'
           import json
           from datetime import datetime, timezone
-          with open("nba_live_aligned_backtest.json", encoding="utf-8") as source:
+          with open("nba_totals_backtest.json", encoding="utf-8") as source:
               payload = json.load(source)
           payload["generated_at"] = datetime.now(timezone.utc).isoformat()
           with open("data/nba_totals_backtest.json", "w", encoding="utf-8") as output:
@@ -110,6 +115,7 @@ jobs:
           path: |
             backtest_results.json
             nba_live_aligned_backtest.json
+            nba_totals_backtest.json
             data/nba_totals_backtest.json
             nba_free_ats_backtest.json
           if-no-files-found: error
