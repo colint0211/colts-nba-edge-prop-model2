@@ -1,404 +1,209 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="theme-color" content="#07111f">
-<title>Colt's NBA Edge — Player Props, Sides & Totals</title>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Colt's NBA Totals Model</title>
 <style>
-:root{color-scheme:dark;--bg:#07111f;--panel:#101d30;--panel2:#14243a;--line:#263a53;--text:#eff6ff;--muted:#9aacc3;--green:#47e0a1;--red:#ff7e8a;--gold:#ffd27a}
-*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at top,#132b46 0%,var(--bg) 55%);color:var(--text);font:14px/1.5 system-ui,-apple-system,Segoe UI,sans-serif}
-header{padding:22px clamp(14px,4vw,42px);background:rgba(8,18,32,.9);border-bottom:1px solid var(--line)}
-main{max-width:1280px;margin:auto;padding:20px clamp(12px,3vw,30px) 44px}
-.head{display:flex;justify-content:space-between;align-items:center;gap:15px;flex-wrap:wrap}
-h1{font-size:clamp(24px,4vw,34px);letter-spacing:-.7px;margin:0;font-weight:900}.brand{color:var(--green)}
-.sub{color:var(--muted);margin:5px 0 0}.status{border:1px solid #31516a;border-radius:99px;padding:7px 11px;font-size:11px;font-weight:900;letter-spacing:.5px}
-.toolbar,.tabs,.filters{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin:15px 0}
-button,input,select{padding:10px 12px;background:var(--panel2);color:inherit;border:1px solid var(--line);border-radius:10px;font:inherit}
-button{cursor:pointer;font-weight:800}button:hover{border-color:var(--green)}button.active{background:#123c32;border-color:#2d9876;color:var(--green)}
-.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
-.stat,.card,.panel{padding:14px;background:linear-gradient(145deg,#14243a,#0e1a2c);border:1px solid var(--line);border-radius:14px;min-width:0}
-.statlabel,.muted,.hint{color:var(--muted)}.statlabel{font-size:11px}.num{font-size:25px;font-weight:900;margin-top:3px}
-.section{font-size:19px;font-weight:900;margin:24px 0 4px}.hint{font-size:12px;margin-bottom:12px}
+:root{color-scheme:dark;--bg:#070c14;--panel:#101c2b;--panel2:#14243a;--line:#263b55;--text:#e8f0fa;--muted:#9aabc0;--green:#43d49a;--red:#ff727f;--gold:#f0c36a;--blue:#78b8ff}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 Inter,system-ui,-apple-system,Segoe UI,sans-serif}
+header{background:#0b1421;border-bottom:1px solid var(--line);padding:20px clamp(14px,3vw,38px);position:sticky;top:0;z-index:5}
+.head,.toolbar{max-width:1500px;margin:auto;display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap}
+h1{font-size:24px;margin:0;font-weight:900;letter-spacing:.2px}.brand{color:var(--green)}.sub,.muted,.hint{color:var(--muted)}.sub{margin:3px 0 0;font-size:12px}
+.toolbar{margin-top:14px;justify-content:flex-start;font-size:12px}
+button,input{background:#15263a;color:var(--text);border:1px solid var(--line);border-radius:9px;padding:9px 12px;font:inherit}
+button{font-weight:800;cursor:pointer}button:hover{border-color:var(--green)}
+.status{border:1px solid #286b57;color:var(--green);background:#102c27;padding:6px 10px;border-radius:99px;font-size:11px;font-weight:900}
+main{max-width:1500px;margin:auto;padding:20px clamp(12px,3vw,38px) 45px}
+.stats{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}
+.stat{background:linear-gradient(145deg,#14243a,#0e1928);border:1px solid var(--line);border-radius:13px;padding:13px}
+.statlabel{font-size:11px;color:var(--muted)}.num{font-size:24px;font-weight:900;margin-top:3px;font-variant-numeric:tabular-nums}
+.section{font-size:19px;font-weight:900;margin:25px 0 4px}.hint{font-size:12px;margin-bottom:12px}
+.picks{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.pick{border:1px solid #286b57;background:linear-gradient(145deg,#10332d,#101d2b);border-radius:13px;padding:13px}
+.pick .top{display:flex;justify-content:space-between;gap:8px}.pick strong{font-size:15px}.ev{font-size:17px;font-weight:900;color:var(--green)}
 .cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
-.card{position:relative;overflow:hidden}.card:before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--green)}
-.card.pass:before{background:var(--gold)}
-.top{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.name{font-size:17px;font-weight:900}.match{font-size:12px;color:var(--muted);margin-top:4px}
-.decision{font-size:10px;font-weight:900;border-radius:99px;padding:5px 8px;background:#103c30;color:var(--green);white-space:nowrap}
-.linebox{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:13px 0;padding:12px;background:#091625;border:1px solid #20354d;border-radius:11px}
-.line-label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.8px}.line{font-size:21px;font-weight:950}
-.metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
-.mini{background:#15263c;border:1px solid #293e58;border-radius:10px;padding:10px;min-width:0}
-.mini-label{font-size:10px;color:var(--muted)}.mini-value{font-size:19px;font-weight:900;margin-top:3px;overflow-wrap:anywhere}
-.positive{color:var(--green)}.negative{color:var(--red)}.gold{color:var(--gold)}
-.bottom{border-top:1px solid #243850;margin-top:12px;padding-top:10px;display:flex;gap:8px;justify-content:space-between;flex-wrap:wrap;color:var(--muted);font-size:11px}
-details{margin-top:10px;color:var(--muted);font-size:12px}summary{cursor:pointer;font-weight:800;color:#cde3ff}
-.empty{padding:26px;border:1px dashed var(--line);border-radius:14px;text-align:center;color:var(--muted);grid-column:1/-1}
-.tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:12px;margin-top:12px}
-table{width:100%;border-collapse:collapse;min-width:800px;font-size:12px}th,td{padding:10px;text-align:left;border-bottom:1px solid #243850;white-space:nowrap}th{color:var(--muted);background:#0b1727}tr:last-child td{border-bottom:0}
-.win{color:var(--green);font-weight:900}.loss{color:var(--red);font-weight:900}.push{color:var(--gold);font-weight:900}
-.source{font-size:11px;color:var(--muted);margin-top:20px;line-height:1.6}
-.ticker{margin-top:9px;padding:9px 11px;border:1px solid #29415d;border-radius:10px;background:#091625;display:flex;gap:8px;justify-content:space-between;align-items:center;flex-wrap:wrap;font-size:12px}.ticker-state{font-weight:900;letter-spacing:.25px}.ticker-detail{color:var(--muted);font-size:11px}.ticker.live .ticker-state{color:var(--gold)}.ticker.live .ticker-state.miss{color:var(--red)}.ticker.final .ticker-state.hit{color:var(--green)}.ticker.final .ticker-state.miss{color:var(--red)}.ticker.final .ticker-state.push{color:var(--gold)}.ticker.wait .ticker-state{color:var(--muted)}
-@media(max-width:760px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.cards{grid-template-columns:1fr}.num{font-size:22px}}
+.card{background:linear-gradient(145deg,#132238,#0c1726);border:1px solid var(--line);border-radius:15px;padding:15px;min-width:0}
+.card.qualified{border-color:#2b8669;box-shadow:inset 3px 0 0 var(--green)}.card.blocked{border-color:#6a4e2d}
+.cardhead{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}.matchup{font-size:16px;font-weight:900}.meta{font-size:11px;color:var(--muted);margin-top:2px}
+.signal{font-size:10px;font-weight:900;border-radius:99px;padding:5px 8px;background:#25344a;color:#d9e6f6;white-space:nowrap}
+.signal.good{background:#103c30;color:var(--green)}.signal.warn{background:#40321e;color:var(--gold)}.signal.bad{background:#3b2029;color:var(--red)}
+.projections{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:13px 0}
+.metric{background:#091522;border:1px solid #20344c;border-radius:10px;padding:10px}.metric small{display:block;color:var(--muted);font-size:10px}.metric b{display:block;font-size:20px;font-weight:900;font-variant-numeric:tabular-nums}
+.marketgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.side{background:#0b1726;border:1px solid #243951;border-radius:10px;padding:10px}.side.active{border-color:var(--green)}
+.side h3{margin:0 0 6px;font-size:12px}.side .big{font-size:19px;font-weight:900}.side p{font-size:11px;color:var(--muted);margin:3px 0}
+.reason{margin-top:12px;border:1px solid #263d57;border-radius:10px;background:#0a1523;padding:10px}.reason summary{cursor:pointer;font-weight:850;color:#cfe3ff;font-size:12px}
+.factor{display:flex;justify-content:space-between;gap:10px;font-size:11px;padding:5px 0;border-bottom:1px solid #203148}.factor:last-child{border:0}.positive{color:var(--green)}.negative{color:var(--red)}.zero{color:var(--muted)}
+.note{font-size:10px;color:var(--muted);margin-top:9px}
+.panel{background:#101c2b;border:1px solid var(--line);border-radius:14px;padding:14px;margin-top:15px}
+.tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:11px;margin-top:10px}
+table{width:100%;border-collapse:collapse;min-width:720px;font-size:12px}th,td{padding:9px 10px;text-align:left;border-bottom:1px solid #24364e;white-space:nowrap}th{color:var(--muted);background:#0a1523}tr:last-child td{border-bottom:0}
+.hit{color:var(--green);font-weight:900}.miss{color:var(--red);font-weight:900}.push{color:var(--gold);font-weight:900}
+.validation{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px;margin-top:10px}
+.validation .stat{padding:11px}.validation .num{font-size:19px}
+.warning{border:1px solid #725a31;background:#2b2417;color:#f0d394;border-radius:10px;padding:10px 12px;font-size:12px;margin-top:12px}
+.empty{padding:25px;border:1px dashed var(--line);border-radius:12px;text-align:center;color:var(--muted);grid-column:1/-1}
+footer{font-size:11px;color:var(--muted);margin-top:22px}
+@media(max-width:900px){.stats{grid-template-columns:repeat(3,minmax(0,1fr))}.cards{grid-template-columns:1fr}}
+@media(max-width:560px){header{padding:15px 12px}.stats{grid-template-columns:repeat(2,minmax(0,1fr))}.picks{grid-template-columns:1fr}.num{font-size:21px}.projections{gap:5px}.metric{padding:8px}.metric b{font-size:17px}.card{padding:12px}.section{margin-top:21px}}
 </style>
 </head>
 <body>
 <header>
  <div class="head">
-  <div><h1><span class="brand">COLT'S</span> NBA EDGE</h1><p class="sub">One dashboard · player props, point spreads and full-game totals</p></div>
+  <div><h1><span class="brand">COLT'S</span> NBA TOTALS MODEL</h1><p class="sub">Independent full-game points projections · DraftKings totals · calibrated probabilities · transparent reasoning</p></div>
   <span id="status" class="status">CONNECTING</span>
  </div>
  <div class="toolbar">
-  <button onclick="refreshBoard()">↻ Refresh board</button>
-  <span id="updated" class="muted">Waiting for today's slate…</span>
-  <span id="slateDate" class="muted"></span>
+  <button onclick="refreshBoard(true)">↻ Refresh model</button>
+  <label class="muted">Slate date <input id="slateDate" type="date"></label>
+  <button onclick="previewDate()">Preview date</button>
+  <span id="updated" class="muted">Waiting for model data…</span>
+  <span id="live" class="muted"></span>
  </div>
 </header>
 <main>
- <div class="section">Independent records</div>
- <div class="grid">
-  <div class="stat"><div class="statlabel">Sides · W–L</div><div id="recSides" class="num">—</div><div id="recSidesSub" class="muted">Official sides ledger</div></div>
-  <div class="stat"><div class="statlabel">Totals · W–L</div><div id="recTotals" class="num">—</div><div id="recTotalsSub" class="muted">Experimental totals ledger</div></div>
-  <div class="stat"><div class="statlabel">Top 5 EV props · W–L</div><div id="recTopEv" class="num">—</div><div id="recTopEvSub" class="muted">Across all five markets</div></div>
-  <div class="stat"><div class="statlabel">All five markets · W–L</div><div id="recAllProps" class="num">—</div><div id="recAllPropsSub" class="muted">Up to 25 locked props</div></div>
+ <div class="stats">
+  <div class="stat"><div class="statlabel">Games on slate</div><div id="gamesCount" class="num">—</div></div>
+  <div class="stat"><div class="statlabel">Qualified totals</div><div id="picksCount" class="num">—</div></div>
+  <div class="stat"><div class="statlabel">Settled record</div><div id="record" class="num">—</div></div>
+  <div class="stat"><div class="statlabel">Win rate</div><div id="winRate" class="num">—</div></div>
+  <div class="stat"><div class="statlabel">Net units</div><div id="units" class="num">—</div></div>
  </div>
 
- <div class="section" id="boardTitle">Point spread candidates</div>
- <div class="hint" id="boardHint">Sides and totals are evaluated independently from sportsbook prices.</div>
- <div class="tabs" aria-label="Model sections">
-  <button id="nav-props" onclick="setSection('props')">Player Props</button>
-  <button id="nav-sides" class="active" onclick="setSection('sides')">Sides</button>
-  <button id="nav-totals" onclick="setSection('totals')">Totals</button>
- </div>
- <div id="propMarkets" class="tabs" style="display:none" aria-label="Player prop markets">
-  <button data-prop-market="points" onclick="setPropMarket('points')">Points</button>
-  <button data-prop-market="rebounds" class="active" onclick="setPropMarket('rebounds')">Rebounds</button>
-  <button data-prop-market="assists" onclick="setPropMarket('assists')">Assists</button>
-  <button data-prop-market="steals" onclick="setPropMarket('steals')">Steals</button>
-  <button data-prop-market="threes" onclick="setPropMarket('threes')">3-Pointers</button>
- </div>
- <div id="board" class="cards"><div class="empty">Loading team ratings and DraftKings lines…</div></div>
+ <div class="section">Today's qualified totals</div>
+ <div class="hint">Maximum five locked plays, ranked by model EV. A play appears only when the historical holdout gate passes and the current DraftKings price offers at least 3% expected value.</div>
+ <div id="picks" class="picks"><div class="empty">Loading qualified totals…</div></div>
 
- <div id="propHistoryPanel">
-  <div class="section">Daily locked player prop candidates</div>
- <div class="hint">Timestamped pregame candidates that passed data-quality and calibration gates are tracked here. They remain research-only until market-level validation is passed; markets without qualified candidates stay blank.</div>
- <div class="filters"><span id="propHistoryStatus" class="muted">Loading player prop results…</span></div>
- <div class="tablewrap">
-  <table><thead><tr><th>Market</th><th>Player</th><th>Matchup</th><th>Side</th><th>Line</th><th>Odds</th><th>Model %</th><th>Projection</th><th>Live ticker</th><th>Actual</th><th>Result</th><th>Units</th></tr></thead>
-  <tbody id="propHistoryRows"><tr><td colspan="12">Loading…</td></tr></tbody></table>
- </div>
- <div class="section">Top 5 EV player props · separate record</div>
- <div class="hint">Five highest-EV picks selected across points, rebounds, assists, steals and threes. Settled independently from the market Top 5 sets.</div>
- <div class="filters"><span id="topEvStatus" class="muted">Loading…</span></div>
- <div class="tablewrap"><table><thead><tr><th>Market</th><th>Player</th><th>Matchup</th><th>Side</th><th>Line</th><th>Odds</th><th>Model %</th><th>EV</th><th>Live ticker</th><th>Actual</th><th>Result</th><th>Units</th></tr></thead><tbody id="topEvRows"><tr><td colspan="12">Loading…</td></tr></tbody></table></div>
+ <div class="section">Every game · model projections</div>
+ <div class="hint">The model projects each team's score independently, combines them into a game total, and compares the resulting distribution with the DraftKings main total. Prices never determine the proprietary projection.</div>
+ <div id="games" class="cards"><div class="empty">Loading NBA game projections…</div></div>
 
- <div class="section">All 5 player props combined · separate record</div>
- <div class="hint">The five locked candidates from each of the five prop markets, up to 25 picks total. This record does not change the Top 5 EV record.</div>
- <div class="filters"><span id="allPropsStatus" class="muted">Loading…</span></div>
- <div class="tablewrap"><table><thead><tr><th>Market</th><th>Player</th><th>Matchup</th><th>Side</th><th>Line</th><th>Odds</th><th>Model %</th><th>EV</th><th>Live ticker</th><th>Actual</th><th>Result</th><th>Units</th></tr></thead><tbody id="allPropsRows"><tr><td colspan="12">Loading…</td></tr></tbody></table></div>
-
+ <div class="section">Historical validation</div>
+ <div class="hint">Chronological walk-forward test: historical team form is calculated using only prior completed games. Calibration coefficients and residual variance come from training seasons; the latest season is held out.</div>
+ <div class="panel">
+  <div id="validationStatus" class="status">VALIDATION LOADING</div>
+  <div id="validationMetrics" class="validation"></div>
+  <div id="validationNote" class="note">Loading validation report…</div>
+  <div id="validationWarning" class="warning" style="display:none"></div>
  </div>
 
-  <div class="section">Experimental totals · separate record</div>
- <div class="hint">Totals probabilities and EV are tracked separately from official sides. The total model remains experimental because its untouched holdout showed material projection bias.</div>
- <div class="filters"><span id="totalsHistoryStatus" class="muted">Loading…</span></div>
- <div class="tablewrap"><table><thead><tr><th>Matchup</th><th>Selection</th><th>Line</th><th>Odds</th><th>Model %</th><th>No-vig %</th><th>EV</th><th>Projection</th><th>Actual</th><th>Result</th><th>Units</th></tr></thead><tbody id="totalsHistoryRows"><tr><td colspan="11">Loading…</td></tr></tbody></table></div>
-
- <div class="section">Daily model results</div>
- <div class="hint">The model record below belongs only to this sides-and-totals model. Units are hypothetical at 1u per pick. The former player-prop ledger is preserved separately and is not included.</div>
- <div class="filters">
-  <label class="muted">Slate date <input id="historyDate" type="date"></label>
-  <button onclick="loadHistory()">↻ Refresh results</button>
-  <span id="historyStatus" class="muted">Loading…</span>
- </div>
- <div class="tablewrap">
-  <table><thead><tr><th>Market</th><th>Matchup</th><th>Selection</th><th>Line</th><th>Odds</th><th>Model %</th><th>Market %</th><th>Projected score</th><th>Actual</th><th>Result</th><th>Units</th></tr></thead>
-  <tbody id="historyRows"><tr><td colspan="11">Loading…</td></tr></tbody></table>
+ <div class="section">Locked daily results</div>
+ <div class="hint">Only saved pregame totals are settled. Live scores never rewrite the original pick; final box scores determine the result.</div>
+ <div class="panel">
+  <div id="historyStatus" class="muted">Loading daily record…</div>
+  <div class="tablewrap"><table><thead><tr><th>Matchup</th><th>Pick</th><th>Line</th><th>Odds</th><th>Model %</th><th>Projection</th><th>Actual total</th><th>Result</th><th>Units</th></tr></thead><tbody id="historyRows"><tr><td colspan="9">Loading…</td></tr></tbody></table></div>
  </div>
 
- <div class="section">Model data and methodology</div>
- <div id="sources" class="panel muted">Checking data sources…</div>
- <div class="source">Team strength uses estimated offensive/defensive efficiency, net rating, pace, effective field-goal percentage and turnover rate. Offensive rebounds are approximated in the possession estimate. Situational features include rest, back-to-backs, travel, time-zone changes and elevation. Official injury reports are checked after initial candidate ranking. Games with questionable/doubtful rotation availability are withheld until that absence can be valued reliably. True EPM and reliable on/off ratings are not yet integrated. DraftKings lines are used to calculate market-relative edge and expected value; they are not used to create the model's projected score or probability. Historical player-prop results remain archived and are never blended into this record.</div>
+ <div class="section">Model methodology and safeguards</div>
+ <div class="panel">
+  <ul>
+   <li>Independent home and away score projections from opponent-adjusted offensive/defensive efficiency and pace.</li>
+   <li>Training-only historical bias correction and residual standard deviation; the untouched holdout is an eligibility audit, never a source of fitted coefficients.</li>
+   <li>Normal distribution for game totals with integer-line push probability handled explicitly.</li>
+   <li>DraftKings main full-game total only. No spreads, moneylines, player props or alternate totals.</li>
+   <li>Two-sided no-vig market probability is a comparison benchmark only. Model probability remains independent.</li>
+   <li>Minimum 3% expected value, fresh odds feed and no unresolved questionable/doubtful player availability.</li>
+   <li>Daily game projections and official picks are frozen once. Settlement uses final scores only.</li>
+   <li>Counterfactual factor impacts are explanatory model diagnostics, not causal effects.</li>
+  </ul>
+  <div class="note" id="sourceStatus">Source information will appear after the slate loads.</div>
+ </div>
+ <footer>NBA team ratings and injury information use free public sources already configured in the project. DraftKings main totals are retrieved through the existing PropLine connection. No new paid data provider has been added. Historical sportsbook totals prices are not currently available for a complete ROI or CLV backtest.</footer>
 </main>
 <script>
-let boardData=null,market='sides',section='sides',propMarket='rebounds',propBoards={},historyRows=[];
-let liveStatsData=null,dailyPropRows=[],topEvPropRows=[],allPropRows=[],liveTickerBusy=false;
+let board=null,backtest=null,historyRows=[];
 const el=id=>document.getElementById(id);
-const fmt=(n,d=1)=>n==null||!Number.isFinite(Number(n))?'—':Number(n).toFixed(d);
-const signed=n=>n==null?'—':(Number(n)>0?'+':'')+fmt(n,1);
-const odds=n=>n==null?'—':(Number(n)>0?'+':'')+n;
-const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const LIVE_STAT_FIELDS={points:'points',rebounds:'rebounds',assists:'assists',steals:'steals',threes:'three_points_made'};
-const LIVE_STAT_LABELS={points:'PTS',rebounds:'REB',assists:'AST',steals:'STL',threes:'3PM'};
-function liveNameKey(s){return String(s||'').toLowerCase().replace(/[^a-z0-9]/g,'');}
-function gradeProp(side,actual,line){if(Math.abs(Number(actual)-Number(line))<1e-9)return 'PUSH';if(side==='OVER')return Number(actual)>Number(line)?'HIT':'MISS';if(side==='UNDER')return Number(actual)<Number(line)?'HIT':'MISS';return null;}
-function liveTicker(p){
- const marketName=String(p.market||'').toLowerCase(),field=LIVE_STAT_FIELDS[marketName],label=LIVE_STAT_LABELS[marketName]||marketName.toUpperCase();
- const key=liveNameKey(p.player),byName=liveStatsData?.players_by_name||{},byId=liveStatsData?.players_by_id||{};
- const player=byName[key]||(p.athlete_id?byId[String(p.athlete_id)]:null);
- const game=player?.game_id?(liveStatsData?.games||[]).find(g=>String(g.id||g.event_id)===String(player.game_id)):null;
- const raw=player&&field?player[field]:null,actual=raw==null?null:Number(raw),line=Number(p.line),side=String(p.side||p.best_side||'').toUpperCase();
- if(p.outcome){const result=p.outcome==='WIN'?'HIT':p.outcome==='LOSS'?'MISS':p.outcome;const cls=result==='HIT'?'hit':result==='MISS'?'miss':'push';return '<div class="ticker final"><span class="ticker-state '+cls+'">FINAL · '+result+'</span><span class="ticker-detail">'+(p.actual_value==null?'':fmt(p.actual_value,1)+' '+label)+' · official settlement</span></div>';}
- if(!player||!Number.isFinite(actual)){
-  const status=game?.state==='in'?'LIVE · waiting for player box score':game?.state==='post'?'FINAL · waiting for verified settlement':game?.state==='pre'?'TIP-OFF PENDING':'Waiting for live game feed';
-  return '<div class="ticker wait"><span class="ticker-state">'+status+'</span><span class="ticker-detail">No live stat received yet</span></div>';
- }
- if(game?.state==='post'){
-  const result=gradeProp(side,actual,line)||'PENDING';
-  const cls=result==='HIT'?'hit':result==='MISS'?'miss':'push';
-  return '<div class="ticker final"><span class="ticker-state '+cls+'">FINAL · '+result+'</span><span class="ticker-detail">'+fmt(actual,1)+' '+label+' vs '+fmt(line,1)+' · '+esc(game.status||'Game complete')+'</span></div>';
- }
- if(game?.state==='pre')return '<div class="ticker wait"><span class="ticker-state">TIP-OFF PENDING</span><span class="ticker-detail">'+fmt(actual,1)+' '+label+' · '+esc(game.status||'Scheduled')+'</span></div>';
- let tracking='';
- if(side==='OVER'){const needed=Math.max(0,Math.floor(line)+1-actual);tracking=actual>line?'TRACKING OVER':needed+' MORE TO CLEAR';}
- else if(side==='UNDER')tracking=actual<line?'TRACKING UNDER':actual===line?'ON THE LINE':'MISS';
- else tracking='LIVE';
- const period=Number(game?.period||0),periodText=period>4?(period-4)+'OT':period?'Q'+period:'';
- const clock=[periodText,game?.clock].filter(Boolean).join(' ');
- return '<div class="ticker live"><span class="ticker-state '+(side==='UNDER'&&actual>line?'miss':'')+'">'+esc(tracking)+'</span><span class="ticker-detail">'+fmt(actual,1)+' '+label+' / '+fmt(line,1)+' · '+esc(clock||game?.status||'Live')+'</span></div>';
-}
-function renderDailyPropRows(){
- const body=el('propHistoryRows');if(!body)return;
- body.innerHTML=dailyPropRows.length?dailyPropRows.map(p=>{
-  const result=p.outcome?(p.outcome==='WIN'?'HIT':p.outcome==='LOSS'?'MISS':p.outcome):'PENDING';
-  const cls=result==='HIT'?'win':result==='MISS'?'loss':result==='PUSH'?'push':'';
-  const profit=p.profit_units==null?'—':(p.profit_units>0?'+':'')+fmt(p.profit_units,2)+'u';
-  return '<tr><td>'+esc(p.market)+'</td><td>'+esc(p.player)+'</td><td>'+esc(p.game||'')+'</td><td>'+esc(p.side)+'</td><td>'+fmt(p.line,1)+'</td><td>'+odds(p.odds)+'</td><td>'+fmt(p.probability_pct,1)+'%</td><td>'+fmt(p.projection,1)+'</td><td>'+liveTicker(p)+'</td><td>'+fmt(p.actual_value,1)+'</td><td class="'+cls+'">'+result+'</td><td>'+profit+'</td></tr>';
- }).join(''):'<tr><td colspan="12">No qualified, locked player prop candidates were recorded for this date. Research candidates are tracked for audit, not treated as official bets.</td></tr>';
-}
-async function refreshLivePropStats(){
- if(liveTickerBusy)return;liveTickerBusy=true;
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const n=(v,d=1)=>v===null||v===undefined||!Number.isFinite(Number(v))?"—":Number(v).toFixed(d);
+const odds=v=>v===null||v===undefined?"—":(Number(v)>0?"+":"")+Math.round(Number(v));
+const units=v=>(Number(v)>0?"+":"")+n(v,2)+"u";
+function stat(target,value){el(target).textContent=value??"—";}
+async function json(url){const r=await fetch(url,{cache:"no-store"});const d=await r.json();if(!r.ok)throw Error(d.detail||d.error||"Request failed: "+r.status);return d;}
+async function refreshBoard(force=false,dateValue=null){
+ el("status").textContent="LOADING";el("updated").textContent="Refreshing model…";
  try{
-  const r=await fetch('/api/live-stats?t='+Date.now(),{cache:'no-store'});if(!r.ok)throw Error('Live stats unavailable');
-  liveStatsData=await r.json();renderDailyPropRows();
-  if(topEvPropRows.length)el('topEvRows').innerHTML=renderPropGroupRows(topEvPropRows);
-  if(allPropRows.length)el('allPropsRows').innerHTML=renderPropGroupRows(allPropRows);
-  if(section==='props'&&propBoards[propMarket])renderPropBoard(propMarket);
- }catch(e){/* Keep the last verified ticker values visible during a temporary feed outage. */}
- finally{liveTickerBusy=false;}
-}
-function setSection(next){
- section=next;
- ['props','sides','totals'].forEach(x=>el('nav-'+x).classList.toggle('active',section===x));
- el('propMarkets').style.display=section==='props'?'flex':'none';
-  el('propHistoryPanel').style.display=section==='props'?'block':'none';
- el('boardTitle').textContent=section==='props'?'Player prop candidates':section==='sides'?'Point spread candidates':'Game total candidates';
- el('boardHint').textContent=section==='props'?'Proprietary player projections ranked by verified DraftKings lines and two-sided prices. Five markets are shown separately; totals are experimental and not official picks.':'Sides and totals are evaluated independently from sportsbook prices.';
- if(section==='props'){loadPropBoard(propMarket);return;}
- market=section;renderBoard();
-}
-function setMarket(m){setSection(m)}
-function setPropMarket(m){
- propMarket=m;
- document.querySelectorAll('[data-prop-market]').forEach(b=>b.classList.toggle('active',b.dataset.propMarket===m));
- loadPropBoard(m);
-}
-async function loadPropBoard(m){
- const host=el('board');
- if(propBoards[m]){renderPropBoard(m);return;}
- host.innerHTML='<div class="empty">Loading verified '+m+' lines and player projections…</div>';
- try{
-  const r=await fetch('/api/proprietary-market-board?market='+encodeURIComponent(m)+'&t='+Date.now(),{cache:'no-store'});
-  const d=await r.json();if(!r.ok)throw Error(d.detail||d.error||'Player prop board unavailable');
-  propBoards[m]=d;renderPropBoard(m);
-  el('updated').textContent='Player props · '+m+' · '+(d.source||'model');
-  el('slateDate').textContent='Slate: '+(d.daily_slate_date||'today');
- }catch(e){host.innerHTML='<div class="empty">Player props unavailable: '+esc(e.message||e)+'. No picks have been fabricated.</div>';}
-}
-function renderPropBoard(m){
- const d=propBoards[m]||{};
- const score=p=>{
-  const v=p.expected_value_pct!=null?Number(p.expected_value_pct):
-   Number(p.best_side==='OVER'?p.over_ev_pct:p.best_side==='UNDER'?p.under_ev_pct:NaN);
-  return Number.isFinite(v)?v:-1e9;
- };
- const list=[...(d.props||[])].sort((a,b)=>score(b)-score(a)).slice(0,5);
- el('status').textContent='PROP RESEARCH ONLY';
- el('updated').textContent='Top 5 '+m+' candidates by estimated raw EV · research only';
- el('slateDate').textContent='Slate: '+(d.daily_slate_date||d.slate_date||'today');
- el('board').innerHTML=list.length?list.map((p,i)=>{
-  const gameState=(p.balldontlie_game||{}).game_state||'UNKNOWN';
-  const calibrated=p.calibration_applied===true;
-  const status=gameState==='LIVE'?'IN-GAME · EXCLUDED':gameState==='FINAL'?'FINAL · AUDIT ONLY':
-   gameState!=='PRE_GAME'?'PREGAME UNVERIFIED · RESEARCH ONLY':'RESEARCH ONLY · NOT AN OFFICIAL PLAY';
-  const held=p.projection_review_required===true;
-  const side=held?'HOLD · REVIEW':(p.best_side||'NO LEAN');
-  const ev=score(p);
-  const evText=ev>-1e8?(ev>0?'+':'')+fmt(ev,1)+'%':'—';
-  const prob=p.best_probability==null?'—':fmt(p.best_probability,1)+'%';
-  const calibratedText=calibrated?'historical calibration map applied; market-relative validation still fails':'calibration sample/gates not met';
-  const stateText=gameState==='PRE_GAME'?'Pregame status verified':gameState==='LIVE'?'Game has started':gameState==='FINAL'?'Game is final':'Game state unavailable';
-  return '<article class="card pass"><div class="top"><div><div class="name">'+(i+1)+'. '+esc(p.player||'Unknown player')+'</div><div class="match">'+esc(p.team||'')+' · '+esc(p.game||'')+'</div></div><span class="decision">'+esc(status)+'</span></div>'+
-   '<div class="linebox"><div><div class="line-label">'+esc(m.toUpperCase())+' · DraftKings line</div><div class="line">'+fmt(p.line,1)+'</div></div><div style="text-align:right"><div class="line-label">Model lean</div><div class="line">'+esc(side)+'</div></div></div>'+
-   '<div class="metrics"><div class="mini"><div class="mini-label">Projection</div><div class="mini-value">'+fmt(p.projection??p.projected_value,1)+'</div></div>'+
-   '<div class="mini"><div class="mini-label">Model probability</div><div class="mini-value">'+prob+'</div></div>'+
-   '<div class="mini"><div class="mini-label">Estimated EV · unvalidated</div><div class="mini-value gold">'+evText+'</div></div></div>'+
-   '<div class="bottom"><span>Odds: O '+odds(p.over_odds)+' / U '+odds(p.under_odds)+'</span><span>'+esc(stateText)+'</span><span>Sample: '+(p.games_used??'—')+' games</span></div>'+liveTicker({...p,market:m})+
-   '<div class="source">'+(held?'HOLD — '+esc(p.projection_review_reason||'Projection and selected side conflict. No side or EV is published.')+' ':'RESEARCH ONLY — ')+esc(calibratedText)+'. Model has not beaten the no-vig market benchmark in this market. Do not treat this as an official bet.</div>'+
-   (p.probability_note?'<details><summary>Model notes</summary><p>'+esc(p.probability_note)+'</p></details>':'')+
-   '</article>';
- }).join(''):'<div class="empty">No '+esc(m)+' prop projections are available. The model will not force a pick.</div>';
- if(d.unavailable?.length)el('updated').textContent+=' · '+d.unavailable.length+' player data issues';
-}
-async function loadDailyPropHistory(day){
- const status=el('propHistoryStatus');
- if(!day){status.textContent='Choose a slate date to view player prop results.';return;}
- try{
-  const r=await fetch('/api/model/daily-top5?slate_date='+encodeURIComponent(day)+'&t='+Date.now(),{cache:'no-store'});
-  const d=await r.json();if(!r.ok)throw Error(d.detail||'Player prop history unavailable');
-  dailyPropRows=d.predictions||[];
-  const wins=dailyPropRows.filter(p=>p.outcome==='WIN').length;
-  const losses=dailyPropRows.filter(p=>p.outcome==='LOSS').length;
-  const pushes=dailyPropRows.filter(p=>p.outcome==='PUSH').length;
-  const pending=dailyPropRows.filter(p=>!p.outcome).length;
-  status.textContent=dailyPropRows.length+' locked prop candidates · '+wins+' HIT – '+losses+' MISS'+(pushes?' · '+pushes+' PUSH':'')+' · '+pending+' pending';
-  renderDailyPropRows();
+  const params=new URLSearchParams();if(force)params.set("refresh","true");if(dateValue)params.set("preview_date",dateValue);
+  board=await json("/api/game-board"+(params.toString()?"?"+params.toString():""));
+  const day=board.slate_date||new Date().toISOString().slice(0,10);
+  el("slateDate").value=day;
+  el("status").textContent=board.record_status||"READY";
+  el("updated").textContent=(board.frozen?"Locked pregame snapshot":"Updated")+" · "+day+" · "+new Date().toLocaleTimeString();
+  renderBoard();await Promise.all([loadMetrics(),loadBacktest(),loadHistory(day)]);
  }catch(e){
-  status.textContent='Player prop results unavailable: '+(e.message||e);
-  el('propHistoryRows').innerHTML='<tr><td colspan="12">Could not load the player prop ledger.</td></tr>';
+  el("status").textContent="DATA UNAVAILABLE";
+  el("updated").textContent=e.message||"Model data unavailable";
+  el("games").innerHTML='<div class="empty">'+esc(e.message||e)+'</div>';
+  el("picks").innerHTML='<div class="empty">No picks are issued when required model or market data cannot be verified.</div>';
  }
-}
-
-function recordSummary(target,sub,metric){
- const m=metric||{};
- el(target).textContent=(m.wins??0)+' – '+(m.losses??0)+(m.pushes?' / '+m.pushes+'P':'');
- el(sub).textContent=(m.win_rate_pct==null?'—':fmt(m.win_rate_pct,1)+'%')+' win rate · '+(m.net_units>0?'+':'')+fmt(m.net_units??0,2)+'u · '+(m.settled??0)+' settled';
-}
-function renderGameRecordStats(d){
- recordSummary('recSides','recSidesSub',d?.metrics?.by_market?.sides);
- recordSummary('recTotals','recTotalsSub',d?.experimental_totals_metrics);
-}
-function renderPropGroupRows(rows){
- return (rows||[]).length?rows.map(p=>{
-  const result=p.outcome?(p.outcome==='WIN'?'HIT':p.outcome==='LOSS'?'MISS':p.outcome):'PENDING';
-  const cls=result==='HIT'?'win':result==='MISS'?'loss':result==='PUSH'?'push':'';
-  const profit=p.profit_units==null?'—':(p.profit_units>0?'+':'')+fmt(p.profit_units,2)+'u';
-  return '<tr><td>'+esc(p.market)+'</td><td>'+esc(p.player)+'</td><td>'+esc(p.game||'')+'</td><td>'+esc(p.side)+'</td><td>'+fmt(p.line,1)+'</td><td>'+odds(p.odds)+'</td><td>'+fmt(p.probability_pct,1)+'%</td><td>'+fmt(p.expected_value_pct,1)+'%</td><td>'+liveTicker(p)+'</td><td>'+fmt(p.actual_value,1)+'</td><td class="'+cls+'">'+result+'</td><td>'+profit+'</td></tr>';
- }).join(''):'<tr><td colspan="12">No picks have been frozen in this record for this slate date.</td></tr>';
-}
-async function loadRecordGroups(day){
- try{
-  const r=await fetch('/api/model/record-groups?slate_date='+encodeURIComponent(day)+'&t='+Date.now(),{cache:'no-store'});
-  const d=await r.json();if(!r.ok)throw Error(d.detail||'Player-prop record groups unavailable');
-  const top=d.groups?.top5_ev_player_props||{},all=d.groups?.all_five_player_props_combined||{};
-  const tm=top.metrics||{},am=all.metrics||{};
-  recordSummary('recTopEv','recTopEvSub',tm);
-  recordSummary('recAllProps','recAllPropsSub',am);
-  const topRows=top.predictions||[],allRows=all.predictions||[];topEvPropRows=topRows;allPropRows=allRows;
-  el('topEvStatus').textContent=topRows.length+' saved picks · '+(tm.wins??0)+'W – '+(tm.losses??0)+'L · '+(tm.settled??0)+' settled';
-  el('allPropsStatus').textContent=allRows.length+' saved picks · '+(am.wins??0)+'W – '+(am.losses??0)+'L · '+(am.settled??0)+' settled';
-  el('topEvRows').innerHTML=renderPropGroupRows(topRows);
-  el('allPropsRows').innerHTML=renderPropGroupRows(allRows);
- }catch(e){
-  el('topEvStatus').textContent='Record unavailable: '+(e.message||e);
-  el('allPropsStatus').textContent='Record unavailable: '+(e.message||e);
- }
-}
-async function loadExperimentalTotalsHistory(day){
- try{
-  const r=await fetch('/api/game-experimental-totals-history?slate_date='+encodeURIComponent(day)+'&t='+Date.now(),{cache:'no-store'});
-  const d=await r.json();if(!r.ok)throw Error(d.detail||'Experimental totals history unavailable');
-  const rows=d.predictions||[],m=d.metrics||{};
-  el('totalsHistoryStatus').textContent=rows.length+' locked experimental totals · '+(m.wins??0)+'W – '+(m.losses??0)+'L · '+(m.settled??0)+' settled · '+(m.net_units>0?'+':'')+fmt(m.net_units??0,2)+'u all-time';
-  el('totalsHistoryRows').innerHTML=rows.length?rows.map(p=>{
-   const result=p.outcome||'PENDING',cls=result==='WIN'?'win':result==='LOSS'?'loss':result==='PUSH'?'push':'';
-   return '<tr><td>'+esc(p.matchup)+'</td><td>'+esc(p.selection)+'</td><td>'+fmt(p.line,1)+'</td><td>'+odds(p.odds)+'</td><td>'+fmt(p.model_probability*100,1)+'%</td><td>'+fmt(p.market_probability*100,1)+'%</td><td>'+fmt(p.ev_pct,2)+'%</td><td>'+fmt(p.projected_total,1)+'</td><td>'+fmt(p.actual_value,1)+'</td><td class="'+cls+'">'+result+'</td><td>'+(p.profit_units==null?'—':(p.profit_units>0?'+':'')+fmt(p.profit_units,2)+'u')+'</td></tr>';
-  }).join(''):'<tr><td colspan="11">No experimental totals were locked for this date.</td></tr>';
- }catch(e){el('totalsHistoryStatus').textContent='Totals record unavailable: '+(e.message||e);}
-}
-
-function adjustmentText(x){
- if(!x)return 'No situational data';
- const inj=(x.injuries||[]).map(p=>p.player+' · '+p.status+' · '+(p.impact_source||'impact unavailable')+' · '+signed(p.estimated_team_points||0)).join('; ');
- return 'Rest '+x.rest_days+' day(s) · travel '+x.travel_miles+' miles · time-zone change '+fmt(x.timezone_change_hours,1)+'h · altitude change '+fmt(x.altitude_change_feet,0)+' ft · rest adj '+signed(x.rest_adjustment)+' · travel adj '+signed(x.travel_adjustment)+' · injury adj '+signed(x.injury_adjustment)+(inj?' · '+inj:'');
-}
-function card(p,i){
- const side=market==='sides';
- const isOver=p.selection==='OVER';
- const label=side?'POINT SPREAD':'EXPERIMENTAL GAME TOTAL';
- const pick=side?(p.selection+' '+(p.line>0?'+':'')+p.line):(p.selection+' '+p.line);
- const edge=Number(p.edge_pp);
- const score=p.projected_away+' @ '+p.projected_home;
- const home= p.home_adjustments||{},away=p.away_adjustments||{};
- return '<article class="card"><div class="top"><div><div class="name">'+(i+1)+'. '+esc(p.selection_name||p.selection)+'</div><div class="match">'+esc(p.matchup)+' · DraftKings</div></div><span class="decision">MODEL CANDIDATE</span></div>'+
- '<div class="linebox"><div><div class="line-label">'+label+'</div><div class="line">'+esc(pick)+'</div></div><div style="text-align:right"><div class="line-label">Sportsbook price</div><div class="line">'+odds(p.odds)+'</div></div></div>'+
- '<div class="metrics"><div class="mini"><div class="mini-label">Unvalidated model probability</div><div class="mini-value">'+fmt(p.model_probability*100,1)+'%</div></div>'+
- '<div class="mini"><div class="mini-label">No-vig market</div><div class="mini-value">'+fmt(p.market_probability*100,1)+'%</div></div>'+
- '<div class="mini"><div class="mini-label">Model edge</div><div class="mini-value '+(Number(p.edge_pp)>=0?'positive':'negative')+'">'+(Number(p.edge_pp)>0?'+':'')+fmt(p.edge_pp,1)+' pp</div></div></div>'+
- '<div class="bottom"><span>Expected value: <b class="'+(Number(p.ev_pct)>=0?'positive':'negative')+'">'+(Number(p.ev_pct)>0?'+':'')+fmt(p.ev_pct,2)+'%</b></span><span>Projected score: '+fmt(p.projected_away,1)+' – '+fmt(p.projected_home,1)+'</span>'+
- '<span>'+ (side?'Projected cover margin: '+signed(p.expected_margin_after_spread):'Projected total: '+fmt(p.projected_total,1)+' · Line edge: '+signed(p.projected_total_edge))+'</span></div>'+
- '<div class="source">'+(side?'RESEARCH CANDIDATE ONLY — winner-probability validation does not establish spread-cover calibration; historical DraftKings closing-line/ATS validation is not yet available.':'EXPERIMENTAL TOTALS — model probability and EV are calculated from DraftKings prices, but totals are excluded from official picks because holdout bias remains unresolved.')+'</div>'+
- '<details><summary>Model factors and injury review</summary><p>Home: '+esc(adjustmentText(home))+'</p><p>Away: '+esc(adjustmentText(away))+'</p><p>Projected pace: '+fmt(p.projected_pace,1)+' · Model: '+esc(p.model_version)+'</p></details></article>';
 }
 function renderBoard(){
- if(!boardData)return;
- const list=market==='sides'?(boardData.sides||[]):(boardData.experimental_totals||[]);
- let message='No '+(market==='sides'?'spread':'total')+' candidates passed the current model gates. No pick will be forced.';
- if(boardData.record_status==='MISSED_PREGAME_WINDOW')message='MISSED PREGAME WINDOW — no verified pregame snapshots were recorded. We will not recreate picks using postgame information.';
- else if(boardData.record_status==='WAITING_FOR_LINES')message='WAITING FOR DRAFTKINGS LINES — scheduled games remain open; no empty slate was saved.';
- else if(boardData.record_status==='NO_GAMES')message='NO GAMES — no NBA games were found for this slate date.';
- else if(market==='totals'&&boardData.source_status?.totals_validation?.official_picks_enabled===false)message='TOTALS DISABLED — the latest untouched holdout showed material projection bias. No official totals are issued until recalibration passes.';
- el('board').innerHTML=list.length?list.map(card).join(''):'<div class="empty">'+esc(message)+'</div>';
+ const games=board?.games||[],picks=board?.picks||[];
+ stat("gamesCount",games.length);stat("picksCount",picks.length);
+ if(board.record_status==="WAITING_FOR_LINES")el("games").innerHTML='<div class="empty">DraftKings main totals have not posted yet. The slate remains open; nothing has been frozen.</div>';
+ else if(board.record_status==="MISSED_PREGAME_WINDOW")el("games").innerHTML='<div class="empty">The pregame window has passed. No picks have been recreated with in-game or postgame information.</div>';
+ else if(board.record_status==="NO_GAMES")el("games").innerHTML='<div class="empty">No NBA games are scheduled for this slate date.</div>';
+ else el("games").innerHTML=games.length?games.map(gameCard).join(""):'<div class="empty">No game projections are available.</div>';
+ el("picks").innerHTML=picks.length?picks.map((p,i)=>'<div class="pick"><div class="top"><strong>#'+(i+1)+' · '+esc(p.matchup||p.event_id)+'</strong><span class="ev">'+n(p.ev_pct,2)+'% EV</span></div><div style="margin-top:5px;font-weight:850">'+esc(p.selection)+' '+n(p.line,1)+' · '+odds(p.odds)+'</div><div class="meta">Model '+n(p.model_probability,1)+'% · Projected total '+n(p.projected_total,1)+'</div></div>').join(""):'<div class="empty">No qualified totals. No bet is better than forcing a weak edge.</div>';
+ const s=board.source_status||{};
+ el("sourceStatus").textContent="Odds: "+(s.odds||"—")+" · Team ratings: "+(s.team_ratings||"—")+" · Season: "+(s.season||"—")+" · Injury report: "+(s.injuries||"—")+" · Odds feed age: "+n(s.odds_feed_age_seconds,0)+"s";
 }
-function renderSources(s){
- if(!s){el('sources').textContent='Source diagnostics unavailable.';return}
- const lines=[
- 'Odds: '+(s.odds||'unavailable'),
- 'Team ratings: '+(s.team_ratings||'unavailable'),
- 'Season: '+(s.season||'—'),
- 'Official injury report: '+(s.injuries||'unavailable'),
- 'Player impact: '+(s.player_impact||'EPM/on-off not integrated'),
- 'Withheld games: '+(s.unavailable_games?.length??0)+' (injury uncertainty or extreme model/market gap)',
- 'Withheld detail: '+(s.unavailable_games||[]).slice(0,5).map(g=>(g.matchup||g.event_id)+': '+g.reason).join(' · '),
- 'DraftKings quota remaining: '+(s.prop_line_quota?.daily_remaining??'not supplied'),
- 'Saved model picks: '+(s.saved_sides??'—')+' sides · '+(s.saved_totals??'—')+' totals'
- ];
- el('sources').innerHTML=lines.map(x=>'<div>• '+esc(x)+'</div>').join('');
+function gameCard(g){
+ const pick=!!g.pick_side, blocked=String(g.signal||"").includes("WITHHELD")||String(g.signal||"").includes("RESEARCH");
+ const delta=Number(g.projected_total)-Number(g.draftkings_total);
+ const overActive=pick&&g.pick_side==="OVER",underActive=pick&&g.pick_side==="UNDER";
+ const side=(name,active,prob,price,ev,fair,min,market,edge)=>'<div class="side '+(active?"active":"")+'"><h3>'+name+(active?' · QUALIFIED':'')+'</h3><div class="big">'+n(prob,1)+'% <span class="meta">· '+odds(price)+'</span></div><p>EV <b class="'+(Number(ev)>=3?"positive":"")+'">'+n(ev,2)+'%</b> · Fair '+odds(fair)+'</p><p>Minimum price for +3% EV: <b>'+odds(min)+'</b></p><p>No-vig '+n(market,1)+'% · Edge '+n(edge,1)+' pp</p></div>';
+ const factors=(g.factor_impacts||[]).map(f=>'<div class="factor"><span>'+esc(f.label)+'</span><b class="'+(Number(f.total_points_impact)>0.01?"positive":Number(f.total_points_impact)<-0.01?"negative":"zero")+'">'+(Number(f.total_points_impact)>0?"+":"")+n(f.total_points_impact,2)+' pts</b></div>').join("");
+ const support=(g.supporting_factors||[]).map(f=>f.label).join(", ");
+ const oppose=(g.opposing_factors||[]).map(f=>f.label).join(", ");
+ return '<article class="card '+(pick?"qualified":blocked?"blocked":"")+'"><div class="cardhead"><div><div class="matchup">'+esc(g.matchup)+'</div><div class="meta">'+esc(g.commence_time||"")+' · '+esc(g.rating_source||"team ratings")+'</div></div><span class="signal '+(pick?"good":blocked?"warn":"")+'">'+esc(g.signal||"NO QUALIFIED BET")+'</span></div>'+
+ '<div class="projections"><div class="metric"><small>'+esc(g.away_team)+' projected</small><b>'+n(g.projected_away,1)+'</b></div><div class="metric"><small>'+esc(g.home_team)+' projected</small><b>'+n(g.projected_home,1)+'</b></div><div class="metric"><small>Model total</small><b>'+n(g.projected_total,1)+'</b></div></div>'+
+ '<div class="projections"><div class="metric"><small>DraftKings main total</small><b>'+n(g.draftkings_total,1)+'</b></div><div class="metric"><small>Model minus line</small><b class="'+(delta>0?"positive":delta<0?"negative":"")+'">'+(delta>0?"+":"")+n(delta,1)+'</b></div><div class="metric"><small>Distribution SD</small><b>'+n(g.model_sd_points,1)+'</b></div></div>'+
+ '<div class="marketgrid">'+side("OVER",overActive,g.over_probability,g.over_odds,g.over_ev_pct,g.over_fair_odds,g.over_minimum_odds_3pct_ev,g.over_market_probability,g.over_edge_pp)+side("UNDER",underActive,g.under_probability,g.under_odds,g.under_ev_pct,g.under_fair_odds,g.under_minimum_odds_3pct_ev,g.under_market_probability,g.under_edge_pp)+'</div>'+
+ '<details class="reason"><summary>Why this play? · Model reasoning</summary><div style="padding-top:8px;font-size:11px;color:var(--muted)">Calibration: '+esc(g.calibration_status||"pending")+' · Offset '+n(g.calibration_offset_points,2)+' pts · Push probability '+n(g.push_probability,2)+'%</div>'+
+ (factors||'<div class="note">No non-zero factor impacts were available.</div>')+
+ (pick?'<div class="note"><b>Factors supporting '+esc(g.pick_side)+':</b> '+esc(support||"No material factor impact")+'</div><div class="note"><b>Opposing factors:</b> '+esc(oppose||"No material opposing factor impact")+'</div>':'')+
+ '<div class="note">'+esc(g.reasoning_method||"Counterfactual model diagnostics.")+'</div></details>'+
+ '<div class="note">Feed fetched '+n(g.odds_feed_age_seconds,0)+'s ago · source maximum age '+n(g.odds_source_max_age_seconds,0)+'s · '+esc(g.odds_source||"DraftKings")+'</div></article>';
 }
-async function loadBoard(refresh=false){
- el('status').textContent='UPDATING';
+async function loadMetrics(){
+ try{const m=await json("/api/game-metrics");stat("record",String(m.wins??0)+"–"+String(m.losses??0)+(m.pushes?"–"+m.pushes:""));stat("winRate",m.win_rate_pct==null?"—":n(m.win_rate_pct,1)+"%");stat("units",units(m.net_units??0));}
+ catch(e){stat("record","—");stat("winRate","—");stat("units","—");}
+}
+async function loadBacktest(){
  try{
-  const r=await fetch('/api/game-board'+(refresh?'?refresh=true':''),{cache:'no-store'});
-  const d=await r.json();if(!r.ok)throw Error(d.detail||d.error||'Game board unavailable');
-   boardData=d;el('status').textContent=d.record_status==='MISSED_PREGAME_WINDOW'?'MISSED PREGAME WINDOW':d.record_status==='WAITING_FOR_LINES'?'WAITING FOR LINES':d.record_status==='NO_GAMES'?'NO GAMES':d.frozen?'SLATE LOCKED':'LIVE DATA';
-  el('updated').textContent='Updated '+new Date().toLocaleTimeString();
-  el('slateDate').textContent='Slate: '+d.slate_date;
-  el('historyDate').value=d.slate_date;
-  renderGameRecordStats(d);if(section!=='props')renderBoard();renderSources(d.source_status);
-  if(d.settlement?.settled)el('updated').textContent+=' · '+d.settlement.settled+' results settled';
-  await loadHistory();
- }catch(e){
-  el('status').textContent='DATA UNAVAILABLE';
-  if(section!=='props')el('board').innerHTML='<div class="empty">The model did not generate picks because required data could not be verified.<br><br>'+esc(e.message||e)+'</div>'; 
-  el('sources').textContent='No model picks were created. The model will not substitute guessed team ratings or sportsbook-implied probabilities.';
- }
+  backtest=await json("/api/game-backtest");
+  const c=backtest.calibration||{};el("validationStatus").textContent=backtest.status||"PENDING";
+  const raw=backtest.holdout_raw||{},adj=backtest.holdout_after_train_calibration||{},train=backtest.train_raw||{};
+  const metrics=[
+   ["Training games",train.games],["Holdout games",adj.games],
+   ["Holdout total MAE",adj.total_mae==null?null:n(adj.total_mae,2)+" pts"],
+   ["Holdout total bias",adj.total_bias==null?null:n(adj.total_bias,2)+" pts"],
+   ["Training residual SD",train.total_residual_sd==null?null:n(train.total_residual_sd,2)+" pts"],
+   ["Train-only correction",c.total_offset_points==null?null:n(c.total_offset_points,2)+" pts"],
+   ["Raw holdout MAE",raw.total_mae==null?null:n(raw.total_mae,2)+" pts"],
+   ["Calibrated holdout MAE",adj.total_mae==null?null:n(adj.total_mae,2)+" pts"],
+   ["Holdout probability Brier",c.holdout_probability_brier==null?null:n(c.holdout_probability_brier,4)],
+   ["Probability calibration error",c.holdout_probability_calibration_error==null?null:n(c.holdout_probability_calibration_error,3)]
+  ];
+  el("validationMetrics").innerHTML=metrics.map(x=>'<div class="stat"><div class="statlabel">'+x[0]+'</div><div class="num">'+(x[1]??"—")+'</div></div>').join("");
+  el("validationNote").textContent=(backtest.method||"Walk-forward validation")+". Training seasons: "+(c.training_seasons||"—")+". Untouched holdout: "+(c.holdout_season||"—")+". Calibration status: "+(c.status||"pending")+". Probability metrics use fixed pseudo-lines around model projections because historical executable DraftKings totals are unavailable.";
+  const warn=el("validationWarning");
+  if(!c.validated){warn.style.display="block";warn.textContent="OFFICIAL PICKS ARE DISABLED. The training-only model calibration has not passed the predefined untouched-holdout gate. Projections remain research-only until bias and error checks pass.";}
+  else{warn.style.display="none";}
+ }catch(e){el("validationStatus").textContent="VALIDATION UNAVAILABLE";el("validationNote").textContent=e.message||"Backtest report unavailable.";}
 }
-async function refreshBoard(){await loadBoard(true)}
-async function loadHistory(){
- const day=el('historyDate').value;if(!day)return;
- el('historyStatus').textContent='Loading saved results…';
+async function loadHistory(day){
  try{
-  const r=await fetch('/api/game-history?slate_date='+encodeURIComponent(day)+'&t='+Date.now(),{cache:'no-store'});
-  const d=await r.json();if(!r.ok)throw Error(d.detail||'History unavailable');
+  const d=await json("/api/game-history?slate_date="+encodeURIComponent(day));
   historyRows=d.predictions||[];
-  await loadDailyPropHistory(day);
-  await loadRecordGroups(day);
-  await loadExperimentalTotalsHistory(day);
-   await refreshLivePropStats();
-  const wins=historyRows.filter(x=>x.outcome==='WIN').length,losses=historyRows.filter(x=>x.outcome==='LOSS').length;
-  const pending=historyRows.filter(x=>!x.outcome).length;
-  el('historyStatus').textContent=historyRows.length+' model picks · '+wins+' wins · '+losses+' losses · '+pending+' pending';
-  el('historyRows').innerHTML=historyRows.length?historyRows.map(p=>{
-   const result=p.outcome||'PENDING',cls=result==='WIN'?'win':result==='LOSS'?'loss':result==='PUSH'?'push':'';
-   return '<tr><td>'+esc(p.market)+'</td><td>'+esc(p.matchup)+'</td><td>'+esc(p.selection)+'</td><td>'+esc(p.line)+'</td><td>'+odds(p.odds)+'</td><td>'+fmt(p.model_probability_pct,1)+'%</td><td>'+fmt(p.market_probability_pct,1)+'%</td><td>'+fmt(p.projected_away,1)+' – '+fmt(p.projected_home,1)+'</td><td>'+fmt(p.actual_value,1)+'</td><td class="'+cls+'">'+result+'</td><td>'+(p.profit_units==null?'—':(p.profit_units>0?'+':'')+fmt(p.profit_units,2)+'u')+'</td></tr>';
-  }).join(''):'<tr><td colspan="11">No sides or totals model picks saved for this date.</td></tr>';
- }catch(e){el('historyStatus').textContent='History unavailable: '+(e.message||e);el('historyRows').innerHTML='<tr><td colspan="11">Could not load game-model results.</td></tr>'}
+  const m=d.metrics||{};
+  el("historyStatus").textContent=historyRows.length+" locked picks · "+(m.wins??0)+"W – "+(m.losses??0)+"L · "+(m.settled??0)+" settled · "+units(m.net_units??0)+" all-time";
+  el("historyRows").innerHTML=historyRows.length?historyRows.map(p=>'<tr><td>'+esc(p.matchup)+'</td><td>'+esc(p.selection)+'</td><td>'+n(p.line,1)+'</td><td>'+odds(p.odds)+'</td><td>'+n(p.model_probability_pct,1)+'%</td><td>'+n(p.projected_total,1)+'</td><td>'+n(p.actual_total,0)+'</td><td class="'+(p.outcome==="WIN"?"hit":p.outcome==="LOSS"?"miss":p.outcome==="PUSH"?"push":"")+'">'+esc(p.outcome||"PENDING")+'</td><td>'+units(p.profit_units??0)+'</td></tr>').join(""):'<tr><td colspan="9">No qualified picks were locked for this slate date.</td></tr>';
+ }catch(e){el("historyStatus").textContent="History unavailable: "+(e.message||e);}
 }
-el('historyDate').addEventListener('change',loadHistory);
-loadBoard();
-setInterval(()=>loadBoard(false),60000);
-setInterval(()=>refreshLivePropStats(),15000);
-setInterval(()=>{const day=el('historyDate').value;if(day)loadDailyPropHistory(day);},60000);
+function previewDate(){const day=el("slateDate").value;if(day)refreshBoard(false,day);}
+async function refreshBoardAndHistory(){await refreshBoard(false);}
+refreshBoard(false);
+setInterval(()=>{if(board?.record_status==="WAITING_FOR_LINES")refreshBoard(false);},5*60*1000);
 </script>
-</body>
-</html>
+</body></html>
