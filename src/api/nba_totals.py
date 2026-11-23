@@ -484,7 +484,11 @@ def _settle_pending():
         """).fetchall()
     if not rows:
         return {"checked": 0, "settled": 0}
-    schedule = gm._schedule(force=True)
+    try:
+        schedule = gm._schedule(force=True)
+    except Exception as exc:
+        return {"checked": len(rows), "settled": 0, "settlement_status": "schedule_unavailable",
+                "error": type(exc).__name__}
     settled = 0
     for pid, slate, event_id, home, away, selection, line, odds in rows:
         try:
