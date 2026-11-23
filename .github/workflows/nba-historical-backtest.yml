@@ -1,31 +1,24 @@
-name: NBA historical walk-forward backtest
+name: NBA full-game totals walk-forward validation
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: "0 8 * * *"
   push:
     branches:
       - feature/nba-stats-off-def-primary
     paths:
-      - src/api/nba_historical_backtest.py
-      - src/api/nba_live_aligned_backtest.py
-      - src/api/nba_totals_backtest.py
-      - src/api/nba_historical_ats_backtest.py
-      - src/api/nba_free_ats_backtest.py
       - src/api/game_model.py
       - src/api/nba_totals.py
+      - src/api/nba_totals_backtest.py
       - src/api/totals.html
       - src/api/index.py
       - tests/test_nba_totals.py
       - tests/test_nba_totals_backtest.py
-      - src/api/prediction_ledger.py
       - tests/test_game_model_player_impact.py
-      - tests/test_historical_ats_backtest.py
-      - tests/test_free_ats_backtest.py
-      - tests/test_propline_draftkings_only.py
-      - tests/test_daily_slate_audit.py
-      - .github/workflows/nba-historical-backtest.yml
       - requirements.txt
       - pyproject.toml
+      - .github/workflows/nba-historical-backtest.yml
 
 permissions:
   contents: write
@@ -60,23 +53,6 @@ jobs:
       - name: Test injury impact matching and safety gates
         run: python -m unittest discover -s tests -v
 
-      - name: Run leakage-safe historical backtest
-        run: |
-          python - <<'PY'
-          from src.api.nba_historical_backtest import run
-          result = run(persist=False)
-          print("BACKTEST_RESULT=" + __import__("json").dumps({
-              "success": result["success"],
-              "games_scored": result["games_scored"],
-              "date_range": result["date_range"],
-              "metrics": result["metrics"],
-              "limitations": result["limitations"],
-          }, sort_keys=True))
-          PY
-
-      - name: Run production-formula-aligned walk-forward validation
-        run: python -m src.api.nba_live_aligned_backtest
-
       - name: Run season-to-date NBA totals walk-forward validation
         run: python -m src.api.nba_totals_backtest
 
@@ -105,18 +81,12 @@ jobs:
             git push origin HEAD:feature/nba-stats-off-def-primary
           fi
 
-      - name: Run zero-cost free-sample closing-spread validation
-        run: python -m src.api.nba_free_ats_backtest
-
-      - name: Save backtest results
+      - name: Save NBA totals validation artifact
         uses: actions/upload-artifact@v4
         with:
-          name: nba-historical-backtest-results
+          name: nba-totals-walk-forward-results
           path: |
-            backtest_results.json
-            nba_live_aligned_backtest.json
             nba_totals_backtest.json
             data/nba_totals_backtest.json
-            nba_free_ats_backtest.json
           if-no-files-found: error
           retention-days: 30
