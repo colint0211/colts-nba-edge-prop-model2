@@ -691,8 +691,8 @@ def _score_game(game,ratings,schedule,injuries,season):
     away_eff=(a["ortg"]+h["drtg"])/2.0
     home_adj=_team_adjustment(home,away,game.get("commence_time"),schedule,injuries,season,True,pace)
     away_adj=_team_adjustment(away,home,game.get("commence_time"),schedule,injuries,season,False,pace)
-    home_points=home_eff*pace/100.0+2.0+home_adj["total_adjustment"]
-    away_points=away_eff*pace/100.0+away_adj["total_adjustment"]
+    home_points=home_eff*pace/100.0+1.0+home_adj["total_adjustment"]
+    away_points=away_eff*pace/100.0-1.0+away_adj["total_adjustment"]
     return {"projected_home":round(home_points,2),"projected_away":round(away_points,2),
       "projected_margin":round(home_points-away_points,2),"projected_total":round(home_points+away_points,2),
       "projected_pace":round(pace,2),"home_adjustments":home_adj,"away_adjustments":away_adj,
