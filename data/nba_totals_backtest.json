@@ -53,6 +53,2062 @@
     "total_bias": 1.721,
     "total_residual_sd": 19.655
   },
+  "holdout_probability_calibration": {
+    "thresholds_scored": 1400,
+    "pseudo_lines_per_game": 7,
+    "brier": 0.213,
+    "log_loss": 0.61599,
+    "brier_baseline_50_50": 0.25,
+    "brier_skill_vs_50_50": 0.14798,
+    "mean_absolute_calibration_error": 0.04346,
+    "bins": [
+      {
+        "probability_range": "0.2-0.3",
+        "thresholds": 200,
+        "predicted_over_pct": 22.39,
+        "observed_over_pct": 18.5,
+        "absolute_calibration_error": 0.03887
+      },
+      {
+        "probability_range": "0.3-0.4",
+        "thresholds": 200,
+        "predicted_over_pct": 30.95,
+        "observed_over_pct": 27.0,
+        "absolute_calibration_error": 0.03945
+      },
+      {
+        "probability_range": "0.4-0.5",
+        "thresholds": 200,
+        "predicted_over_pct": 40.69,
+        "observed_over_pct": 34.5,
+        "absolute_calibration_error": 0.06187
+      },
+      {
+        "probability_range": "0.5-0.6",
+        "thresholds": 200,
+        "predicted_over_pct": 51.04,
+        "observed_over_pct": 46.5,
+        "absolute_calibration_error": 0.04544
+      },
+      {
+        "probability_range": "0.6-0.7",
+        "thresholds": 200,
+        "predicted_over_pct": 61.33,
+        "observed_over_pct": 58.0,
+        "absolute_calibration_error": 0.03332
+      },
+      {
+        "probability_range": "0.7-0.8",
+        "thresholds": 400,
+        "predicted_over_pct": 75.01,
+        "observed_over_pct": 70.75,
+        "absolute_calibration_error": 0.04262
+      }
+    ],
+    "note": "Predeclared pseudo-lines at fixed offsets from each forecast; not historical DraftKings lines or a betting ROI test."
+  },
+  "holdout_predictions": [
+    {
+      "date": "2026-10-26",
+      "game_id": "0022600119",
+      "home": "CHA",
+      "away": "WAS",
+      "projected_total": 227.632,
+      "calibrated_total": 227.538,
+      "actual_total": 213.0,
+      "residual_after_calibration": 14.538
+    },
+    {
+      "date": "2026-10-26",
+      "game_id": "0022600122",
+      "home": "MIA",
+      "away": "DAL",
+      "projected_total": 230.199,
+      "calibrated_total": 230.105,
+      "actual_total": 222.0,
+      "residual_after_calibration": 8.105
+    },
+    {
+      "date": "2026-10-26",
+      "game_id": "0022600123",
+      "home": "MIL",
+      "away": "IND",
+      "projected_total": 233.991,
+      "calibrated_total": 233.897,
+      "actual_total": 212.0,
+      "residual_after_calibration": 21.897
+    },
+    {
+      "date": "2026-10-26",
+      "game_id": "0022600125",
+      "home": "HOU",
+      "away": "ATL",
+      "projected_total": 230.491,
+      "calibrated_total": 230.397,
+      "actual_total": 230.0,
+      "residual_after_calibration": 0.397
+    },
+    {
+      "date": "2026-10-26",
+      "game_id": "0022600126",
+      "home": "UTA",
+      "away": "MEM",
+      "projected_total": 230.607,
+      "calibrated_total": 230.513,
+      "actual_total": 215.0,
+      "residual_after_calibration": 15.513
+    },
+    {
+      "date": "2026-10-27",
+      "game_id": "0022600128",
+      "home": "BOS",
+      "away": "BKN",
+      "projected_total": 229.521,
+      "calibrated_total": 229.427,
+      "actual_total": 249.0,
+      "residual_after_calibration": -19.573
+    },
+    {
+      "date": "2026-10-27",
+      "game_id": "0022600129",
+      "home": "NYK",
+      "away": "DET",
+      "projected_total": 224.854,
+      "calibrated_total": 224.76,
+      "actual_total": 208.0,
+      "residual_after_calibration": 16.76
+    },
+    {
+      "date": "2026-10-27",
+      "game_id": "0022600130",
+      "home": "SAS",
+      "away": "SAC",
+      "projected_total": 228.996,
+      "calibrated_total": 228.902,
+      "actual_total": 233.0,
+      "residual_after_calibration": -4.098
+    },
+    {
+      "date": "2026-10-28",
+      "game_id": "0022600132",
+      "home": "ATL",
+      "away": "MIA",
+      "projected_total": 230.52,
+      "calibrated_total": 230.426,
+      "actual_total": 246.0,
+      "residual_after_calibration": -15.574
+    },
+    {
+      "date": "2026-10-28",
+      "game_id": "0022600133",
+      "home": "CLE",
+      "away": "WAS",
+      "projected_total": 231.322,
+      "calibrated_total": 231.228,
+      "actual_total": 232.0,
+      "residual_after_calibration": -0.772
+    },
+    {
+      "date": "2026-10-28",
+      "game_id": "0022600134",
+      "home": "DET",
+      "away": "CHA",
+      "projected_total": 225.532,
+      "calibrated_total": 225.438,
+      "actual_total": 186.0,
+      "residual_after_calibration": 39.438
+    },
+    {
+      "date": "2026-10-28",
+      "game_id": "0022600135",
+      "home": "IND",
+      "away": "PHI",
+      "projected_total": 227.895,
+      "calibrated_total": 227.801,
+      "actual_total": 223.0,
+      "residual_after_calibration": 4.801
+    },
+    {
+      "date": "2026-10-28",
+      "game_id": "0022600136",
+      "home": "TOR",
+      "away": "ORL",
+      "projected_total": 226.99,
+      "calibrated_total": 226.896,
+      "actual_total": 228.0,
+      "residual_after_calibration": -1.104
+    },
+    {
+      "date": "2026-10-28",
+      "game_id": "0022600137",
+      "home": "CHI",
+      "away": "NYK",
+      "projected_total": 228.07,
+      "calibrated_total": 227.976,
+      "actual_total": 260.0,
+      "residual_after_calibration": -32.024
+    },
+    {
+      "date": "2026-10-28",
+      "game_id": "0022600138",
+      "home": "MIL",
+      "away": "HOU",
+      "projected_total": 231.788,
+      "calibrated_total": 231.694,
+      "actual_total": 232.0,
+      "residual_after_calibration": -0.306
+    },
+    {
+      "date": "2026-10-28",
+      "game_id": "0022600139",
+      "home": "MIN",
+      "away": "GSW",
+      "projected_total": 230.782,
+      "calibrated_total": 230.688,
+      "actual_total": 233.0,
+      "residual_after_calibration": -2.312
+    },
+    {
+      "date": "2026-10-28",
+      "game_id": "0022600140",
+      "home": "NOP",
+      "away": "DEN",
+      "projected_total": 234.69,
+      "calibrated_total": 234.596,
+      "actual_total": 195.0,
+      "residual_after_calibration": 39.596
+    },
+    {
+      "date": "2026-10-28",
+      "game_id": "0022600141",
+      "home": "UTA",
+      "away": "SAS",
+      "projected_total": 229.907,
+      "calibrated_total": 229.813,
+      "actual_total": 228.0,
+      "residual_after_calibration": 1.813
+    },
+    {
+      "date": "2026-10-28",
+      "game_id": "0022600142",
+      "home": "DAL",
+      "away": "OKC",
+      "projected_total": 226.495,
+      "calibrated_total": 226.401,
+      "actual_total": 216.0,
+      "residual_after_calibration": 10.401
+    },
+    {
+      "date": "2026-10-28",
+      "game_id": "0022600143",
+      "home": "LAC",
+      "away": "LAL",
+      "projected_total": 231.861,
+      "calibrated_total": 231.767,
+      "actual_total": 190.0,
+      "residual_after_calibration": 41.767
+    },
+    {
+      "date": "2026-10-29",
+      "game_id": "0022600144",
+      "home": "ATL",
+      "away": "CLE",
+      "projected_total": 231.43,
+      "calibrated_total": 231.336,
+      "actual_total": 225.0,
+      "residual_after_calibration": 6.336
+    },
+    {
+      "date": "2026-10-29",
+      "game_id": "0022600145",
+      "home": "NOP",
+      "away": "SAC",
+      "projected_total": 231.066,
+      "calibrated_total": 230.972,
+      "actual_total": 252.0,
+      "residual_after_calibration": -21.028
+    },
+    {
+      "date": "2026-10-29",
+      "game_id": "0022600146",
+      "home": "POR",
+      "away": "MEM",
+      "projected_total": 229.71,
+      "calibrated_total": 229.616,
+      "actual_total": 227.0,
+      "residual_after_calibration": 2.616
+    },
+    {
+      "date": "2026-10-30",
+      "game_id": "0022600015",
+      "home": "WAS",
+      "away": "CHA",
+      "projected_total": 225.148,
+      "calibrated_total": 225.054,
+      "actual_total": 174.0,
+      "residual_after_calibration": 51.054
+    },
+    {
+      "date": "2026-10-30",
+      "game_id": "0022600016",
+      "home": "BOS",
+      "away": "CHI",
+      "projected_total": 232.236,
+      "calibrated_total": 232.142,
+      "actual_total": 236.0,
+      "residual_after_calibration": -3.858
+    },
+    {
+      "date": "2026-10-30",
+      "game_id": "0022600017",
+      "home": "BKN",
+      "away": "DET",
+      "projected_total": 227.456,
+      "calibrated_total": 227.362,
+      "actual_total": 204.0,
+      "residual_after_calibration": 23.362
+    },
+    {
+      "date": "2026-10-30",
+      "game_id": "0022600018",
+      "home": "PHI",
+      "away": "NYK",
+      "projected_total": 224.956,
+      "calibrated_total": 224.862,
+      "actual_total": 191.0,
+      "residual_after_calibration": 33.862
+    },
+    {
+      "date": "2026-10-30",
+      "game_id": "0022600019",
+      "home": "TOR",
+      "away": "ORL",
+      "projected_total": 226.859,
+      "calibrated_total": 226.765,
+      "actual_total": 235.0,
+      "residual_after_calibration": -8.235
+    },
+    {
+      "date": "2026-10-30",
+      "game_id": "0022600020",
+      "home": "MIA",
+      "away": "IND",
+      "projected_total": 229.956,
+      "calibrated_total": 229.862,
+      "actual_total": 270.0,
+      "residual_after_calibration": -40.138
+    },
+    {
+      "date": "2026-10-30",
+      "game_id": "0022600021",
+      "home": "DAL",
+      "away": "HOU",
+      "projected_total": 228.84,
+      "calibrated_total": 228.746,
+      "actual_total": 227.0,
+      "residual_after_calibration": 1.746
+    },
+    {
+      "date": "2026-10-30",
+      "game_id": "0022600022",
+      "home": "MIN",
+      "away": "LAC",
+      "projected_total": 226.184,
+      "calibrated_total": 226.09,
+      "actual_total": 228.0,
+      "residual_after_calibration": -1.91
+    },
+    {
+      "date": "2026-10-30",
+      "game_id": "0022600023",
+      "home": "GSW",
+      "away": "LAL",
+      "projected_total": 231.917,
+      "calibrated_total": 231.823,
+      "actual_total": 207.0,
+      "residual_after_calibration": 24.823
+    },
+    {
+      "date": "2026-10-30",
+      "game_id": "0022600024",
+      "home": "PHX",
+      "away": "DEN",
+      "projected_total": 228.828,
+      "calibrated_total": 228.734,
+      "actual_total": 247.0,
+      "residual_after_calibration": -18.266
+    },
+    {
+      "date": "2026-10-31",
+      "game_id": "0022600147",
+      "home": "UTA",
+      "away": "POR",
+      "projected_total": 230.385,
+      "calibrated_total": 230.291,
+      "actual_total": 202.0,
+      "residual_after_calibration": 28.291
+    },
+    {
+      "date": "2026-10-31",
+      "game_id": "0022600148",
+      "home": "CHA",
+      "away": "PHI",
+      "projected_total": 219.615,
+      "calibrated_total": 219.521,
+      "actual_total": 213.0,
+      "residual_after_calibration": 6.521
+    },
+    {
+      "date": "2026-10-31",
+      "game_id": "0022600149",
+      "home": "NOP",
+      "away": "ATL",
+      "projected_total": 231.685,
+      "calibrated_total": 231.591,
+      "actual_total": 220.0,
+      "residual_after_calibration": 11.591
+    },
+    {
+      "date": "2026-10-31",
+      "game_id": "0022600150",
+      "home": "MEM",
+      "away": "SAC",
+      "projected_total": 229.008,
+      "calibrated_total": 228.914,
+      "actual_total": 241.0,
+      "residual_after_calibration": -12.086
+    },
+    {
+      "date": "2026-10-31",
+      "game_id": "0022600151",
+      "home": "MIL",
+      "away": "CLE",
+      "projected_total": 231.162,
+      "calibrated_total": 231.068,
+      "actual_total": 247.0,
+      "residual_after_calibration": -15.932
+    },
+    {
+      "date": "2026-10-31",
+      "game_id": "0022600152",
+      "home": "SAS",
+      "away": "MIN",
+      "projected_total": 227.737,
+      "calibrated_total": 227.643,
+      "actual_total": 232.0,
+      "residual_after_calibration": -4.357
+    },
+    {
+      "date": "2026-10-31",
+      "game_id": "0022600153",
+      "home": "HOU",
+      "away": "OKC",
+      "projected_total": 225.69,
+      "calibrated_total": 225.596,
+      "actual_total": 217.0,
+      "residual_after_calibration": 8.596
+    },
+    {
+      "date": "2026-11-01",
+      "game_id": "0022600154",
+      "home": "ORL",
+      "away": "BOS",
+      "projected_total": 228.689,
+      "calibrated_total": 228.595,
+      "actual_total": 205.0,
+      "residual_after_calibration": 23.595
+    },
+    {
+      "date": "2026-11-01",
+      "game_id": "0022600155",
+      "home": "IND",
+      "away": "BKN",
+      "projected_total": 230.286,
+      "calibrated_total": 230.192,
+      "actual_total": 188.0,
+      "residual_after_calibration": 42.192
+    },
+    {
+      "date": "2026-11-01",
+      "game_id": "0022600156",
+      "home": "GSW",
+      "away": "LAC",
+      "projected_total": 226.591,
+      "calibrated_total": 226.497,
+      "actual_total": 236.0,
+      "residual_after_calibration": -9.503
+    },
+    {
+      "date": "2026-11-01",
+      "game_id": "0022600157",
+      "home": "LAL",
+      "away": "TOR",
+      "projected_total": 227.671,
+      "calibrated_total": 227.577,
+      "actual_total": 256.0,
+      "residual_after_calibration": -28.423
+    },
+    {
+      "date": "2026-11-02",
+      "game_id": "0022600158",
+      "home": "CLE",
+      "away": "OKC",
+      "projected_total": 226.48,
+      "calibrated_total": 226.386,
+      "actual_total": 229.0,
+      "residual_after_calibration": -2.614
+    },
+    {
+      "date": "2026-11-02",
+      "game_id": "0022600159",
+      "home": "CHA",
+      "away": "DET",
+      "projected_total": 218.736,
+      "calibrated_total": 218.642,
+      "actual_total": 215.0,
+      "residual_after_calibration": 3.642
+    },
+    {
+      "date": "2026-11-02",
+      "game_id": "0022600160",
+      "home": "IND",
+      "away": "ATL",
+      "projected_total": 228.914,
+      "calibrated_total": 228.82,
+      "actual_total": 212.0,
+      "residual_after_calibration": 16.82
+    },
+    {
+      "date": "2026-11-02",
+      "game_id": "0022600161",
+      "home": "NYK",
+      "away": "BKN",
+      "projected_total": 223.98,
+      "calibrated_total": 223.886,
+      "actual_total": 193.0,
+      "residual_after_calibration": 30.886
+    },
+    {
+      "date": "2026-11-02",
+      "game_id": "0022600162",
+      "home": "ORL",
+      "away": "WAS",
+      "projected_total": 225.194,
+      "calibrated_total": 225.1,
+      "actual_total": 197.0,
+      "residual_after_calibration": 28.1
+    },
+    {
+      "date": "2026-11-02",
+      "game_id": "0022600163",
+      "home": "PHI",
+      "away": "CHI",
+      "projected_total": 227.482,
+      "calibrated_total": 227.388,
+      "actual_total": 233.0,
+      "residual_after_calibration": -5.612
+    },
+    {
+      "date": "2026-11-02",
+      "game_id": "0022600164",
+      "home": "DAL",
+      "away": "SAC",
+      "projected_total": 229.337,
+      "calibrated_total": 229.243,
+      "actual_total": 215.0,
+      "residual_after_calibration": 14.243
+    },
+    {
+      "date": "2026-11-02",
+      "game_id": "0022600165",
+      "home": "MEM",
+      "away": "NOP",
+      "projected_total": 229.516,
+      "calibrated_total": 229.422,
+      "actual_total": 269.0,
+      "residual_after_calibration": -39.578
+    },
+    {
+      "date": "2026-11-02",
+      "game_id": "0022600166",
+      "home": "MIN",
+      "away": "MIL",
+      "projected_total": 230.229,
+      "calibrated_total": 230.135,
+      "actual_total": 212.0,
+      "residual_after_calibration": 18.135
+    },
+    {
+      "date": "2026-11-02",
+      "game_id": "0022600167",
+      "home": "HOU",
+      "away": "BOS",
+      "projected_total": 227.867,
+      "calibrated_total": 227.773,
+      "actual_total": 202.0,
+      "residual_after_calibration": 25.773
+    },
+    {
+      "date": "2026-11-02",
+      "game_id": "0022600168",
+      "home": "SAS",
+      "away": "UTA",
+      "projected_total": 227.444,
+      "calibrated_total": 227.35,
+      "actual_total": 216.0,
+      "residual_after_calibration": 11.35
+    },
+    {
+      "date": "2026-11-02",
+      "game_id": "0022600169",
+      "home": "DEN",
+      "away": "POR",
+      "projected_total": 228.209,
+      "calibrated_total": 228.115,
+      "actual_total": 228.0,
+      "residual_after_calibration": 0.115
+    },
+    {
+      "date": "2026-11-02",
+      "game_id": "0022600170",
+      "home": "GSW",
+      "away": "PHX",
+      "projected_total": 230.2,
+      "calibrated_total": 230.106,
+      "actual_total": 229.0,
+      "residual_after_calibration": 1.106
+    },
+    {
+      "date": "2026-11-02",
+      "game_id": "0022600171",
+      "home": "LAC",
+      "away": "TOR",
+      "projected_total": 226.123,
+      "calibrated_total": 226.029,
+      "actual_total": 243.0,
+      "residual_after_calibration": -16.971
+    },
+    {
+      "date": "2026-11-02",
+      "game_id": "0022600172",
+      "home": "LAL",
+      "away": "MIA",
+      "projected_total": 231.905,
+      "calibrated_total": 231.811,
+      "actual_total": 255.0,
+      "residual_after_calibration": -23.189
+    },
+    {
+      "date": "2026-11-04",
+      "game_id": "0022600173",
+      "home": "DET",
+      "away": "PHI",
+      "projected_total": 220.687,
+      "calibrated_total": 220.593,
+      "actual_total": 218.0,
+      "residual_after_calibration": 2.593
+    },
+    {
+      "date": "2026-11-04",
+      "game_id": "0022600174",
+      "home": "WAS",
+      "away": "ATL",
+      "projected_total": 225.099,
+      "calibrated_total": 225.005,
+      "actual_total": 225.0,
+      "residual_after_calibration": 0.005
+    },
+    {
+      "date": "2026-11-04",
+      "game_id": "0022600175",
+      "home": "BOS",
+      "away": "MIL",
+      "projected_total": 228.167,
+      "calibrated_total": 228.073,
+      "actual_total": 211.0,
+      "residual_after_calibration": 17.073
+    },
+    {
+      "date": "2026-11-04",
+      "game_id": "0022600176",
+      "home": "BKN",
+      "away": "CHA",
+      "projected_total": 219.953,
+      "calibrated_total": 219.859,
+      "actual_total": 218.0,
+      "residual_after_calibration": 1.859
+    },
+    {
+      "date": "2026-11-04",
+      "game_id": "0022600177",
+      "home": "NYK",
+      "away": "CHI",
+      "projected_total": 226.667,
+      "calibrated_total": 226.573,
+      "actual_total": 240.0,
+      "residual_after_calibration": -13.427
+    },
+    {
+      "date": "2026-11-04",
+      "game_id": "0022600178",
+      "home": "MEM",
+      "away": "IND",
+      "projected_total": 228.431,
+      "calibrated_total": 228.337,
+      "actual_total": 210.0,
+      "residual_after_calibration": 18.337
+    },
+    {
+      "date": "2026-11-04",
+      "game_id": "0022600179",
+      "home": "NOP",
+      "away": "UTA",
+      "projected_total": 230.134,
+      "calibrated_total": 230.04,
+      "actual_total": 233.0,
+      "residual_after_calibration": -2.96
+    },
+    {
+      "date": "2026-11-04",
+      "game_id": "0022600180",
+      "home": "OKC",
+      "away": "CLE",
+      "projected_total": 226.334,
+      "calibrated_total": 226.24,
+      "actual_total": 240.0,
+      "residual_after_calibration": -13.76
+    },
+    {
+      "date": "2026-11-04",
+      "game_id": "0022600181",
+      "home": "HOU",
+      "away": "MIN",
+      "projected_total": 226.469,
+      "calibrated_total": 226.375,
+      "actual_total": 224.0,
+      "residual_after_calibration": 2.375
+    },
+    {
+      "date": "2026-11-04",
+      "game_id": "0022600182",
+      "home": "DEN",
+      "away": "TOR",
+      "projected_total": 228.159,
+      "calibrated_total": 228.065,
+      "actual_total": 237.0,
+      "residual_after_calibration": -8.935
+    },
+    {
+      "date": "2026-11-04",
+      "game_id": "0022600183",
+      "home": "PHX",
+      "away": "POR",
+      "projected_total": 228.963,
+      "calibrated_total": 228.869,
+      "actual_total": 251.0,
+      "residual_after_calibration": -22.131
+    },
+    {
+      "date": "2026-11-04",
+      "game_id": "0022600184",
+      "home": "SAS",
+      "away": "DAL",
+      "projected_total": 226.067,
+      "calibrated_total": 225.973,
+      "actual_total": 223.0,
+      "residual_after_calibration": 2.973
+    },
+    {
+      "date": "2026-11-04",
+      "game_id": "0022600185",
+      "home": "SAC",
+      "away": "LAL",
+      "projected_total": 231.324,
+      "calibrated_total": 231.23,
+      "actual_total": 219.0,
+      "residual_after_calibration": 12.23
+    },
+    {
+      "date": "2026-11-04",
+      "game_id": "0022600186",
+      "home": "LAC",
+      "away": "MIA",
+      "projected_total": 229.6,
+      "calibrated_total": 229.506,
+      "actual_total": 233.0,
+      "residual_after_calibration": -3.494
+    },
+    {
+      "date": "2026-11-05",
+      "game_id": "0022600187",
+      "home": "PHX",
+      "away": "ORL",
+      "projected_total": 227.679,
+      "calibrated_total": 227.585,
+      "actual_total": 221.0,
+      "residual_after_calibration": 6.585
+    },
+    {
+      "date": "2026-11-05",
+      "game_id": "0022600188",
+      "home": "GSW",
+      "away": "MIA",
+      "projected_total": 231.684,
+      "calibrated_total": 231.59,
+      "actual_total": 220.0,
+      "residual_after_calibration": 11.59
+    },
+    {
+      "date": "2026-11-06",
+      "game_id": "0022600025",
+      "home": "ATL",
+      "away": "WAS",
+      "projected_total": 225.075,
+      "calibrated_total": 224.981,
+      "actual_total": 271.0,
+      "residual_after_calibration": -46.019
+    },
+    {
+      "date": "2026-11-06",
+      "game_id": "0022600026",
+      "home": "CHA",
+      "away": "BOS",
+      "projected_total": 220.555,
+      "calibrated_total": 220.461,
+      "actual_total": 199.0,
+      "residual_after_calibration": 21.461
+    },
+    {
+      "date": "2026-11-06",
+      "game_id": "0022600027",
+      "home": "CLE",
+      "away": "PHI",
+      "projected_total": 226.376,
+      "calibrated_total": 226.282,
+      "actual_total": 214.0,
+      "residual_after_calibration": 12.282
+    },
+    {
+      "date": "2026-11-06",
+      "game_id": "0022600028",
+      "home": "DAL",
+      "away": "UTA",
+      "projected_total": 226.163,
+      "calibrated_total": 226.069,
+      "actual_total": 212.0,
+      "residual_after_calibration": 14.069
+    },
+    {
+      "date": "2026-11-06",
+      "game_id": "0022600029",
+      "home": "MEM",
+      "away": "OKC",
+      "projected_total": 225.632,
+      "calibrated_total": 225.538,
+      "actual_total": 225.0,
+      "residual_after_calibration": 0.538
+    },
+    {
+      "date": "2026-11-06",
+      "game_id": "0022600030",
+      "home": "MIL",
+      "away": "TOR",
+      "projected_total": 229.288,
+      "calibrated_total": 229.194,
+      "actual_total": 228.0,
+      "residual_after_calibration": 1.194
+    },
+    {
+      "date": "2026-11-06",
+      "game_id": "0022600031",
+      "home": "NOP",
+      "away": "MIN",
+      "projected_total": 230.178,
+      "calibrated_total": 230.084,
+      "actual_total": 224.0,
+      "residual_after_calibration": 6.084
+    },
+    {
+      "date": "2026-11-06",
+      "game_id": "0022600032",
+      "home": "LAL",
+      "away": "POR",
+      "projected_total": 230.476,
+      "calibrated_total": 230.382,
+      "actual_total": 242.0,
+      "residual_after_calibration": -11.618
+    },
+    {
+      "date": "2026-11-06",
+      "game_id": "0022600033",
+      "home": "SAC",
+      "away": "SAS",
+      "projected_total": 227.882,
+      "calibrated_total": 227.788,
+      "actual_total": 233.0,
+      "residual_after_calibration": -5.212
+    },
+    {
+      "date": "2026-11-07",
+      "game_id": "0022600189",
+      "home": "IND",
+      "away": "DEN",
+      "projected_total": 227.23,
+      "calibrated_total": 227.136,
+      "actual_total": 216.0,
+      "residual_after_calibration": 11.136
+    },
+    {
+      "date": "2026-11-07",
+      "game_id": "0022600190",
+      "home": "ATL",
+      "away": "BKN",
+      "projected_total": 226.706,
+      "calibrated_total": 226.612,
+      "actual_total": 245.0,
+      "residual_after_calibration": -18.388
+    },
+    {
+      "date": "2026-11-07",
+      "game_id": "0022600191",
+      "home": "CLE",
+      "away": "NYK",
+      "projected_total": 225.767,
+      "calibrated_total": 225.673,
+      "actual_total": 206.0,
+      "residual_after_calibration": 19.673
+    },
+    {
+      "date": "2026-11-07",
+      "game_id": "0022600192",
+      "home": "OKC",
+      "away": "WAS",
+      "projected_total": 224.061,
+      "calibrated_total": 223.967,
+      "actual_total": 189.0,
+      "residual_after_calibration": 34.967
+    },
+    {
+      "date": "2026-11-07",
+      "game_id": "0022600193",
+      "home": "GSW",
+      "away": "ORL",
+      "projected_total": 226.287,
+      "calibrated_total": 226.193,
+      "actual_total": 245.0,
+      "residual_after_calibration": -18.807
+    },
+    {
+      "date": "2026-11-07",
+      "game_id": "0022600194",
+      "home": "PHX",
+      "away": "HOU",
+      "projected_total": 228.43,
+      "calibrated_total": 228.336,
+      "actual_total": 201.0,
+      "residual_after_calibration": 27.336
+    },
+    {
+      "date": "2026-11-07",
+      "game_id": "0022600195",
+      "home": "POR",
+      "away": "SAS",
+      "projected_total": 228.423,
+      "calibrated_total": 228.329,
+      "actual_total": 228.0,
+      "residual_after_calibration": 0.329
+    },
+    {
+      "date": "2026-11-08",
+      "game_id": "0022600196",
+      "home": "CHI",
+      "away": "PHI",
+      "projected_total": 227.225,
+      "calibrated_total": 227.131,
+      "actual_total": 248.0,
+      "residual_after_calibration": -20.869
+    },
+    {
+      "date": "2026-11-08",
+      "game_id": "0022600197",
+      "home": "DET",
+      "away": "LAL",
+      "projected_total": 225.77,
+      "calibrated_total": 225.676,
+      "actual_total": 237.0,
+      "residual_after_calibration": -11.324
+    },
+    {
+      "date": "2026-11-08",
+      "game_id": "0022600198",
+      "home": "MIN",
+      "away": "UTA",
+      "projected_total": 225.977,
+      "calibrated_total": 225.883,
+      "actual_total": 215.0,
+      "residual_after_calibration": 10.883
+    },
+    {
+      "date": "2026-11-08",
+      "game_id": "0022600199",
+      "home": "DAL",
+      "away": "BKN",
+      "projected_total": 224.425,
+      "calibrated_total": 224.331,
+      "actual_total": 223.0,
+      "residual_after_calibration": 1.331
+    },
+    {
+      "date": "2026-11-08",
+      "game_id": "0022600200",
+      "home": "MIL",
+      "away": "BOS",
+      "projected_total": 226.101,
+      "calibrated_total": 226.007,
+      "actual_total": 214.0,
+      "residual_after_calibration": 12.007
+    },
+    {
+      "date": "2026-11-08",
+      "game_id": "0022600201",
+      "home": "LAC",
+      "away": "NOP",
+      "projected_total": 229.324,
+      "calibrated_total": 229.23,
+      "actual_total": 262.0,
+      "residual_after_calibration": -32.77
+    },
+    {
+      "date": "2026-11-08",
+      "game_id": "0022600202",
+      "home": "SAC",
+      "away": "MIA",
+      "projected_total": 231.248,
+      "calibrated_total": 231.154,
+      "actual_total": 222.0,
+      "residual_after_calibration": 9.154
+    },
+    {
+      "date": "2026-11-09",
+      "game_id": "0022600203",
+      "home": "ATL",
+      "away": "LAL",
+      "projected_total": 231.616,
+      "calibrated_total": 231.522,
+      "actual_total": 238.0,
+      "residual_after_calibration": -6.478
+    },
+    {
+      "date": "2026-11-09",
+      "game_id": "0022600204",
+      "home": "CHA",
+      "away": "CLE",
+      "projected_total": 222.289,
+      "calibrated_total": 222.195,
+      "actual_total": 236.0,
+      "residual_after_calibration": -13.805
+    },
+    {
+      "date": "2026-11-09",
+      "game_id": "0022600205",
+      "home": "DET",
+      "away": "WAS",
+      "projected_total": 221.95,
+      "calibrated_total": 221.856,
+      "actual_total": 233.0,
+      "residual_after_calibration": -11.144
+    },
+    {
+      "date": "2026-11-09",
+      "game_id": "0022600206",
+      "home": "TOR",
+      "away": "MEM",
+      "projected_total": 228.6,
+      "calibrated_total": 228.506,
+      "actual_total": 220.0,
+      "residual_after_calibration": 8.506
+    },
+    {
+      "date": "2026-11-09",
+      "game_id": "0022600207",
+      "home": "DAL",
+      "away": "IND",
+      "projected_total": 225.039,
+      "calibrated_total": 224.945,
+      "actual_total": 247.0,
+      "residual_after_calibration": -22.055
+    },
+    {
+      "date": "2026-11-09",
+      "game_id": "0022600208",
+      "home": "HOU",
+      "away": "DEN",
+      "projected_total": 226.068,
+      "calibrated_total": 225.974,
+      "actual_total": 210.0,
+      "residual_after_calibration": 15.974
+    },
+    {
+      "date": "2026-11-09",
+      "game_id": "0022600209",
+      "home": "PHX",
+      "away": "SAS",
+      "projected_total": 227.696,
+      "calibrated_total": 227.602,
+      "actual_total": 218.0,
+      "residual_after_calibration": 9.602
+    },
+    {
+      "date": "2026-11-09",
+      "game_id": "0022600210",
+      "home": "GSW",
+      "away": "NOP",
+      "projected_total": 232.261,
+      "calibrated_total": 232.167,
+      "actual_total": 225.0,
+      "residual_after_calibration": 7.167
+    },
+    {
+      "date": "2026-11-10",
+      "game_id": "0022600211",
+      "home": "NYK",
+      "away": "MIL",
+      "projected_total": 224.303,
+      "calibrated_total": 224.209,
+      "actual_total": 202.0,
+      "residual_after_calibration": 22.209
+    },
+    {
+      "date": "2026-11-10",
+      "game_id": "0022600212",
+      "home": "PHI",
+      "away": "BOS",
+      "projected_total": 222.407,
+      "calibrated_total": 222.313,
+      "actual_total": 224.0,
+      "residual_after_calibration": -1.687
+    },
+    {
+      "date": "2026-11-10",
+      "game_id": "0022600213",
+      "home": "PHX",
+      "away": "LAC",
+      "projected_total": 228.054,
+      "calibrated_total": 227.96,
+      "actual_total": 243.0,
+      "residual_after_calibration": -15.04
+    },
+    {
+      "date": "2026-11-10",
+      "game_id": "0022600214",
+      "home": "UTA",
+      "away": "MIA",
+      "projected_total": 228.829,
+      "calibrated_total": 228.735,
+      "actual_total": 224.0,
+      "residual_after_calibration": 4.735
+    },
+    {
+      "date": "2026-11-10",
+      "game_id": "0022600215",
+      "home": "SAC",
+      "away": "ORL",
+      "projected_total": 227.131,
+      "calibrated_total": 227.037,
+      "actual_total": 207.0,
+      "residual_after_calibration": 20.037
+    },
+    {
+      "date": "2026-11-10",
+      "game_id": "0022600216",
+      "home": "POR",
+      "away": "OKC",
+      "projected_total": 225.554,
+      "calibrated_total": 225.46,
+      "actual_total": 226.0,
+      "residual_after_calibration": -0.54
+    },
+    {
+      "date": "2026-11-11",
+      "game_id": "0022600217",
+      "home": "IND",
+      "away": "WAS",
+      "projected_total": 225.063,
+      "calibrated_total": 224.969,
+      "actual_total": 215.0,
+      "residual_after_calibration": 9.969
+    },
+    {
+      "date": "2026-11-11",
+      "game_id": "0022600218",
+      "home": "NYK",
+      "away": "CLE",
+      "projected_total": 224.194,
+      "calibrated_total": 224.1,
+      "actual_total": 222.0,
+      "residual_after_calibration": 2.1
+    },
+    {
+      "date": "2026-11-11",
+      "game_id": "0022600219",
+      "home": "TOR",
+      "away": "BOS",
+      "projected_total": 225.495,
+      "calibrated_total": 225.401,
+      "actual_total": 191.0,
+      "residual_after_calibration": 34.401
+    },
+    {
+      "date": "2026-11-11",
+      "game_id": "0022600220",
+      "home": "CHI",
+      "away": "SAS",
+      "projected_total": 230.39,
+      "calibrated_total": 230.296,
+      "actual_total": 243.0,
+      "residual_after_calibration": -12.704
+    },
+    {
+      "date": "2026-11-11",
+      "game_id": "0022600221",
+      "home": "MEM",
+      "away": "DEN",
+      "projected_total": 227.078,
+      "calibrated_total": 226.984,
+      "actual_total": 241.0,
+      "residual_after_calibration": -14.016
+    },
+    {
+      "date": "2026-11-11",
+      "game_id": "0022600222",
+      "home": "MIL",
+      "away": "LAL",
+      "projected_total": 229.787,
+      "calibrated_total": 229.693,
+      "actual_total": 235.0,
+      "residual_after_calibration": -5.307
+    },
+    {
+      "date": "2026-11-11",
+      "game_id": "0022600223",
+      "home": "NOP",
+      "away": "BKN",
+      "projected_total": 229.227,
+      "calibrated_total": 229.133,
+      "actual_total": 256.0,
+      "residual_after_calibration": -26.867
+    },
+    {
+      "date": "2026-11-11",
+      "game_id": "0022600224",
+      "home": "UTA",
+      "away": "ORL",
+      "projected_total": 224.452,
+      "calibrated_total": 224.358,
+      "actual_total": 231.0,
+      "residual_after_calibration": -6.642
+    },
+    {
+      "date": "2026-11-11",
+      "game_id": "0022600225",
+      "home": "HOU",
+      "away": "GSW",
+      "projected_total": 226.616,
+      "calibrated_total": 226.522,
+      "actual_total": 223.0,
+      "residual_after_calibration": 3.522
+    },
+    {
+      "date": "2026-11-11",
+      "game_id": "0022600226",
+      "home": "POR",
+      "away": "OKC",
+      "projected_total": 225.479,
+      "calibrated_total": 225.385,
+      "actual_total": 226.0,
+      "residual_after_calibration": -0.615
+    },
+    {
+      "date": "2026-11-12",
+      "game_id": "0022600227",
+      "home": "PHI",
+      "away": "TOR",
+      "projected_total": 224.364,
+      "calibrated_total": 224.27,
+      "actual_total": 235.0,
+      "residual_after_calibration": -10.73
+    },
+    {
+      "date": "2026-11-12",
+      "game_id": "0022600228",
+      "home": "WAS",
+      "away": "DET",
+      "projected_total": 222.324,
+      "calibrated_total": 222.23,
+      "actual_total": 284.0,
+      "residual_after_calibration": -61.77
+    },
+    {
+      "date": "2026-11-12",
+      "game_id": "0022600229",
+      "home": "MIN",
+      "away": "DAL",
+      "projected_total": 225.765,
+      "calibrated_total": 225.671,
+      "actual_total": 227.0,
+      "residual_after_calibration": -1.329
+    },
+    {
+      "date": "2026-11-12",
+      "game_id": "0022600230",
+      "home": "PHX",
+      "away": "CHA",
+      "projected_total": 222.765,
+      "calibrated_total": 222.671,
+      "actual_total": 197.0,
+      "residual_after_calibration": 25.671
+    },
+    {
+      "date": "2026-11-13",
+      "game_id": "0022600034",
+      "home": "IND",
+      "away": "NYK",
+      "projected_total": 222.667,
+      "calibrated_total": 222.573,
+      "actual_total": 210.0,
+      "residual_after_calibration": 12.573
+    },
+    {
+      "date": "2026-11-13",
+      "game_id": "0022600035",
+      "home": "ORL",
+      "away": "MIL",
+      "projected_total": 225.943,
+      "calibrated_total": 225.849,
+      "actual_total": 206.0,
+      "residual_after_calibration": 19.849
+    },
+    {
+      "date": "2026-11-13",
+      "game_id": "0022600036",
+      "home": "MIA",
+      "away": "CLE",
+      "projected_total": 230.585,
+      "calibrated_total": 230.491,
+      "actual_total": 254.0,
+      "residual_after_calibration": -23.509
+    },
+    {
+      "date": "2026-11-13",
+      "game_id": "0022600037",
+      "home": "CHI",
+      "away": "ATL",
+      "projected_total": 233.352,
+      "calibrated_total": 233.258,
+      "actual_total": 242.0,
+      "residual_after_calibration": -8.742
+    },
+    {
+      "date": "2026-11-13",
+      "game_id": "0022600038",
+      "home": "NOP",
+      "away": "MEM",
+      "projected_total": 232.0,
+      "calibrated_total": 231.906,
+      "actual_total": 253.0,
+      "residual_after_calibration": -21.094
+    },
+    {
+      "date": "2026-11-13",
+      "game_id": "0022600039",
+      "home": "HOU",
+      "away": "UTA",
+      "projected_total": 224.711,
+      "calibrated_total": 224.617,
+      "actual_total": 243.0,
+      "residual_after_calibration": -18.383
+    },
+    {
+      "date": "2026-11-13",
+      "game_id": "0022600040",
+      "home": "SAS",
+      "away": "GSW",
+      "projected_total": 228.136,
+      "calibrated_total": 228.042,
+      "actual_total": 208.0,
+      "residual_after_calibration": 20.042
+    },
+    {
+      "date": "2026-11-13",
+      "game_id": "0022600041",
+      "home": "SAC",
+      "away": "POR",
+      "projected_total": 228.985,
+      "calibrated_total": 228.891,
+      "actual_total": 227.0,
+      "residual_after_calibration": 1.891
+    },
+    {
+      "date": "2026-11-13",
+      "game_id": "0022600042",
+      "home": "LAC",
+      "away": "OKC",
+      "projected_total": 225.149,
+      "calibrated_total": 225.055,
+      "actual_total": 225.0,
+      "residual_after_calibration": 0.055
+    },
+    {
+      "date": "2026-11-14",
+      "game_id": "0022600231",
+      "home": "NOP",
+      "away": "DEN",
+      "projected_total": 231.882,
+      "calibrated_total": 231.788,
+      "actual_total": 224.0,
+      "residual_after_calibration": 7.788
+    },
+    {
+      "date": "2026-11-14",
+      "game_id": "0022600232",
+      "home": "CLE",
+      "away": "DAL",
+      "projected_total": 228.208,
+      "calibrated_total": 228.114,
+      "actual_total": 244.0,
+      "residual_after_calibration": -15.886
+    },
+    {
+      "date": "2026-11-14",
+      "game_id": "0022600233",
+      "home": "MIA",
+      "away": "DET",
+      "projected_total": 229.016,
+      "calibrated_total": 228.922,
+      "actual_total": 254.0,
+      "residual_after_calibration": -25.078
+    },
+    {
+      "date": "2026-11-14",
+      "game_id": "0022600234",
+      "home": "MEM",
+      "away": "BKN",
+      "projected_total": 227.971,
+      "calibrated_total": 227.877,
+      "actual_total": 239.0,
+      "residual_after_calibration": -11.123
+    },
+    {
+      "date": "2026-11-14",
+      "game_id": "0022600235",
+      "home": "MIN",
+      "away": "CHI",
+      "projected_total": 230.837,
+      "calibrated_total": 230.743,
+      "actual_total": 223.0,
+      "residual_after_calibration": 7.743
+    },
+    {
+      "date": "2026-11-15",
+      "game_id": "0022600236",
+      "home": "PHI",
+      "away": "IND",
+      "projected_total": 224.284,
+      "calibrated_total": 224.19,
+      "actual_total": 255.0,
+      "residual_after_calibration": -30.81
+    },
+    {
+      "date": "2026-11-15",
+      "game_id": "0022600237",
+      "home": "PHX",
+      "away": "LAL",
+      "projected_total": 230.24,
+      "calibrated_total": 230.146,
+      "actual_total": 254.0,
+      "residual_after_calibration": -23.854
+    },
+    {
+      "date": "2026-11-15",
+      "game_id": "0022600238",
+      "home": "LAC",
+      "away": "CHA",
+      "projected_total": 222.266,
+      "calibrated_total": 222.172,
+      "actual_total": 218.0,
+      "residual_after_calibration": 4.172
+    },
+    {
+      "date": "2026-11-15",
+      "game_id": "0022600239",
+      "home": "UTA",
+      "away": "SAS",
+      "projected_total": 226.403,
+      "calibrated_total": 226.309,
+      "actual_total": 212.0,
+      "residual_after_calibration": 14.309
+    },
+    {
+      "date": "2026-11-15",
+      "game_id": "0022600240",
+      "home": "BOS",
+      "away": "DAL",
+      "projected_total": 224.124,
+      "calibrated_total": 224.03,
+      "actual_total": 225.0,
+      "residual_after_calibration": -0.97
+    },
+    {
+      "date": "2026-11-15",
+      "game_id": "0022600241",
+      "home": "TOR",
+      "away": "NYK",
+      "projected_total": 223.048,
+      "calibrated_total": 222.954,
+      "actual_total": 220.0,
+      "residual_after_calibration": 2.954
+    },
+    {
+      "date": "2026-11-15",
+      "game_id": "0022600242",
+      "home": "WAS",
+      "away": "HOU",
+      "projected_total": 225.641,
+      "calibrated_total": 225.547,
+      "actual_total": 266.0,
+      "residual_after_calibration": -40.453
+    },
+    {
+      "date": "2026-11-15",
+      "game_id": "0022600243",
+      "home": "MIL",
+      "away": "ATL",
+      "projected_total": 229.379,
+      "calibrated_total": 229.285,
+      "actual_total": 219.0,
+      "residual_after_calibration": 10.285
+    },
+    {
+      "date": "2026-11-15",
+      "game_id": "0022600244",
+      "home": "SAC",
+      "away": "OKC",
+      "projected_total": 225.101,
+      "calibrated_total": 225.007,
+      "actual_total": 228.0,
+      "residual_after_calibration": -2.993
+    },
+    {
+      "date": "2026-11-16",
+      "game_id": "0022600245",
+      "home": "BOS",
+      "away": "ORL",
+      "projected_total": 222.614,
+      "calibrated_total": 222.52,
+      "actual_total": 220.0,
+      "residual_after_calibration": 2.52
+    },
+    {
+      "date": "2026-11-16",
+      "game_id": "0022600246",
+      "home": "CLE",
+      "away": "CHI",
+      "projected_total": 233.267,
+      "calibrated_total": 233.173,
+      "actual_total": 241.0,
+      "residual_after_calibration": -7.827
+    },
+    {
+      "date": "2026-11-16",
+      "game_id": "0022600247",
+      "home": "WAS",
+      "away": "MEM",
+      "projected_total": 229.355,
+      "calibrated_total": 229.261,
+      "actual_total": 256.0,
+      "residual_after_calibration": -26.739
+    },
+    {
+      "date": "2026-11-16",
+      "game_id": "0022600248",
+      "home": "BKN",
+      "away": "PHI",
+      "projected_total": 225.796,
+      "calibrated_total": 225.702,
+      "actual_total": 258.0,
+      "residual_after_calibration": -32.298
+    },
+    {
+      "date": "2026-11-16",
+      "game_id": "0022600249",
+      "home": "MIA",
+      "away": "HOU",
+      "projected_total": 230.624,
+      "calibrated_total": 230.53,
+      "actual_total": 238.0,
+      "residual_after_calibration": -7.47
+    },
+    {
+      "date": "2026-11-16",
+      "game_id": "0022600250",
+      "home": "MIN",
+      "away": "POR",
+      "projected_total": 227.928,
+      "calibrated_total": 227.834,
+      "actual_total": 204.0,
+      "residual_after_calibration": 23.834
+    },
+    {
+      "date": "2026-11-16",
+      "game_id": "0022600251",
+      "home": "NOP",
+      "away": "GSW",
+      "projected_total": 232.218,
+      "calibrated_total": 232.124,
+      "actual_total": 209.0,
+      "residual_after_calibration": 23.124
+    },
+    {
+      "date": "2026-11-16",
+      "game_id": "0022600252",
+      "home": "DEN",
+      "away": "PHX",
+      "projected_total": 228.24,
+      "calibrated_total": 228.146,
+      "actual_total": 222.0,
+      "residual_after_calibration": 6.146
+    },
+    {
+      "date": "2026-11-17",
+      "game_id": "0022600253",
+      "home": "TOR",
+      "away": "NYK",
+      "projected_total": 223.072,
+      "calibrated_total": 222.978,
+      "actual_total": 213.0,
+      "residual_after_calibration": 9.978
+    },
+    {
+      "date": "2026-11-17",
+      "game_id": "0022600254",
+      "home": "MIN",
+      "away": "POR",
+      "projected_total": 226.88,
+      "calibrated_total": 226.786,
+      "actual_total": 211.0,
+      "residual_after_calibration": 15.786
+    },
+    {
+      "date": "2026-11-17",
+      "game_id": "0022600255",
+      "home": "SAS",
+      "away": "DET",
+      "projected_total": 226.211,
+      "calibrated_total": 226.117,
+      "actual_total": 198.0,
+      "residual_after_calibration": 28.117
+    },
+    {
+      "date": "2026-11-17",
+      "game_id": "0022600256",
+      "home": "LAL",
+      "away": "CHA",
+      "projected_total": 225.048,
+      "calibrated_total": 224.954,
+      "actual_total": 232.0,
+      "residual_after_calibration": -7.046
+    },
+    {
+      "date": "2026-11-17",
+      "game_id": "0022600257",
+      "home": "LAC",
+      "away": "UTA",
+      "projected_total": 227.2,
+      "calibrated_total": 227.106,
+      "actual_total": 239.0,
+      "residual_after_calibration": -11.894
+    },
+    {
+      "date": "2026-11-18",
+      "game_id": "0022600258",
+      "home": "CLE",
+      "away": "MEM",
+      "projected_total": 231.58,
+      "calibrated_total": 231.486,
+      "actual_total": 245.0,
+      "residual_after_calibration": -13.514
+    },
+    {
+      "date": "2026-11-18",
+      "game_id": "0022600259",
+      "home": "IND",
+      "away": "HOU",
+      "projected_total": 227.086,
+      "calibrated_total": 226.992,
+      "actual_total": 223.0,
+      "residual_after_calibration": 3.992
+    },
+    {
+      "date": "2026-11-18",
+      "game_id": "0022600260",
+      "home": "MIA",
+      "away": "MIL",
+      "projected_total": 230.412,
+      "calibrated_total": 230.318,
+      "actual_total": 267.0,
+      "residual_after_calibration": -36.682
+    },
+    {
+      "date": "2026-11-18",
+      "game_id": "0022600261",
+      "home": "ORL",
+      "away": "PHI",
+      "projected_total": 224.716,
+      "calibrated_total": 224.622,
+      "actual_total": 237.0,
+      "residual_after_calibration": -12.378
+    },
+    {
+      "date": "2026-11-18",
+      "game_id": "0022600262",
+      "home": "BKN",
+      "away": "CHI",
+      "projected_total": 231.931,
+      "calibrated_total": 231.837,
+      "actual_total": 244.0,
+      "residual_after_calibration": -12.163
+    },
+    {
+      "date": "2026-11-18",
+      "game_id": "0022600263",
+      "home": "TOR",
+      "away": "WAS",
+      "projected_total": 227.79,
+      "calibrated_total": 227.696,
+      "actual_total": 202.0,
+      "residual_after_calibration": 25.696
+    },
+    {
+      "date": "2026-11-18",
+      "game_id": "0022600264",
+      "home": "NOP",
+      "away": "DET",
+      "projected_total": 229.921,
+      "calibrated_total": 229.827,
+      "actual_total": 231.0,
+      "residual_after_calibration": -1.173
+    },
+    {
+      "date": "2026-11-18",
+      "game_id": "0022600265",
+      "home": "OKC",
+      "away": "ATL",
+      "projected_total": 226.821,
+      "calibrated_total": 226.727,
+      "actual_total": 229.0,
+      "residual_after_calibration": -2.273
+    },
+    {
+      "date": "2026-11-18",
+      "game_id": "0022600266",
+      "home": "DEN",
+      "away": "BOS",
+      "projected_total": 224.281,
+      "calibrated_total": 224.187,
+      "actual_total": 206.0,
+      "residual_after_calibration": 18.187
+    },
+    {
+      "date": "2026-11-18",
+      "game_id": "0022600267",
+      "home": "DAL",
+      "away": "GSW",
+      "projected_total": 227.207,
+      "calibrated_total": 227.113,
+      "actual_total": 210.0,
+      "residual_after_calibration": 17.113
+    },
+    {
+      "date": "2026-11-18",
+      "game_id": "0022600268",
+      "home": "LAL",
+      "away": "UTA",
+      "projected_total": 230.133,
+      "calibrated_total": 230.039,
+      "actual_total": 206.0,
+      "residual_after_calibration": 24.039
+    },
+    {
+      "date": "2026-11-18",
+      "game_id": "0022600269",
+      "home": "SAC",
+      "away": "PHX",
+      "projected_total": 228.479,
+      "calibrated_total": 228.385,
+      "actual_total": 235.0,
+      "residual_after_calibration": -6.615
+    },
+    {
+      "date": "2026-11-19",
+      "game_id": "0022600270",
+      "home": "MEM",
+      "away": "GSW",
+      "projected_total": 229.701,
+      "calibrated_total": 229.607,
+      "actual_total": 224.0,
+      "residual_after_calibration": 5.607
+    },
+    {
+      "date": "2026-11-19",
+      "game_id": "0022600271",
+      "home": "MIL",
+      "away": "POR",
+      "projected_total": 228.201,
+      "calibrated_total": 228.107,
+      "actual_total": 238.0,
+      "residual_after_calibration": -9.893
+    },
+    {
+      "date": "2026-11-19",
+      "game_id": "0022600272",
+      "home": "MIN",
+      "away": "NYK",
+      "projected_total": 221.788,
+      "calibrated_total": 221.694,
+      "actual_total": 201.0,
+      "residual_after_calibration": 20.694
+    },
+    {
+      "date": "2026-11-19",
+      "game_id": "0022600273",
+      "home": "SAS",
+      "away": "LAC",
+      "projected_total": 226.853,
+      "calibrated_total": 226.759,
+      "actual_total": 236.0,
+      "residual_after_calibration": -9.241
+    },
+    {
+      "date": "2026-11-20",
+      "game_id": "0022600043",
+      "home": "ATL",
+      "away": "CHA",
+      "projected_total": 224.166,
+      "calibrated_total": 224.072,
+      "actual_total": 208.0,
+      "residual_after_calibration": 16.072
+    },
+    {
+      "date": "2026-11-20",
+      "game_id": "0022600044",
+      "home": "BKN",
+      "away": "ORL",
+      "projected_total": 226.701,
+      "calibrated_total": 226.607,
+      "actual_total": 224.0,
+      "residual_after_calibration": 2.607
+    },
+    {
+      "date": "2026-11-20",
+      "game_id": "0022600045",
+      "home": "CLE",
+      "away": "IND",
+      "projected_total": 229.555,
+      "calibrated_total": 229.461,
+      "actual_total": 247.0,
+      "residual_after_calibration": -17.539
+    },
+    {
+      "date": "2026-11-20",
+      "game_id": "0022600046",
+      "home": "DET",
+      "away": "TOR",
+      "projected_total": 225.421,
+      "calibrated_total": 225.327,
+      "actual_total": 207.0,
+      "residual_after_calibration": 18.327
+    },
+    {
+      "date": "2026-11-20",
+      "game_id": "0022600047",
+      "home": "CHI",
+      "away": "WAS",
+      "projected_total": 232.207,
+      "calibrated_total": 232.113,
+      "actual_total": 192.0,
+      "residual_after_calibration": 40.113
+    },
+    {
+      "date": "2026-11-20",
+      "game_id": "0022600048",
+      "home": "OKC",
+      "away": "NOP",
+      "projected_total": 228.655,
+      "calibrated_total": 228.561,
+      "actual_total": 246.0,
+      "residual_after_calibration": -17.439
+    },
+    {
+      "date": "2026-11-20",
+      "game_id": "0022600049",
+      "home": "UTA",
+      "away": "PHX",
+      "projected_total": 227.394,
+      "calibrated_total": 227.3,
+      "actual_total": 212.0,
+      "residual_after_calibration": 15.3
+    },
+    {
+      "date": "2026-11-20",
+      "game_id": "0022600050",
+      "home": "DEN",
+      "away": "HOU",
+      "projected_total": 226.785,
+      "calibrated_total": 226.691,
+      "actual_total": 257.0,
+      "residual_after_calibration": -30.309
+    },
+    {
+      "date": "2026-11-20",
+      "game_id": "0022600051",
+      "home": "LAL",
+      "away": "SAC",
+      "projected_total": 230.801,
+      "calibrated_total": 230.707,
+      "actual_total": 210.0,
+      "residual_after_calibration": 20.707
+    },
+    {
+      "date": "2026-11-21",
+      "game_id": "0022600274",
+      "home": "PHI",
+      "away": "MIL",
+      "projected_total": 227.357,
+      "calibrated_total": 227.263,
+      "actual_total": 261.0,
+      "residual_after_calibration": -33.737
+    },
+    {
+      "date": "2026-11-21",
+      "game_id": "0022600275",
+      "home": "NYK",
+      "away": "POR",
+      "projected_total": 222.916,
+      "calibrated_total": 222.822,
+      "actual_total": 193.0,
+      "residual_after_calibration": 29.822
+    },
+    {
+      "date": "2026-11-21",
+      "game_id": "0022600276",
+      "home": "DAL",
+      "away": "LAC",
+      "projected_total": 227.435,
+      "calibrated_total": 227.341,
+      "actual_total": 210.0,
+      "residual_after_calibration": 17.341
+    },
+    {
+      "date": "2026-11-21",
+      "game_id": "0022600277",
+      "home": "MIN",
+      "away": "MEM",
+      "projected_total": 227.419,
+      "calibrated_total": 227.325,
+      "actual_total": 199.0,
+      "residual_after_calibration": 28.325
+    },
+    {
+      "date": "2026-11-21",
+      "game_id": "0022600278",
+      "home": "SAS",
+      "away": "NOP",
+      "projected_total": 229.818,
+      "calibrated_total": 229.724,
+      "actual_total": 205.0,
+      "residual_after_calibration": 24.724
+    },
+    {
+      "date": "2026-11-21",
+      "game_id": "0022600279",
+      "home": "SAC",
+      "away": "BOS",
+      "projected_total": 224.133,
+      "calibrated_total": 224.039,
+      "actual_total": 193.0,
+      "residual_after_calibration": 31.039
+    },
+    {
+      "date": "2026-11-22",
+      "game_id": "0022600280",
+      "home": "ATL",
+      "away": "DET",
+      "projected_total": 227.111,
+      "calibrated_total": 227.017,
+      "actual_total": 204.0,
+      "residual_after_calibration": 23.017
+    },
+    {
+      "date": "2026-11-22",
+      "game_id": "0022600281",
+      "home": "MIA",
+      "away": "OKC",
+      "projected_total": 229.262,
+      "calibrated_total": 229.168,
+      "actual_total": 236.0,
+      "residual_after_calibration": -6.832
+    },
+    {
+      "date": "2026-11-22",
+      "game_id": "0022600282",
+      "home": "WAS",
+      "away": "ORL",
+      "projected_total": 225.028,
+      "calibrated_total": 224.934,
+      "actual_total": 212.0,
+      "residual_after_calibration": 12.934
+    },
+    {
+      "date": "2026-11-22",
+      "game_id": "0022600283",
+      "home": "CHI",
+      "away": "DEN",
+      "projected_total": 230.353,
+      "calibrated_total": 230.259,
+      "actual_total": 296.0,
+      "residual_after_calibration": -65.741
+    },
+    {
+      "date": "2026-11-22",
+      "game_id": "0022600284",
+      "home": "UTA",
+      "away": "DAL",
+      "projected_total": 224.905,
+      "calibrated_total": 224.811,
+      "actual_total": 230.0,
+      "residual_after_calibration": -5.189
+    },
+    {
+      "date": "2026-11-22",
+      "game_id": "0022600285",
+      "home": "NYK",
+      "away": "IND",
+      "projected_total": 221.857,
+      "calibrated_total": 221.763,
+      "actual_total": 219.0,
+      "residual_after_calibration": 2.763
+    },
+    {
+      "date": "2026-11-22",
+      "game_id": "0022600286",
+      "home": "GSW",
+      "away": "BOS",
+      "projected_total": 222.753,
+      "calibrated_total": 222.659,
+      "actual_total": 175.0,
+      "residual_after_calibration": 47.659
+    }
+  ],
   "games_scored": 2564,
   "date_range": {
     "first": "2024-10-28",
@@ -63,5 +2119,5 @@
     "Historical DraftKings full-game totals and paired executable prices are not in this free source; ROI and CLV are not measured.",
     "The live app adds current injury, rest and travel adjustments; those inputs are not replayed in this historical team-form test."
   ],
-  "generated_at": "2026-11-23T20:24:55.944017+00:00"
+  "generated_at": "2026-11-23T20:26:27.974488+00:00"
 }
