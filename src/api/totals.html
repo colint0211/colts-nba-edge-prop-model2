@@ -202,6 +202,6 @@ async function loadHistory(day){
 function previewDate(){const day=el("slateDate").value;if(day)refreshBoard(false,day);}
 async function refreshBoardAndHistory(){await refreshBoard(false);}
 refreshBoard(false);
-setInterval(()=>{if(board?.record_status!=="LOCKED")refreshBoard(false);},5*60*1000);
+setInterval(()=>{if(board?.record_status==="WAITING_FOR_LINES")refreshBoard(false);},5*60*1000);
 </script>
 </body></html>
