@@ -96,12 +96,30 @@ def _team_ratings(force=False):
             "Basketball-Reference team snapshot failed validation "
             f"(season={payload.get('season')}, age_hours={round(age / 3600, 2)}, teams={len(teams)})."
         )
+    league = {
+        key: sum(float(row[key]) for row in teams.values()) / len(teams)
+        for key in ("ortg", "drtg", "pace")
+    }
+    adjusted = {}
+    for code, raw in teams.items():
+        games = max(0, int(raw.get("games") or 0))
+        prior_weight = max(0.12, min(0.65, 8.0 / (games + 8.0))) if games else 0.65
+        row = dict(raw)
+        for key in ("ortg", "drtg", "pace"):
+            row[key] = float(raw[key]) * (1.0 - prior_weight) + league[key] * prior_weight
+        row.update({
+            "games": games, "net": row["ortg"] - row["drtg"],
+            "prior_weight": prior_weight,
+            "source": "Basketball-Reference season-to-date ratings shrunk toward league average",
+        })
+        adjusted[code] = row
     result = {
-        "teams": teams, "season": payload["season"],
+        "teams": adjusted, "season": payload["season"],
         "source": payload.get("source") or "Basketball-Reference",
         "data_quality": "basketball_reference",
         "fetched_at": payload.get("fetched_at"),
-        "team_count": len(teams), "fallback_used": False,
+        "team_count": len(adjusted), "fallback_used": False,
+        "league_average": league, "shrinkage": "8 prior games; weight clamped 12%-65%",
     }
     _TEAM_CACHE.update({"at": now, "data": result})
     return result
