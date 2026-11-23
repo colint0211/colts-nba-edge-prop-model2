@@ -124,6 +124,73 @@ def summarize(rows, offset=0.0):
     }
 
 
+def normal_cdf(value, mean, sd):
+    return 0.5 * (1.0 + math.erf((value - mean) / (sd * math.sqrt(2.0))))
+
+
+def probability_calibration(rows, residual_sd, offset):
+    """Evaluate the fitted normal distribution on predeclared pseudo-lines.
+
+    Historical executable sportsbook totals are unavailable. These offsets
+    around each forecast are a distribution calibration diagnostic, not ROI.
+    """
+    offsets = (-15.5, -10.5, -5.5, -0.5, 4.5, 9.5, 14.5)
+    observations = []
+    for row in rows:
+        mean = float(row["total"]) + float(offset)
+        actual = float(row["actual_total"])
+        for delta in offsets:
+            line = mean + delta
+            probability = 1.0 - normal_cdf(line, mean, residual_sd)
+            outcome = 1.0 if actual > line else 0.0
+            probability = max(1e-9, min(1.0 - 1e-9, probability))
+            observations.append({
+                "predicted_over_probability": probability,
+                "actual_over": outcome,
+                "delta_from_projection": delta,
+            })
+    if not observations:
+        return None
+    n = len(observations)
+    brier = sum((x["predicted_over_probability"] - x["actual_over"]) ** 2
+                for x in observations) / n
+    log_loss = -sum(
+        x["actual_over"] * math.log(x["predicted_over_probability"])
+        + (1.0 - x["actual_over"]) * math.log(1.0 - x["predicted_over_probability"])
+        for x in observations
+    ) / n
+    bins = []
+    for lower in (0.2, 0.3, 0.4, 0.5, 0.6, 0.7):
+        upper = lower + 0.1
+        bucket = [x for x in observations
+                  if lower <= x["predicted_over_probability"] < upper]
+        if bucket:
+            predicted = sum(x["predicted_over_probability"] for x in bucket) / len(bucket)
+            observed = sum(x["actual_over"] for x in bucket) / len(bucket)
+            bins.append({
+                "probability_range": f"{lower:.1f}-{upper:.1f}",
+                "thresholds": len(bucket),
+                "predicted_over_pct": round(predicted * 100.0, 2),
+                "observed_over_pct": round(observed * 100.0, 2),
+                "absolute_calibration_error": round(abs(predicted - observed), 5),
+            })
+    weighted_error = (
+        sum(x["absolute_calibration_error"] * x["thresholds"] for x in bins)
+        / sum(x["thresholds"] for x in bins)
+    ) if bins else None
+    return {
+        "thresholds_scored": n,
+        "pseudo_lines_per_game": len(offsets),
+        "brier": round(brier, 5),
+        "log_loss": round(log_loss, 5),
+        "brier_baseline_50_50": 0.25,
+        "brier_skill_vs_50_50": round(1.0 - brier / 0.25, 5),
+        "mean_absolute_calibration_error": round(weighted_error, 5) if weighted_error is not None else None,
+        "bins": bins,
+        "note": "Predeclared pseudo-lines at fixed offsets from each forecast; not historical DraftKings lines or a betting ROI test.",
+    }
+
+
 def load_games():
     games = []
     files = {}
@@ -224,6 +291,9 @@ def run(output_path="nba_totals_backtest.json"):
     offset = -float(train_raw["total_bias"])
     holdout_raw = summarize(holdout)
     holdout_calibrated = summarize(holdout, offset)
+    holdout_probability_calibration = probability_calibration(
+        holdout, train_raw["total_residual_sd"], offset
+    )
     results = {
         "success": True,
         "model_version": "nba_season_to_date_efficiency_totals_v1",
@@ -247,6 +317,12 @@ def run(output_path="nba_totals_backtest.json"):
             "holdout_season": HOLDOUT_SEASON,
         },
         "holdout_after_train_calibration": holdout_calibrated,
+        "holdout_probability_calibration": holdout_probability_calibration,
+        "holdout_predictions": [{
+            "date": r["date"], "game_id": r["game_id"], "home": r["home"], "away": r["away"],
+            "projected_total": round(r["total"], 3), "calibrated_total": round(r["total"] + offset, 3),
+            "actual_total": r["actual_total"], "residual_after_calibration": round(r["total"] + offset - r["actual_total"], 3)
+        } for r in holdout],
         "games_scored": len(predictions),
         "date_range": {"first": predictions[0]["date"], "last": predictions[-1]["date"]},
         "limitations": [
@@ -261,6 +337,7 @@ def run(output_path="nba_totals_backtest.json"):
     print("NBA_TOTALS_BACKTEST=" + json.dumps({
         "train": train_raw, "holdout": holdout_raw,
         "holdout_after_train_calibration": holdout_calibrated,
+        "holdout_probability_calibration": holdout_probability_calibration,
         "training_only_offset": offset, "games": len(predictions),
     }, sort_keys=True))
     return results
