@@ -28,12 +28,12 @@ def _json_safe(value):
 class JSONResponse(StarletteJSONResponse):
     def render(self, content):
         return super().render(_json_safe(content))
-from . import prediction_ledger, game_model
+from . import prediction_ledger, game_model, nba_totals
 from .away_ats_tracker import router as away_ats_router
 from pathlib import Path
 from html.parser import HTMLParser
 from zoneinfo import ZoneInfo
-HTML = Path(__file__).with_name("index.html").read_text(encoding="utf-8")
+HTML = Path(__file__).with_name("totals.html").read_text(encoding="utf-8")
 UPSTREAM = "https://colts-nba-edge-prop-model-e2oyr9l03-colin-82ad.vercel.app"
 LIVE_UPSTREAM = "https://colts-nba-edge-prop-model-3xj6ghyhl-colin-82ad.vercel.app"
 app = FastAPI()
@@ -3834,10 +3834,10 @@ async def model_recalculate(request: FastRequest):
 
 
 @app.get("/api/game-board")
-def game_sides_totals_board(refresh: bool = False, preview_date: str = ""):
-    """Return the independent point-spread and game-total board."""
+def nba_game_totals_board(refresh: bool = False, preview_date: str = ""):
+    """Return the independent, totals-only NBA board."""
     try:
-        return JSONResponse(game_model.build_board(force=refresh,preview_date=preview_date or None))
+        return JSONResponse(nba_totals.build_board(force=refresh, preview_date=preview_date or None))
     except HTTPException:
         raise
     except Exception as exc:
@@ -3846,38 +3846,36 @@ def game_sides_totals_board(refresh: bool = False, preview_date: str = ""):
             "status": "unavailable",
             "error": type(exc).__name__,
             "detail": message[:300],
-            "board_type": "sides_and_totals",
+            "board_type": "nba_full_game_totals",
         }, status_code=503)
 
 
 @app.get("/api/game-history")
-def game_sides_totals_history(slate_date: str):
+def nba_game_totals_history(slate_date: str):
     try:
         return JSONResponse({
             "slate_date": slate_date,
-            "predictions": game_model.history(slate_date),
-            "metrics": game_model._metrics(),
+            "predictions": nba_totals.history(slate_date),
+            "metrics": nba_totals.metrics(),
         })
     except Exception as exc:
-        raise HTTPException(status_code=503, detail="Game-model history is temporarily unavailable: " + type(exc).__name__)
+        raise HTTPException(status_code=503, detail="NBA totals history is temporarily unavailable: " + type(exc).__name__)
 
-
-@app.get("/api/game-experimental-totals-history")
-def game_experimental_totals_history(slate_date: str):
-    try:
-        game_model.initialize()
-        return JSONResponse({"slate_date": slate_date, "predictions": game_model._experimental_totals_history(slate_date), "metrics": game_model._experimental_totals_metrics()})
-    except Exception as exc:
-        raise HTTPException(status_code=503, detail="Experimental totals history unavailable: " + type(exc).__name__)
 
 @app.get("/api/game-metrics")
-def game_sides_totals_metrics():
+def nba_game_totals_metrics():
     try:
-        return JSONResponse(game_model._metrics())
+        return JSONResponse(nba_totals.metrics())
     except Exception as exc:
-        raise HTTPException(status_code=503, detail="Game-model record is temporarily unavailable: " + type(exc).__name__)
+        raise HTTPException(status_code=503, detail="NBA totals record is temporarily unavailable: " + type(exc).__name__)
 
 
+@app.get("/api/game-backtest")
+def nba_game_totals_backtest():
+    try:
+        return JSONResponse(nba_totals.backtest_status())
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="NBA totals validation report is temporarily unavailable: " + type(exc).__name__)
 
 
 @app.api_route("/api/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
