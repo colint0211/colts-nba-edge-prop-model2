@@ -9,6 +9,8 @@ on:
     branches: [feature/nba-stats-off-def-primary]
     paths:
       - scripts/refresh_nba_player_impact.py
+      - src/api/nba_totals.py
+      - data/nba_team_advanced.json
       - .github/workflows/refresh-nba-player-impact.yml
 
 permissions:
