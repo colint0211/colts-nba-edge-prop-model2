@@ -333,13 +333,17 @@ def _score_snapshot(game, ratings, schedule, injuries, calibration, feed_age):
     best = max((over, under), key=lambda x: x["ev_pct"])
     injury_block = bool(model.get("injury_uncertainty"))
     fresh = feed_age <= _SOURCE_MAX_AGE_SECONDS
+    rating_quality_ok = model.get("data_quality") not in ("derived_early_season", "fallback_estimated")
     qualified = (
-        calibration.get("validated") is True and not injury_block and fresh
+        calibration.get("validated") is True and rating_quality_ok
+        and not injury_block and fresh
         and best["ev_pct"] >= _MIN_EV_PCT and best["model_probability"] >= 0.50
     )
     pick_side = best["selection"] if qualified else None
     if not calibration.get("validated"):
         signal = "RESEARCH ONLY · historical holdout gate not passed"
+    elif not rating_quality_ok:
+        signal = "WITHHELD · estimated fallback team ratings"
     elif injury_block:
         signal = "WITHHELD · unpriced injury availability"
     elif not fresh:
@@ -380,6 +384,7 @@ def _score_snapshot(game, ratings, schedule, injuries, calibration, feed_age):
         "model_sd_points": round(sd, 3), "model_version": _MODEL_VERSION,
         "calibration_status": calibration.get("status"),
         "calibration_validated": bool(calibration.get("validated")),
+        "rating_quality_ok": rating_quality_ok,
         "calibration_offset_points": round(offset, 3),
         "projected_pace": model.get("projected_pace"),
         "home_adjustments": model.get("home_adjustments"),
