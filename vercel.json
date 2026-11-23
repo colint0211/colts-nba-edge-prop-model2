@@ -10,10 +10,6 @@
     },
     {
       "path": "/api/cron/freeze-daily",
-      "schedule": "5 11 * * *"
-    },
-    {
-      "path": "/api/cron/freeze-daily",
       "schedule": "5 12 * * *"
     }
   ],
