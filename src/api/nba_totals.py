@@ -204,6 +204,7 @@ def _load_calibration():
         train = payload.get("train_raw") or {}
         raw_holdout = payload.get("holdout_raw") or {}
         calibrated_holdout = payload.get("holdout_after_train_calibration") or {}
+        probability_check = payload.get("holdout_probability_calibration") or {}
         offset = float(fit["total_offset_points"])
         residual_sd = float(train["total_residual_sd"])
         train_games = int(train.get("games") or 0)
@@ -211,8 +212,12 @@ def _load_calibration():
         holdout_bias = float(calibrated_holdout["total_bias"])
         raw_mae = float(raw_holdout["total_mae"])
         calibrated_mae = float(calibrated_holdout["total_mae"])
-        valid_numbers = all(math.isfinite(x) for x in
-                            (offset, residual_sd, holdout_bias, raw_mae, calibrated_mae))
+        probability_brier = float(probability_check["brier"])
+        probability_calibration_error = float(probability_check["mean_absolute_calibration_error"])
+        valid_numbers = all(math.isfinite(x) for x in (
+            offset, residual_sd, holdout_bias, raw_mae, calibrated_mae,
+            probability_brier, probability_calibration_error,
+        ))
         # These gates are defined before the holdout is evaluated. The holdout
         # never supplies the offset or variance; it only determines eligibility.
         validated = (
@@ -220,6 +225,8 @@ def _load_calibration():
             and 10.0 <= residual_sd <= 30.0
             and abs(holdout_bias) <= 2.0
             and calibrated_mae <= raw_mae
+            and probability_brier < 0.25
+            and probability_calibration_error <= 0.06
         )
         return {
             "available": valid_numbers, "validated": validated,
@@ -230,6 +237,8 @@ def _load_calibration():
             "holdout_bias_points": holdout_bias if valid_numbers else None,
             "raw_holdout_mae": raw_mae if valid_numbers else None,
             "calibrated_holdout_mae": calibrated_mae if valid_numbers else None,
+            "holdout_probability_brier": probability_brier if valid_numbers else None,
+            "holdout_probability_calibration_error": probability_calibration_error if valid_numbers else None,
             "training_seasons": payload.get("train_seasons"),
             "holdout_season": payload.get("holdout_season"),
             "method": "Training-season additive bias correction and training residual SD; untouched holdout used only for eligibility audit.",
@@ -734,6 +743,7 @@ def backtest_status():
         "train_raw": payload.get("train_raw"),
         "holdout_raw": payload.get("holdout_raw"),
         "holdout_after_train_calibration": payload.get("holdout_after_train_calibration"),
+        "holdout_probability_calibration": payload.get("holdout_probability_calibration"),
         "limitations": payload.get("limitations") or [],
         "roi_available": False, "clv_available": False,
     }
