@@ -3,14 +3,6 @@
     {
       "path": "/api/game-board",
       "schedule": "0 12 * * *"
-    },
-    {
-      "path": "/api/away-ats/collect",
-      "schedule": "0 13 * * *"
-    },
-    {
-      "path": "/api/cron/freeze-daily",
-      "schedule": "5 12 * * *"
     }
   ],
   "git": {
