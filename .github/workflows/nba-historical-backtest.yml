@@ -11,6 +11,10 @@ on:
       - src/api/nba_historical_ats_backtest.py
       - src/api/nba_free_ats_backtest.py
       - src/api/game_model.py
+      - src/api/nba_totals.py
+      - src/api/totals.html
+      - src/api/index.py
+      - tests/test_nba_totals.py
       - src/api/index.py
       - src/api/prediction_ledger.py
       - tests/test_game_model_player_impact.py
@@ -23,7 +27,7 @@ on:
       - pyproject.toml
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: nba-historical-backtest
@@ -72,6 +76,31 @@ jobs:
       - name: Run production-formula-aligned walk-forward validation
         run: python -m src.api.nba_live_aligned_backtest
 
+      - name: Publish training-only NBA totals calibration snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p data
+          python - <<'PY'
+          import json
+          from datetime import datetime, timezone
+          with open("nba_live_aligned_backtest.json", encoding="utf-8") as source:
+              payload = json.load(source)
+          payload["generated_at"] = datetime.now(timezone.utc).isoformat()
+          with open("data/nba_totals_backtest.json", "w", encoding="utf-8") as output:
+              json.dump(payload, output, indent=2, allow_nan=False)
+              output.write("\\n")
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/nba_totals_backtest.json
+          if git diff --cached --quiet; then
+            echo "NBA totals calibration snapshot is unchanged."
+          else
+            git commit -m "Publish NBA totals walk-forward calibration"
+            git push origin HEAD:feature/nba-stats-off-def-primary
+          fi
+
       - name: Run zero-cost free-sample closing-spread validation
         run: python -m src.api.nba_free_ats_backtest
 
@@ -82,6 +111,7 @@ jobs:
           path: |
             backtest_results.json
             nba_live_aligned_backtest.json
+            data/nba_totals_backtest.json
             nba_free_ats_backtest.json
           if-no-files-found: error
           retention-days: 30
