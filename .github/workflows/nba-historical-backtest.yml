@@ -15,7 +15,6 @@ on:
       - src/api/totals.html
       - src/api/index.py
       - tests/test_nba_totals.py
-      - src/api/index.py
       - src/api/prediction_ledger.py
       - tests/test_game_model_player_impact.py
       - tests/test_historical_ats_backtest.py
@@ -89,7 +88,7 @@ jobs:
           payload["generated_at"] = datetime.now(timezone.utc).isoformat()
           with open("data/nba_totals_backtest.json", "w", encoding="utf-8") as output:
               json.dump(payload, output, indent=2, allow_nan=False)
-              output.write("\\n")
+              output.write("\n")
           PY
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
