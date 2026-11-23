@@ -1,8 +1,6 @@
 name: NBA three-hour settlement
 
 on:
-  schedule:
-    - cron: "0 */3 * * *"
   workflow_dispatch:
 
 permissions:
