@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Colt's NBA Totals Model</title>
+<style>
+:root{color-scheme:dark;--bg:#070c14;--panel:#101c2b;--panel2:#14243a;--line:#263b55;--text:#e8f0fa;--muted:#9aabc0;--green:#43d49a;--red:#ff727f;--gold:#f0c36a;--blue:#78b8ff}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 Inter,system-ui,-apple-system,Segoe UI,sans-serif}
+header{background:#0b1421;border-bottom:1px solid var(--line);padding:20px clamp(14px,3vw,38px);position:sticky;top:0;z-index:5}
+.head,.toolbar{max-width:1500px;margin:auto;display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap}
+h1{font-size:24px;margin:0;font-weight:900;letter-spacing:.2px}.brand{color:var(--green)}.sub,.muted,.hint{color:var(--muted)}.sub{margin:3px 0 0;font-size:12px}
+.toolbar{margin-top:14px;justify-content:flex-start;font-size:12px}
+button,input{background:#15263a;color:var(--text);border:1px solid var(--line);border-radius:9px;padding:9px 12px;font:inherit}
+button{font-weight:800;cursor:pointer}button:hover{border-color:var(--green)}
+.status{border:1px solid #286b57;color:var(--green);background:#102c27;padding:6px 10px;border-radius:99px;font-size:11px;font-weight:900}
+main{max-width:1500px;margin:auto;padding:20px clamp(12px,3vw,38px) 45px}
+.stats{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}
+.stat{background:linear-gradient(145deg,#14243a,#0e1928);border:1px solid var(--line);border-radius:13px;padding:13px}
+.statlabel{font-size:11px;color:var(--muted)}.num{font-size:24px;font-weight:900;margin-top:3px;font-variant-numeric:tabular-nums}
+.section{font-size:19px;font-weight:900;margin:25px 0 4px}.hint{font-size:12px;margin-bottom:12px}
+.picks{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.pick{border:1px solid #286b57;background:linear-gradient(145deg,#10332d,#101d2b);border-radius:13px;padding:13px}
+.pick .top{display:flex;justify-content:space-between;gap:8px}.pick strong{font-size:15px}.ev{font-size:17px;font-weight:900;color:var(--green)}
+.cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.card{background:linear-gradient(145deg,#132238,#0c1726);border:1px solid var(--line);border-radius:15px;padding:15px;min-width:0}
+.card.qualified{border-color:#2b8669;box-shadow:inset 3px 0 0 var(--green)}.card.blocked{border-color:#6a4e2d}
+.cardhead{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}.matchup{font-size:16px;font-weight:900}.meta{font-size:11px;color:var(--muted);margin-top:2px}
+.signal{font-size:10px;font-weight:900;border-radius:99px;padding:5px 8px;background:#25344a;color:#d9e6f6;white-space:nowrap}
+.signal.good{background:#103c30;color:var(--green)}.signal.warn{background:#40321e;color:var(--gold)}.signal.bad{background:#3b2029;color:var(--red)}
+.projections{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:13px 0}
+.metric{background:#091522;border:1px solid #20344c;border-radius:10px;padding:10px}.metric small{display:block;color:var(--muted);font-size:10px}.metric b{display:block;font-size:20px;font-weight:900;font-variant-numeric:tabular-nums}
+.marketgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.side{background:#0b1726;border:1px solid #243951;border-radius:10px;padding:10px}.side.active{border-color:var(--green)}
+.side h3{margin:0 0 6px;font-size:12px}.side .big{font-size:19px;font-weight:900}.side p{font-size:11px;color:var(--muted);margin:3px 0}
+.reason{margin-top:12px;border:1px solid #263d57;border-radius:10px;background:#0a1523;padding:10px}.reason summary{cursor:pointer;font-weight:850;color:#cfe3ff;font-size:12px}
+.factor{display:flex;justify-content:space-between;gap:10px;font-size:11px;padding:5px 0;border-bottom:1px solid #203148}.factor:last-child{border:0}.positive{color:var(--green)}.negative{color:var(--red)}.zero{color:var(--muted)}
+.note{font-size:10px;color:var(--muted);margin-top:9px}
+.panel{background:#101c2b;border:1px solid var(--line);border-radius:14px;padding:14px;margin-top:15px}
+.tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:11px;margin-top:10px}
+table{width:100%;border-collapse:collapse;min-width:720px;font-size:12px}th,td{padding:9px 10px;text-align:left;border-bottom:1px solid #24364e;white-space:nowrap}th{color:var(--muted);background:#0a1523}tr:last-child td{border-bottom:0}
+.hit{color:var(--green);font-weight:900}.miss{color:var(--red);font-weight:900}.push{color:var(--gold);font-weight:900}
+.validation{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px;margin-top:10px}
+.validation .stat{padding:11px}.validation .num{font-size:19px}
+.warning{border:1px solid #725a31;background:#2b2417;color:#f0d394;border-radius:10px;padding:10px 12px;font-size:12px;margin-top:12px}
+.empty{padding:25px;border:1px dashed var(--line);border-radius:12px;text-align:center;color:var(--muted);grid-column:1/-1}
+footer{font-size:11px;color:var(--muted);margin-top:22px}
+@media(max-width:900px){.stats{grid-template-columns:repeat(3,minmax(0,1fr))}.cards{grid-template-columns:1fr}}
+@media(max-width:560px){header{padding:15px 12px}.stats{grid-template-columns:repeat(2,minmax(0,1fr))}.picks{grid-template-columns:1fr}.num{font-size:21px}.projections{gap:5px}.metric{padding:8px}.metric b{font-size:17px}.card{padding:12px}.section{margin-top:21px}}
+</style>
+</head>
+<body>
+<header>
+ <div class="head">
+  <div><h1><span class="brand">COLT'S</span> NBA TOTALS MODEL</h1><p class="sub">Independent full-game points projections · DraftKings totals · calibrated probabilities · transparent reasoning</p></div>
+  <span id="status" class="status">CONNECTING</span>
+ </div>
+ <div class="toolbar">
+  <button onclick="refreshBoard(true)">↻ Refresh model</button>
+  <label class="muted">Slate date <input id="slateDate" type="date"></label>
+  <button onclick="previewDate()">Preview date</button>
+  <span id="updated" class="muted">Waiting for model data…</span>
+  <span id="live" class="muted"></span>
+ </div>
+</header>
+<main>
+ <div class="stats">
+  <div class="stat"><div class="statlabel">Games on slate</div><div id="gamesCount" class="num">—</div></div>
+  <div class="stat"><div class="statlabel">Qualified totals</div><div id="picksCount" class="num">—</div></div>
+  <div class="stat"><div class="statlabel">Settled record</div><div id="record" class="num">—</div></div>
+  <div class="stat"><div class="statlabel">Win rate</div><div id="winRate" class="num">—</div></div>
+  <div class="stat"><div class="statlabel">Net units</div><div id="units" class="num">—</div></div>
+ </div>
+
+ <div class="section">Today's qualified totals</div>
+ <div class="hint">Maximum five locked plays, ranked by model EV. A play appears only when the historical holdout gate passes and the current DraftKings price offers at least 3% expected value.</div>
+ <div id="picks" class="picks"><div class="empty">Loading qualified totals…</div></div>
+
+ <div class="section">Every game · model projections</div>
+ <div class="hint">The model projects each team's score independently, combines them into a game total, and compares the resulting distribution with the DraftKings main total. Prices never determine the proprietary projection.</div>
+ <div id="games" class="cards"><div class="empty">Loading NBA game projections…</div></div>
+
+ <div class="section">Historical validation</div>
+ <div class="hint">Chronological walk-forward test: historical team form is calculated using only prior completed games. Calibration coefficients and residual variance come from training seasons; the latest season is held out.</div>
+ <div class="panel">
+  <div id="validationStatus" class="status">VALIDATION LOADING</div>
+  <div id="validationMetrics" class="validation"></div>
+  <div id="validationNote" class="note">Loading validation report…</div>
+  <div id="validationWarning" class="warning" style="display:none"></div>
+ </div>
+
+ <div class="section">Locked daily results</div>
+ <div class="hint">Only saved pregame totals are settled. Live scores never rewrite the original pick; final box scores determine the result.</div>
+ <div class="panel">
+  <div id="historyStatus" class="muted">Loading daily record…</div>
+  <div class="tablewrap"><table><thead><tr><th>Matchup</th><th>Pick</th><th>Line</th><th>Odds</th><th>Model %</th><th>Projection</th><th>Actual total</th><th>Result</th><th>Units</th></tr></thead><tbody id="historyRows"><tr><td colspan="9">Loading…</td></tr></tbody></table></div>
+ </div>
+
+ <div class="section">Model methodology and safeguards</div>
+ <div class="panel">
+  <ul>
+   <li>Independent home and away score projections from opponent-adjusted offensive/defensive efficiency and pace.</li>
+   <li>Training-only historical bias correction and residual standard deviation; the untouched holdout is an eligibility audit, never a source of fitted coefficients.</li>
+   <li>Normal distribution for game totals with integer-line push probability handled explicitly.</li>
+   <li>DraftKings main full-game total only. No spreads, moneylines, player props or alternate totals.</li>
+   <li>Two-sided no-vig market probability is a comparison benchmark only. Model probability remains independent.</li>
+   <li>Minimum 3% expected value, fresh odds feed and no unresolved questionable/doubtful player availability.</li>
+   <li>Daily game projections and official picks are frozen once. Settlement uses final scores only.</li>
+   <li>Counterfactual factor impacts are explanatory model diagnostics, not causal effects.</li>
+  </ul>
+  <div class="note" id="sourceStatus">Source information will appear after the slate loads.</div>
+ </div>
+ <footer>NBA team ratings and injury information use free public sources already configured in the project. DraftKings main totals are retrieved through the existing PropLine connection. No new paid data provider has been added. Historical sportsbook totals prices are not currently available for a complete ROI or CLV backtest.</footer>
+</main>
+<script>
+let board=null,backtest=null,historyRows=[];
+const el=id=>document.getElementById(id);
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const n=(v,d=1)=>v===null||v===undefined||!Number.isFinite(Number(v))?"—":Number(v).toFixed(d);
+const odds=v=>v===null||v===undefined?"—":(Number(v)>0?"+":"")+Math.round(Number(v));
+const units=v=>(Number(v)>0?"+":"")+n(v,2)+"u";
+function stat(target,value){el(target).textContent=value??"—";}
+async function json(url){const r=await fetch(url,{cache:"no-store"});const d=await r.json();if(!r.ok)throw Error(d.detail||d.error||"Request failed: "+r.status);return d;}
+async function refreshBoard(force=false,dateValue=null){
+ el("status").textContent="LOADING";el("updated").textContent="Refreshing model…";
+ try{
+  const params=new URLSearchParams();if(force)params.set("refresh","true");if(dateValue)params.set("preview_date",dateValue);
+  board=await json("/api/game-board"+(params.toString()?"?"+params.toString():""));
+  const day=board.slate_date||new Date().toISOString().slice(0,10);
+  el("slateDate").value=day;
+  el("status").textContent=board.record_status||"READY";
+  el("updated").textContent=(board.frozen?"Locked pregame snapshot":"Updated")+" · "+day+" · "+new Date().toLocaleTimeString();
+  renderBoard();await Promise.all([loadMetrics(),loadBacktest(),loadHistory(day)]);
+ }catch(e){
+  el("status").textContent="DATA UNAVAILABLE";
+  el("updated").textContent=e.message||"Model data unavailable";
+  el("games").innerHTML='<div class="empty">'+esc(e.message||e)+'</div>';
+  el("picks").innerHTML='<div class="empty">No picks are issued when required model or market data cannot be verified.</div>';
+ }
+}
+function renderBoard(){
+ const games=board?.games||[],picks=board?.picks||[];
+ stat("gamesCount",games.length);stat("picksCount",picks.length);
+ if(board.record_status==="WAITING_FOR_LINES")el("games").innerHTML='<div class="empty">DraftKings main totals have not posted yet. The slate remains open; nothing has been frozen.</div>';
+ else if(board.record_status==="MISSED_PREGAME_WINDOW")el("games").innerHTML='<div class="empty">The pregame window has passed. No picks have been recreated with in-game or postgame information.</div>';
+ else if(board.record_status==="NO_GAMES")el("games").innerHTML='<div class="empty">No NBA games are scheduled for this slate date.</div>';
+ else el("games").innerHTML=games.length?games.map(gameCard).join(""):'<div class="empty">No game projections are available.</div>';
+ el("picks").innerHTML=picks.length?picks.map((p,i)=>'<div class="pick"><div class="top"><strong>#'+(i+1)+' · '+esc(p.matchup||p.event_id)+'</strong><span class="ev">'+n(p.ev_pct,2)+'% EV</span></div><div style="margin-top:5px;font-weight:850">'+esc(p.selection)+' '+n(p.line,1)+' · '+odds(p.odds)+'</div><div class="meta">Model '+n(p.model_probability,1)+'% · Projected total '+n(p.projected_total,1)+'</div></div>').join(""):'<div class="empty">No qualified totals. No bet is better than forcing a weak edge.</div>';
+ const s=board.source_status||{};
+ el("sourceStatus").textContent="Odds: "+(s.odds||"—")+" · Team ratings: "+(s.team_ratings||"—")+" · Season: "+(s.season||"—")+" · Injury report: "+(s.injuries||"—")+" · Odds feed age: "+n(s.odds_feed_age_seconds,0)+"s";
+}
+function gameCard(g){
+ const pick=!!g.pick_side, blocked=String(g.signal||"").includes("WITHHELD")||String(g.signal||"").includes("RESEARCH");
+ const delta=Number(g.projected_total)-Number(g.draftkings_total);
+ const overActive=pick&&g.pick_side==="OVER",underActive=pick&&g.pick_side==="UNDER";
+ const side=(name,active,prob,price,ev,fair,min,market,edge)=>'<div class="side '+(active?"active":"")+'"><h3>'+name+(active?' · QUALIFIED':'')+'</h3><div class="big">'+n(prob,1)+'% <span class="meta">· '+odds(price)+'</span></div><p>EV <b class="'+(Number(ev)>=3?"positive":"")+'">'+n(ev,2)+'%</b> · Fair '+odds(fair)+'</p><p>Minimum price for +3% EV: <b>'+odds(min)+'</b></p><p>No-vig '+n(market,1)+'% · Edge '+n(edge,1)+' pp</p></div>';
+ const factors=(g.factor_impacts||[]).map(f=>'<div class="factor"><span>'+esc(f.label)+'</span><b class="'+(Number(f.total_points_impact)>0.01?"positive":Number(f.total_points_impact)<-0.01?"negative":"zero")+'">'+(Number(f.total_points_impact)>0?"+":"")+n(f.total_points_impact,2)+' pts</b></div>').join("");
+ const support=(g.supporting_factors||[]).map(f=>f.label).join(", ");
+ const oppose=(g.opposing_factors||[]).map(f=>f.label).join(", ");
+ return '<article class="card '+(pick?"qualified":blocked?"blocked":"")+'"><div class="cardhead"><div><div class="matchup">'+esc(g.matchup)+'</div><div class="meta">'+esc(g.commence_time||"")+' · '+esc(g.rating_source||"team ratings")+'</div></div><span class="signal '+(pick?"good":blocked?"warn":"")+'">'+esc(g.signal||"NO QUALIFIED BET")+'</span></div>'+
+ '<div class="projections"><div class="metric"><small>'+esc(g.away_team)+' projected</small><b>'+n(g.projected_away,1)+'</b></div><div class="metric"><small>'+esc(g.home_team)+' projected</small><b>'+n(g.projected_home,1)+'</b></div><div class="metric"><small>Model total</small><b>'+n(g.projected_total,1)+'</b></div></div>'+
+ '<div class="projections"><div class="metric"><small>DraftKings main total</small><b>'+n(g.draftkings_total,1)+'</b></div><div class="metric"><small>Model minus line</small><b class="'+(delta>0?"positive":delta<0?"negative":"")+'">'+(delta>0?"+":"")+n(delta,1)+'</b></div><div class="metric"><small>Distribution SD</small><b>'+n(g.model_sd_points,1)+'</b></div></div>'+
+ '<div class="marketgrid">'+side("OVER",overActive,g.over_probability,g.over_odds,g.over_ev_pct,g.over_fair_odds,g.over_minimum_odds_3pct_ev,g.over_market_probability,g.over_edge_pp)+side("UNDER",underActive,g.under_probability,g.under_odds,g.under_ev_pct,g.under_fair_odds,g.under_minimum_odds_3pct_ev,g.under_market_probability,g.under_edge_pp)+'</div>'+
+ '<details class="reason"><summary>Why this play? · Model reasoning</summary><div style="padding-top:8px;font-size:11px;color:var(--muted)">Calibration: '+esc(g.calibration_status||"pending")+' · Offset '+n(g.calibration_offset_points,2)+' pts · Push probability '+n(g.push_probability,2)+'%</div>'+
+ (factors||'<div class="note">No non-zero factor impacts were available.</div>')+
+ (pick?'<div class="note"><b>Factors supporting '+esc(g.pick_side)+':</b> '+esc(support||"No material factor impact")+'</div><div class="note"><b>Opposing factors:</b> '+esc(oppose||"No material opposing factor impact")+'</div>':'')+
+ '<div class="note">'+esc(g.reasoning_method||"Counterfactual model diagnostics.")+'</div></details>'+
+ '<div class="note">Feed fetched '+n(g.odds_feed_age_seconds,0)+'s ago · source maximum age '+n(g.odds_source_max_age_seconds,0)+'s · '+esc(g.odds_source||"DraftKings")+'</div></article>';
+}
+async function loadMetrics(){
+ try{const m=await json("/api/game-metrics");stat("record",String(m.wins??0)+"–"+String(m.losses??0)+(m.pushes?"–"+m.pushes:""));stat("winRate",m.win_rate_pct==null?"—":n(m.win_rate_pct,1)+"%");stat("units",units(m.net_units??0));}
+ catch(e){stat("record","—");stat("winRate","—");stat("units","—");}
+}
+async function loadBacktest(){
+ try{
+  backtest=await json("/api/game-backtest");
+  const c=backtest.calibration||{};el("validationStatus").textContent=backtest.status||"PENDING";
+  const raw=backtest.holdout_raw||{},adj=backtest.holdout_after_train_calibration||{},train=backtest.train_raw||{};
+  const metrics=[
+   ["Training games",train.games],["Holdout games",adj.games],
+   ["Holdout total MAE",adj.total_mae==null?null:n(adj.total_mae,2)+" pts"],
+   ["Holdout total bias",adj.total_bias==null?null:n(adj.total_bias,2)+" pts"],
+   ["Training residual SD",train.total_residual_sd==null?null:n(train.total_residual_sd,2)+" pts"],
+   ["Train-only correction",c.total_offset_points==null?null:n(c.total_offset_points,2)+" pts"],
+   ["Raw holdout MAE",raw.total_mae==null?null:n(raw.total_mae,2)+" pts"],
+   ["Calibrated holdout MAE",adj.total_mae==null?null:n(adj.total_mae,2)+" pts"]
+  ];
+  el("validationMetrics").innerHTML=metrics.map(x=>'<div class="stat"><div class="statlabel">'+x[0]+'</div><div class="num">'+(x[1]??"—")+'</div></div>').join("");
+  el("validationNote").textContent=(backtest.method||"Walk-forward validation")+". Training seasons: "+(c.training_seasons||"—")+". Untouched holdout: "+(c.holdout_season||"—")+". Calibration status: "+(c.status||"pending")+".";
+  const warn=el("validationWarning");
+  if(!c.validated){warn.style.display="block";warn.textContent="OFFICIAL PICKS ARE DISABLED. The training-only model calibration has not passed the predefined untouched-holdout gate. Projections remain research-only until bias and error checks pass.";}
+  else{warn.style.display="none";}
+ }catch(e){el("validationStatus").textContent="VALIDATION UNAVAILABLE";el("validationNote").textContent=e.message||"Backtest report unavailable.";}
+}
+async function loadHistory(day){
+ try{
+  const d=await json("/api/game-history?slate_date="+encodeURIComponent(day));
+  historyRows=d.predictions||[];
+  const m=d.metrics||{};
+  el("historyStatus").textContent=historyRows.length+" locked picks · "+(m.wins??0)+"W – "+(m.losses??0)+"L · "+(m.settled??0)+" settled · "+units(m.net_units??0)+" all-time";
+  el("historyRows").innerHTML=historyRows.length?historyRows.map(p=>'<tr><td>'+esc(p.matchup)+'</td><td>'+esc(p.selection)+'</td><td>'+n(p.line,1)+'</td><td>'+odds(p.odds)+'</td><td>'+n(p.model_probability_pct,1)+'%</td><td>'+n(p.projected_total,1)+'</td><td>'+n(p.actual_total,0)+'</td><td class="'+(p.outcome==="WIN"?"hit":p.outcome==="LOSS"?"miss":p.outcome==="PUSH"?"push":"")+'">'+esc(p.outcome||"PENDING")+'</td><td>'+units(p.profit_units??0)+'</td></tr>').join(""):'<tr><td colspan="9">No qualified picks were locked for this slate date.</td></tr>';
+ }catch(e){el("historyStatus").textContent="History unavailable: "+(e.message||e);}
+}
+function previewDate(){const day=el("slateDate").value;if(day)refreshBoard(false,day);}
+async function refreshBoardAndHistory(){await refreshBoard(false);}
+refreshBoard(false);
+setInterval(()=>{if(board?.record_status!=="LOCKED")refreshBoard(false);},5*60*1000);
+</script>
+</body></html>
