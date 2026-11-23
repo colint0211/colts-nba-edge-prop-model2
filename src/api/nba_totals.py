@@ -22,6 +22,8 @@ _ET = "America/New_York"
 _MODEL_VERSION = "nba_game_totals_counterfactual_v1"
 _CACHE = {"at": 0.0, "events": None, "quota": {}}
 _CACHE_TTL = 60
+_TEAM_CACHE = {"at": 0.0, "data": None}
+_TEAM_CACHE_TTL = 300
 _SOURCE_MAX_AGE_SECONDS = 300
 _MIN_EV_PCT = 3.0
 _TARGET_EV = 0.03
@@ -62,6 +64,47 @@ def initialize():
         CREATE INDEX IF NOT EXISTS nba_totals_predictions_pending
           ON nba_totals_predictions(settled_at) WHERE settled_at IS NULL;
         """)
+
+
+def _team_ratings(force=False):
+    """Load only the validated, free Basketball-Reference 30-team snapshot."""
+    now = time.time()
+    if not force and _TEAM_CACHE["data"] is not None and now - _TEAM_CACHE["at"] < _TEAM_CACHE_TTL:
+        return _TEAM_CACHE["data"]
+    path = Path(__file__).resolve().parents[2] / "data" / "nba_team_advanced.json"
+    if not path.exists():
+        raise RuntimeError("Validated Basketball-Reference team ratings snapshot is missing.")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    fetched = datetime.fromisoformat(str(payload.get("fetched_at") or "").replace("Z", "+00:00"))
+    if fetched.tzinfo is None:
+        fetched = fetched.replace(tzinfo=timezone.utc)
+    age = max(0.0, (datetime.now(timezone.utc) - fetched.astimezone(timezone.utc)).total_seconds())
+    current_year = datetime.now(timezone.utc).year
+    season_start = current_year if datetime.now(timezone.utc).month >= 7 else current_year - 1
+    expected_season = f"{season_start}-{str(season_start + 1)[-2:]}"
+    teams = payload.get("teams") or {}
+    required = ("ortg", "drtg", "pace")
+    valid_rows = (
+        isinstance(teams, dict) and len(teams) == 30
+        and all(code in gm._TEAM_NAMES and all(
+            key in row and math.isfinite(float(row[key])) for key in required
+        ) for code, row in teams.items())
+    )
+    if (payload.get("team_count") != 30 or not valid_rows
+            or payload.get("season") != expected_season or age > 36 * 3600):
+        raise RuntimeError(
+            "Basketball-Reference team snapshot failed validation "
+            f"(season={payload.get('season')}, age_hours={round(age / 3600, 2)}, teams={len(teams)})."
+        )
+    result = {
+        "teams": teams, "season": payload["season"],
+        "source": payload.get("source") or "Basketball-Reference",
+        "data_quality": "basketball_reference",
+        "fetched_at": payload.get("fetched_at"),
+        "team_count": len(teams), "fallback_used": False,
+    }
+    _TEAM_CACHE.update({"at": now, "data": result})
+    return result
 
 
 def _fetch_lines(force=False):
@@ -583,7 +626,7 @@ def build_board(force=False, preview_date=None):
                               "prop_line_quota": quota},
         }
 
-    ratings = gm._team_ratings(force)
+    ratings = _team_ratings(force)
     schedule = gm._schedule(force)
     from . import index as app_index
     injury_feed = app_index._load_official_injury_feed()
