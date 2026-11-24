@@ -126,38 +126,11 @@ def _team_ratings(force=False):
 
 
 def _fetch_lines(force=False):
-    now = time.time()
-    if not force and _CACHE["events"] is not None and now - _CACHE["at"] < _CACHE_TTL:
-        return _CACHE["events"], "cache", _CACHE["quota"]
-    key = os.getenv("PROPLINE_API_KEY", "").strip()
-    if not key:
-        raise RuntimeError("PROPLINE_API_KEY is missing.")
-    params = urlencode({
-        "markets": "totals", "bookmakers": "draftkings",
-        "includeLinks": "true", "max_age": _SOURCE_MAX_AGE_SECONDS,
-    })
-    request = Request(
-        "https://api.prop-line.com/v1/sports/basketball_nba/odds?" + params,
-        headers={"X-API-Key": key, "Accept": "application/json",
-                 "User-Agent": "ColtsNBATotals/1.0"},
+    """Fail closed until a verified no-cost DraftKings odds source is integrated."""
+    raise RuntimeError(
+        "Free-only policy: DraftKings odds are unavailable because the paid PropLine endpoint is disabled. "
+        "No paid odds request was made."
     )
-    with urlopen(request, timeout=20) as response:
-        payload = json.loads(response.read().decode("utf-8", "replace"))
-        headers = dict(response.headers.items())
-    events = payload if isinstance(payload, list) else (
-        payload.get("events") or payload.get("data") or payload.get("results") or []
-    )
-    if not isinstance(events, list):
-        raise RuntimeError("PropLine did not return an NBA event list.")
-    quota = {
-        "daily_limit": headers.get("X-Daily-Limit"),
-        "daily_used": headers.get("X-Daily-Used"),
-        "daily_remaining": headers.get("X-Daily-Remaining"),
-    }
-    _CACHE.update({"at": now, "events": events, "quota": quota})
-    return events, "live", quota
-
-
 def _parse_total_lines(events):
     """Parse only DraftKings full-game main totals; spreads are not required."""
     rows = []
@@ -214,7 +187,7 @@ def _parse_total_lines(events):
 
 
 def _load_calibration():
-    """Load coefficients fitted only on prior seasons; holdout is a pass/fail audit."""
+    """Require both untouched-holdout calibration and explicit market-relative validation."""
     path = Path(__file__).resolve().parents[2] / "data" / "nba_totals_backtest.json"
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -236,9 +209,9 @@ def _load_calibration():
             offset, residual_sd, holdout_bias, raw_mae, calibrated_mae,
             probability_brier, probability_calibration_error,
         ))
-        # These gates are defined before the holdout is evaluated. The holdout
-        # never supplies the offset or variance; it only determines eligibility.
-        validated = (
+        # These holdout gates are defined before the holdout is evaluated.
+        # The holdout never supplies the offset or variance; it only audits eligibility.
+        holdout_validated = (
             valid_numbers and train_games >= 500 and holdout_games >= 100
             and 10.0 <= residual_sd <= 30.0
             and abs(holdout_bias) <= 2.0
@@ -246,9 +219,25 @@ def _load_calibration():
             and probability_brier < 0.25
             and probability_calibration_error <= 0.06
         )
+        # A good pseudo-line holdout is not proof of an edge against DraftKings.
+        # Require a separately produced, explicit market-relative validation result.
+        market_relative = payload.get("market_relative_validation") or {}
+        market_relative_validated = (
+            isinstance(market_relative, dict) and market_relative.get("passed") is True
+        )
+        validated = holdout_validated and market_relative_validated
+        if validated:
+            status = "VALIDATED"
+        elif not holdout_validated:
+            status = "HOLDOUT_REVIEW_REQUIRED"
+        else:
+            status = "MARKET_RELATIVE_VALIDATION_REQUIRED"
         return {
             "available": valid_numbers, "validated": validated,
-            "status": "VALIDATED" if validated else "HOLDOUT_REVIEW_REQUIRED",
+            "holdout_gate_passed": holdout_validated,
+            "market_relative_validated": market_relative_validated,
+            "market_relative_validation": market_relative if isinstance(market_relative, dict) else {},
+            "status": status,
             "total_offset_points": offset if valid_numbers else 0.0,
             "total_residual_sd_points": residual_sd if valid_numbers else _FALLBACK_TOTAL_SD,
             "train_games": train_games, "holdout_games": holdout_games,
@@ -259,20 +248,21 @@ def _load_calibration():
             "holdout_probability_calibration_error": probability_calibration_error if valid_numbers else None,
             "training_seasons": payload.get("train_seasons"),
             "holdout_season": payload.get("holdout_season"),
-            "method": "Training-season additive bias correction and training residual SD; untouched holdout used only for eligibility audit.",
+            "method": "Training-season additive bias correction and training residual SD; untouched holdout audits calibration, while a separate DraftKings-relative validation is required for official eligibility.",
             "generated_at": payload.get("generated_at"),
         }
     except Exception as exc:
         return {
-            "available": False, "validated": False, "status": "BACKTEST_PENDING",
+            "available": False, "validated": False,
+            "holdout_gate_passed": False, "market_relative_validated": False,
+            "market_relative_validation": {},
+            "status": "BACKTEST_PENDING",
             "total_offset_points": 0.0, "total_residual_sd_points": _FALLBACK_TOTAL_SD,
             "train_games": 0, "holdout_games": 0, "holdout_bias_points": None,
             "raw_holdout_mae": None, "calibrated_holdout_mae": None,
             "method": "No validated training-only calibration file is available.",
             "error": type(exc).__name__,
         }
-
-
 def _american_odds(probability):
     p = float(probability)
     if not 0.0 < p < 1.0:
@@ -410,8 +400,12 @@ def _score_snapshot(game, ratings, schedule, injuries, calibration, feed_age):
         and best["ev_pct"] >= _MIN_EV_PCT and best["model_probability"] >= 0.50
     )
     pick_side = best["selection"] if qualified else None
-    if not calibration.get("validated"):
+    if not calibration.get("holdout_gate_passed"):
         signal = "RESEARCH ONLY · historical holdout gate not passed"
+    elif not calibration.get("market_relative_validated"):
+        signal = "RESEARCH ONLY · DraftKings-relative validation not passed"
+    elif not calibration.get("validated"):
+        signal = "RESEARCH ONLY · calibration eligibility not passed"
     elif not rating_quality_ok:
         signal = "WITHHELD · estimated fallback team ratings"
     elif injury_block:

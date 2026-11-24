@@ -1,4 +1,6 @@
+import json
 import unittest
+from unittest.mock import patch
 
 from src.api import nba_totals
 
@@ -66,6 +68,48 @@ class NbaTotalsTests(unittest.TestCase):
     def test_fair_odds_are_independent_of_market_prices(self):
         self.assertEqual(nba_totals._american_odds(0.5), -100)
         self.assertEqual(nba_totals._american_odds(0.4), 150)
+
+    def test_paid_prop_line_fetch_fails_closed_under_free_only_policy(self):
+        with self.assertRaisesRegex(RuntimeError, "Free-only policy"):
+            nba_totals._fetch_lines(force=True)
+
+    def test_holdout_pass_does_not_enable_official_totals_without_market_validation(self):
+        payload = {
+            "calibration_fit_on_train_only": {"total_offset_points": -0.1},
+            "train_raw": {"games": 600, "total_residual_sd": 19.0},
+            "holdout_raw": {"total_mae": 15.0},
+            "holdout_after_train_calibration": {
+                "games": 120, "total_bias": 1.5, "total_mae": 14.9
+            },
+            "holdout_probability_calibration": {
+                "brier": 0.20, "mean_absolute_calibration_error": 0.04
+            },
+        }
+        with patch.object(nba_totals.Path, "read_text", return_value=json.dumps(payload)):
+            result = nba_totals._load_calibration()
+        self.assertTrue(result["holdout_gate_passed"])
+        self.assertFalse(result["market_relative_validated"])
+        self.assertFalse(result["validated"])
+        self.assertEqual(result["status"], "MARKET_RELATIVE_VALIDATION_REQUIRED")
+
+    def test_explicit_market_relative_pass_is_required_in_addition_to_holdout(self):
+        payload = {
+            "calibration_fit_on_train_only": {"total_offset_points": -0.1},
+            "train_raw": {"games": 600, "total_residual_sd": 19.0},
+            "holdout_raw": {"total_mae": 15.0},
+            "holdout_after_train_calibration": {
+                "games": 120, "total_bias": 1.5, "total_mae": 14.9
+            },
+            "holdout_probability_calibration": {
+                "brier": 0.20, "mean_absolute_calibration_error": 0.04
+            },
+            "market_relative_validation": {"passed": True},
+        }
+        with patch.object(nba_totals.Path, "read_text", return_value=json.dumps(payload)):
+            result = nba_totals._load_calibration()
+        self.assertTrue(result["holdout_gate_passed"])
+        self.assertTrue(result["market_relative_validated"])
+        self.assertTrue(result["validated"])
 
 
 if __name__ == "__main__":

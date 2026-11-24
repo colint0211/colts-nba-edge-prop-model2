@@ -1,10 +1,5 @@
 {
-  "crons": [
-    {
-      "path": "/api/game-board",
-      "schedule": "0 12 * * *"
-    }
-  ],
+  "crons": [],
   "git": {
     "deploymentEnabled": {
       "injury-feed": false
