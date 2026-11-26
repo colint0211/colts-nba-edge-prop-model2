@@ -14,7 +14,7 @@
     },
     "2027": {
       "file": "pbp_regular_2027.parquet",
-      "bytes": 4749366
+      "bytes": 4989592
     }
   },
   "train_seasons": [
@@ -30,11 +30,11 @@
     "total_residual_sd": 19.099
   },
   "holdout_raw": {
-    "games": 200,
-    "total_mae": 15.38,
-    "total_rmse": 19.739,
-    "total_bias": 1.815,
-    "total_residual_sd": 19.655
+    "games": 213,
+    "total_mae": 15.328,
+    "total_rmse": 19.647,
+    "total_bias": 1.543,
+    "total_residual_sd": 19.586
   },
   "calibration_fit_on_train_only": {
     "total_offset_points": -0.094,
@@ -47,62 +47,62 @@
     "holdout_season": 2027
   },
   "holdout_after_train_calibration": {
-    "games": 200,
-    "total_mae": 15.369,
-    "total_rmse": 19.73,
-    "total_bias": 1.721,
-    "total_residual_sd": 19.655
+    "games": 213,
+    "total_mae": 15.319,
+    "total_rmse": 19.639,
+    "total_bias": 1.449,
+    "total_residual_sd": 19.586
   },
   "holdout_probability_calibration": {
-    "thresholds_scored": 1400,
+    "thresholds_scored": 1491,
     "pseudo_lines_per_game": 7,
-    "brier": 0.213,
-    "log_loss": 0.61599,
+    "brier": 0.21252,
+    "log_loss": 0.61488,
     "brier_baseline_50_50": 0.25,
-    "brier_skill_vs_50_50": 0.14798,
-    "mean_absolute_calibration_error": 0.04346,
+    "brier_skill_vs_50_50": 0.14994,
+    "mean_absolute_calibration_error": 0.03566,
     "bins": [
       {
         "probability_range": "0.2-0.3",
-        "thresholds": 200,
+        "thresholds": 213,
         "predicted_over_pct": 22.39,
-        "observed_over_pct": 18.5,
-        "absolute_calibration_error": 0.03887
+        "observed_over_pct": 18.78,
+        "absolute_calibration_error": 0.03607
       },
       {
         "probability_range": "0.3-0.4",
-        "thresholds": 200,
+        "thresholds": 213,
         "predicted_over_pct": 30.95,
-        "observed_over_pct": 27.0,
-        "absolute_calibration_error": 0.03945
+        "observed_over_pct": 27.7,
+        "absolute_calibration_error": 0.03246
       },
       {
         "probability_range": "0.4-0.5",
-        "thresholds": 200,
+        "thresholds": 213,
         "predicted_over_pct": 40.69,
-        "observed_over_pct": 34.5,
-        "absolute_calibration_error": 0.06187
+        "observed_over_pct": 35.68,
+        "absolute_calibration_error": 0.05006
       },
       {
         "probability_range": "0.5-0.6",
-        "thresholds": 200,
+        "thresholds": 213,
         "predicted_over_pct": 51.04,
-        "observed_over_pct": 46.5,
-        "absolute_calibration_error": 0.04544
+        "observed_over_pct": 47.42,
+        "absolute_calibration_error": 0.03626
       },
       {
         "probability_range": "0.6-0.7",
-        "thresholds": 200,
+        "thresholds": 213,
         "predicted_over_pct": 61.33,
-        "observed_over_pct": 58.0,
-        "absolute_calibration_error": 0.03332
+        "observed_over_pct": 58.69,
+        "absolute_calibration_error": 0.02646
       },
       {
         "probability_range": "0.7-0.8",
-        "thresholds": 400,
+        "thresholds": 426,
         "predicted_over_pct": 75.01,
-        "observed_over_pct": 70.75,
-        "absolute_calibration_error": 0.04262
+        "observed_over_pct": 71.6,
+        "absolute_calibration_error": 0.03416
       }
     ],
     "note": "Predeclared pseudo-lines at fixed offsets from each forecast; not historical DraftKings lines or a betting ROI test."
@@ -2107,17 +2107,147 @@
       "calibrated_total": 222.659,
       "actual_total": 175.0,
       "residual_after_calibration": 47.659
+    },
+    {
+      "date": "2026-11-23",
+      "game_id": "0022600287",
+      "home": "CHA",
+      "away": "MEM",
+      "projected_total": 223.028,
+      "calibrated_total": 222.934,
+      "actual_total": 228.0,
+      "residual_after_calibration": -5.066
+    },
+    {
+      "date": "2026-11-23",
+      "game_id": "0022600288",
+      "home": "PHI",
+      "away": "POR",
+      "projected_total": 226.939,
+      "calibrated_total": 226.845,
+      "actual_total": 239.0,
+      "residual_after_calibration": -12.155
+    },
+    {
+      "date": "2026-11-23",
+      "game_id": "0022600289",
+      "home": "IND",
+      "away": "OKC",
+      "projected_total": 225.212,
+      "calibrated_total": 225.118,
+      "actual_total": 245.0,
+      "residual_after_calibration": -19.882
+    },
+    {
+      "date": "2026-11-23",
+      "game_id": "0022600290",
+      "home": "TOR",
+      "away": "MIL",
+      "projected_total": 226.773,
+      "calibrated_total": 226.679,
+      "actual_total": 227.0,
+      "residual_after_calibration": -0.321
+    },
+    {
+      "date": "2026-11-23",
+      "game_id": "0022600291",
+      "home": "MIN",
+      "away": "BKN",
+      "projected_total": 225.251,
+      "calibrated_total": 225.157,
+      "actual_total": 258.0,
+      "residual_after_calibration": -32.843
+    },
+    {
+      "date": "2026-11-23",
+      "game_id": "0022600292",
+      "home": "CHI",
+      "away": "CLE",
+      "projected_total": 234.296,
+      "calibrated_total": 234.202,
+      "actual_total": 230.0,
+      "residual_after_calibration": 4.202
+    },
+    {
+      "date": "2026-11-23",
+      "game_id": "0022600293",
+      "home": "NOP",
+      "away": "PHX",
+      "projected_total": 230.652,
+      "calibrated_total": 230.558,
+      "actual_total": 242.0,
+      "residual_after_calibration": -11.442
+    },
+    {
+      "date": "2026-11-23",
+      "game_id": "0022600294",
+      "home": "HOU",
+      "away": "LAC",
+      "projected_total": 227.926,
+      "calibrated_total": 227.832,
+      "actual_total": 220.0,
+      "residual_after_calibration": 7.832
+    },
+    {
+      "date": "2026-11-23",
+      "game_id": "0022600295",
+      "home": "LAL",
+      "away": "UTA",
+      "projected_total": 228.154,
+      "calibrated_total": 228.06,
+      "actual_total": 203.0,
+      "residual_after_calibration": 25.06
+    },
+    {
+      "date": "2026-11-23",
+      "game_id": "0022600296",
+      "home": "SAC",
+      "away": "SAS",
+      "projected_total": 224.913,
+      "calibrated_total": 224.819,
+      "actual_total": 230.0,
+      "residual_after_calibration": -5.181
+    },
+    {
+      "date": "2026-11-24",
+      "game_id": "0022600052",
+      "home": "ORL",
+      "away": "DET",
+      "projected_total": 223.191,
+      "calibrated_total": 223.097,
+      "actual_total": 190.0,
+      "residual_after_calibration": 33.097
+    },
+    {
+      "date": "2026-11-24",
+      "game_id": "0022600053",
+      "home": "WAS",
+      "away": "BOS",
+      "projected_total": 221.607,
+      "calibrated_total": 221.513,
+      "actual_total": 247.0,
+      "residual_after_calibration": -25.487
+    },
+    {
+      "date": "2026-11-24",
+      "game_id": "0022600054",
+      "home": "DEN",
+      "away": "DAL",
+      "projected_total": 227.645,
+      "calibrated_total": 227.551,
+      "actual_total": 221.0,
+      "residual_after_calibration": 6.551
     }
   ],
-  "games_scored": 2564,
+  "games_scored": 2577,
   "date_range": {
     "first": "2024-10-28",
-    "last": "2026-11-22"
+    "last": "2026-11-24"
   },
   "limitations": [
     "The holdout is a team-only season-to-date replay; historical pregame injury and player-impact snapshots are unavailable.",
     "Historical DraftKings full-game totals and paired executable prices are not in this free source; ROI and CLV are not measured.",
     "The live app adds current injury, rest and travel adjustments; those inputs are not replayed in this historical team-form test."
   ],
-  "generated_at": "2026-11-24T12:22:40.862306+00:00"
+  "generated_at": "2026-11-26T12:22:15.627375+00:00"
 }
