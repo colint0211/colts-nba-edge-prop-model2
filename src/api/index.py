@@ -42,46 +42,12 @@ async def home():
     return HTMLResponse(HTML)
 @app.get("/api/api-sports-status")
 def api_sports_status():
-    """Validate the Basketball API key using its documented no-parameter timezone endpoint."""
-    api_key = os.getenv("API_SPORTS_KEY", "").strip()
-    if not api_key:
-        return JSONResponse({"configured": False, "valid": False, "message": "API_SPORTS_KEY is not configured."}, status_code=503)
-    request = Request(
-        "https://v1.basketball.api-sports.io/timezone",
-        headers={"User-Agent": "Mozilla/5.0 ColtsNBAEdge/1.0", "Accept": "application/json", "x-apisports-key": api_key}
-    )
-    try:
-        with urlopen(request, timeout=10) as response:
-            payload = json.loads(response.read().decode("utf-8", "replace"))
-            headers = dict(response.headers.items())
-        errors = payload.get("errors") or []
-        result = payload.get("response") or []
-        valid = not bool(errors) and isinstance(result, list) and len(result) > 0
-        # Return API error details, but never return the API key or request headers.
-        safe_errors = errors if isinstance(errors, (list, dict, str)) else str(errors)
-        return {
-            "configured": True,
-            "valid": valid,
-            "endpoint_tested": "Basketball API /timezone",
-            "error_details": safe_errors,
-            "results_count": payload.get("results"),
-            "message": "API-Sports Basketball authentication successful." if valid else "API-Sports did not validate the key. Check error_details."
-        }
-    except HTTPError as exc:
-        try:
-            body = json.loads(exc.read().decode("utf-8", "replace"))
-            errors = body.get("errors") or body.get("message") or body
-        except Exception:
-            errors = "HTTP " + str(exc.code)
-        return JSONResponse({
-            "configured": True, "valid": False, "http_status": exc.code,
-            "endpoint_tested": "Basketball API /timezone",
-            "error_details": errors,
-            "message": "API-Sports rejected the request. Check error_details."
-        }, status_code=502)
-    except Exception as exc:
-        return JSONResponse({"configured": True, "valid": False, "message": "Could not reach API-Sports: " + str(exc)[:180]}, status_code=502)
-
+    """API-Sports is disabled until its account tier can be verified as free."""
+    return JSONResponse({
+        "configured": bool(os.getenv("API_SPORTS_KEY", "").strip()),
+        "valid": False,
+        "message": "Disabled by free-only policy. No API-Sports request was made.",
+    }, status_code=503)
 
 _BDL_STATUS_CACHE = {"at": 0.0, "data": None}
 _BDL_STATUS_CACHE_TTL = 900
@@ -539,47 +505,11 @@ def _position_group(position):
 
 
 def _api_sports_player_position(player_name):
- """Return API-Sports Basketball's listed broad position (Guard/Forward/Center).
- This source does not distinguish PG/SG or SF/PF; ESPN remains the finer-position source.
- """
- name=str(player_name or "").strip()
- normalized=_norm_player_name(name)
- if len(normalized)<3:
-  return None
- now=time.time()
- cached=_API_SPORTS_POSITION_CACHE.get(normalized)
- if cached and now-cached.get("at",0)<_API_SPORTS_POSITION_CACHE_TTL:
-  return cached.get("data")
- api_key=os.getenv("API_SPORTS_KEY","").strip()
- if not api_key:
-  _API_SPORTS_POSITION_CACHE[normalized]={"at":now,"data":None}
-  return None
- try:
-  query=urlencode({"search":name})
-  request=Request(
-   "https://v1.basketball.api-sports.io/players?"+query,
-   headers={"User-Agent":"Mozilla/5.0 ColtsNBAEdge/1.0","Accept":"application/json","x-apisports-key":api_key}
-  )
-  with urlopen(request,timeout=8) as response:
-   payload=json.loads(response.read().decode("utf-8","replace"))
-  rows=payload.get("response") or [] if isinstance(payload,dict) else []
-  exact=[]
-  for row in rows:
-   if not isinstance(row,dict):
-    continue
-   candidate=row.get("name") or row.get("player",{}).get("name") if isinstance(row.get("player"),dict) else row.get("name")
-   if _norm_player_name(candidate)==normalized:
-    position=_position_group(row.get("position"))
-    if position:
-     exact.append(position)
-  # Require an exact, unambiguous player-name match. Never guess from fuzzy search results.
-  unique=set(exact)
-  result=next(iter(unique)) if len(unique)==1 else None
-  _API_SPORTS_POSITION_CACHE[normalized]={"at":now,"data":result}
-  return result
- except Exception:
-  _API_SPORTS_POSITION_CACHE[normalized]={"at":now,"data":None}
-  return None
+    """Return no API-Sports position data under the free-only policy."""
+    normalized = _norm_player_name(player_name)
+    if normalized:
+        _API_SPORTS_POSITION_CACHE[normalized] = {"at": time.time(), "data": None}
+    return None
 
 def _espn_player_position(athlete_id,team_code):
  """Resolve a specific PG/SG/SF/PF/C role; generic G/F roster labels are not enough."""
@@ -1350,101 +1280,15 @@ _BP_STALE_CACHE_SECONDS = 3600
 _BP_EVENT_MATCHUP_CACHE = {}
 
 def _bp_event_matchup(event_id):
-    """Resolve BettingPros event IDs to an away-at-home matchup for DVP."""
-    key=str(event_id or "").strip()
-    if not key:
-        return ""
-    cached=_BP_EVENT_MATCHUP_CACHE.get(key)
-    if cached and time.time()-cached["at"]<3600:
-        return cached["matchup"]
-    api_key=os.getenv("BETTINGPROS_API_KEY","").strip()
-    if not api_key:
-        return ""
-    headers={"x-api-key":api_key,"accept":"application/json","user-agent":"ColtsNBAEdge/1.0"}
-    urls=[
-        "https://api.bettingpros.com/v3/events?"+urlencode({"sport":"NBA","event_id":key}),
-        "https://api.bettingpros.com/v3/events/"+key+"?"+urlencode({"sport":"NBA"}),
-    ]
-    payload=None
-    for url in urls:
-        try:
-            req=Request(url,headers=headers)
-            with urlopen(req,timeout=10) as response:
-                candidate=json.loads(response.read().decode("utf-8","replace"))
-            if isinstance(candidate,dict):
-                payload=candidate
-                break
-        except Exception:
-            continue
-    matchup=""
-    def walk(value):
-        if isinstance(value,dict):
-            home=value.get("home_team") or value.get("homeTeam") or value.get("home")
-            away=value.get("away_team") or value.get("awayTeam") or value.get("away")
-            if isinstance(home,dict): home=home.get("abbreviation") or home.get("short_name") or home.get("name") or home.get("display_name")
-            if isinstance(away,dict): away=away.get("abbreviation") or away.get("short_name") or away.get("name") or away.get("display_name")
-            if home and away:
-                return str(away)+" @ "+str(home)
-            for child in value.values():
-                found=walk(child)
-                if found: return found
-        elif isinstance(value,list):
-            for child in value:
-                found=walk(child)
-                if found: return found
-        return ""
-    if payload:
-        matchup=walk(payload)
-    _BP_EVENT_MATCHUP_CACHE[key]={"at":time.time(),"matchup":matchup}
-    return matchup
+    """BettingPros event lookups are disabled by the free-only policy."""
+    return ""
 
 def _bp_fetch_props(market, limit=50):
-    """Shared per-market cache; never fan out repeated props requests during a provider cooldown."""
-    now = time.time()
-    cached = _BP_PROPS_CACHE.get(market)
-    if cached and now - cached[0] < _BP_CACHE_TTL_SECONDS:
-        return cached[1], "cache"
-    market_cooldown_until = _BP_MARKET_RATE_LIMIT_UNTIL.get(market, 0.0)
-    if now < market_cooldown_until:
-        if cached and now - cached[0] < _BP_STALE_CACHE_SECONDS:
-            return cached[1], "stale-cache"
-        retry = max(1, int(market_cooldown_until - now))
-        raise HTTPException(status_code=503, detail="BettingPros cooldown active. Retry in " + str(retry) + " seconds.")
-    api_key = os.getenv("BETTINGPROS_API_KEY", "").strip()
-    if not api_key:
-        raise HTTPException(status_code=503, detail="BETTINGPROS_API_KEY is missing.")
-    url = "https://api.bettingpros.com/v3/props?" + urlencode({
-        "sport": "NBA", "market_id": BP_MARKETS[market], "page": 1, "limit": limit
-    })
-    req = Request(url, headers={"x-api-key": api_key, "accept": "application/json",
-                                "user-agent": "ColtsNBAEdge/1.0"})
-    try:
-        with urlopen(req, timeout=20) as response:
-            payload = json.loads(response.read().decode("utf-8", "replace"))
-        if not isinstance(payload, dict):
-            raise ValueError("Invalid BettingPros response.")
-        _BP_PROPS_CACHE[market] = (time.time(), payload)
-        return payload, "live"
-    except HTTPError as exc:
-        if exc.code == 429:
-            retry_after = exc.headers.get("Retry-After") if exc.headers else None
-            try:
-                cooldown = max(_BP_RATE_LIMIT_COOLDOWN_SECONDS, min(1800, int(retry_after)))
-            except (TypeError, ValueError):
-                cooldown = _BP_RATE_LIMIT_COOLDOWN_SECONDS
-            _BP_MARKET_RATE_LIMIT_UNTIL[market] = time.time() + cooldown
-            if cached and time.time() - cached[0] < _BP_STALE_CACHE_SECONDS:
-                return cached[1], "stale-cache"
-            raise HTTPException(status_code=503, detail="BettingPros rate limit reached. Cooling down for " + str(cooldown) + " seconds.") from exc
-        if exc.code in (401, 403):
-            raise HTTPException(status_code=502, detail="BettingPros rejected the API key or this account tier does not allow this endpoint.") from exc
-        raise HTTPException(status_code=502, detail="BettingPros props endpoint returned HTTP " + str(exc.code) + ".") from exc
-    except HTTPException:
-        raise
-    except Exception as exc:
-        if cached and time.time() - cached[0] < _BP_STALE_CACHE_SECONDS:
-            return cached[1], "stale-cache"
-        raise HTTPException(status_code=502, detail="Could not retrieve " + market + " prop lines from BettingPros.") from exc
+    """Fail closed: do not call the keyed BettingPros props endpoint."""
+    raise HTTPException(
+        status_code=503,
+        detail="Free-only policy: BettingPros props are disabled; no paid request was made.",
+    )
 
 def _american_probability(odds):
     try:
@@ -1460,57 +1304,12 @@ def _american_payout(odds):
     return 100.0 / abs(value) if value < 0 else value / 100.0
 
 def _bp_books():
-    now = __import__("time").time()
-    if now - _BP_BOOKS_CACHE["at"] < 3600 and _BP_BOOKS_CACHE["ids"]:
-        return _BP_BOOKS_CACHE["ids"]
-    api_key = os.getenv("BETTINGPROS_API_KEY", "").strip()
-    if not api_key:
-        return {}
-    req = Request("https://api.bettingpros.com/v3/books?sport=NBA",
-        headers={"x-api-key": api_key, "accept": "application/json", "user-agent": "ColtsNBAEdge/1.0"})
-    try:
-        with urlopen(req, timeout=12) as response:
-            payload = json.loads(response.read().decode("utf-8", "replace"))
-        rows = payload.get("books", []) if isinstance(payload, dict) else []
-        ids = {}
-        for row in rows:
-            name = str(row.get("name") or row.get("title") or "").lower()
-            if "draftkings" in name or "draft kings" in name:
-                ids["draftkings"] = int(row["id"])
-            elif "fanduel" in name or "fan duel" in name:
-                ids["fanduel"] = int(row["id"])
-        _BP_BOOKS_CACHE.update({"at": now, "ids": ids})
-        return ids
-    except Exception:
-        return {}
+    """Return no sportsbook IDs; do not call the keyed BettingPros books endpoint."""
+    return {}
 
 def _bp_event_offers(event_id, market):
-    global _BP_RATE_LIMIT_UNTIL
-    key = (str(event_id), market)
-    now = time.time()
-    cached = _BP_OFFERS_CACHE.get(key)
-    if cached and now - cached[0] < 600:
-        return cached[1]
-    if now < _BP_RATE_LIMIT_UNTIL:
-        return []
-    api_key = os.getenv("BETTINGPROS_API_KEY", "").strip()
-    if not api_key:
-        return []
-    params = urlencode({"sport": "NBA", "market_id": BP_MARKETS[market], "event_id": event_id, "page": 1, "limit": 50})
-    req = Request("https://api.bettingpros.com/v3/offers?" + params,
-        headers={"x-api-key": api_key, "accept": "application/json", "user-agent": "ColtsNBAEdge/1.0"})
-    try:
-        with urlopen(req, timeout=15) as response:
-            payload = json.loads(response.read().decode("utf-8", "replace"))
-        rows = payload.get("offers", []) if isinstance(payload, dict) else []
-        _BP_OFFERS_CACHE[key] = (now, rows)
-        return rows
-    except HTTPError as exc:
-        if exc.code == 429:
-            _BP_RATE_LIMIT_UNTIL = time.time() + _BP_RATE_LIMIT_COOLDOWN_SECONDS
-        return []
-    except Exception:
-        return []
+    """Return no offers; do not call the keyed BettingPros offers endpoint."""
+    return []
 
 def _bp_two_book_market(offers, player_name):
     """Return a same-line DK/FD no-vig blend and the best price at that exact line."""
@@ -1749,81 +1548,11 @@ _PROPLINE_MARKETS = {
 
 
 def _propline_fetch_events():
-    """Fetch one cached DraftKings-only NBA slate from PropLine."""
-    global _PROPLINE_COOLDOWN_UNTIL
-    now = time.time()
-    cached_events = _PROPLINE_CACHE.get("events")
-    age = now - float(_PROPLINE_CACHE.get("at") or 0.0)
-    if cached_events is not None and age < _PROPLINE_CACHE_TTL:
-        return cached_events, "cache", _PROPLINE_CACHE.get("headers") or {}
-
-    api_key = os.getenv("PROPLINE_API_KEY", "").strip()
-    if not api_key:
-        raise HTTPException(status_code=503, detail="PROPLINE_API_KEY is missing from this deployment.")
-
-    if now < _PROPLINE_COOLDOWN_UNTIL:
-        if cached_events is not None and age < _PROPLINE_STALE_TTL:
-            return cached_events, "stale-cache", _PROPLINE_CACHE.get("headers") or {}
-        retry = max(1, int(_PROPLINE_COOLDOWN_UNTIL - now))
-        raise HTTPException(status_code=503, detail="PropLine rate-limit cooldown active. Retry in " + str(retry) + " seconds.")
-
-    params = urlencode({
-        "markets": ",".join(_PROPLINE_MARKETS.values()),
-        "bookmakers": "draftkings",
-        "includeLinks": "true",
-        "max_age": 300,
-    })
-    request = Request(
-        "https://api.prop-line.com/v1/sports/basketball_nba/odds?" + params,
-        headers={
-            "X-API-Key": api_key,
-            "Accept": "application/json",
-            "User-Agent": "ColtsNBAEdge/1.0",
-        },
+    """Fail closed: never request paid PropLine odds from this application."""
+    raise HTTPException(
+        status_code=503,
+        detail="Free-only policy: PropLine is disabled; no paid odds request was made.",
     )
-    try:
-        with urlopen(request, timeout=20) as response:
-            payload = json.loads(response.read().decode("utf-8", "replace"))
-            headers = {
-                "daily_limit": response.headers.get("X-Daily-Limit"),
-                "daily_used": response.headers.get("X-Daily-Used"),
-                "daily_remaining": response.headers.get("X-Daily-Remaining"),
-                "fetched_at": datetime.now(timezone.utc).isoformat(),
-            }
-        if isinstance(payload, list):
-            events = payload
-        elif isinstance(payload, dict):
-            events = payload.get("events") or payload.get("data") or payload.get("results")
-            if not isinstance(events, list):
-                events = [payload] if payload.get("bookmakers") else []
-        else:
-            events = []
-        if not isinstance(events, list):
-            raise ValueError("PropLine odds response did not contain an event list.")
-        _PROPLINE_CACHE.update({"at": time.time(), "events": events, "headers": headers})
-        _PROPLINE_COOLDOWN_UNTIL = 0.0
-        return events, "live", headers
-    except HTTPError as exc:
-        if exc.code == 429:
-            retry_after = exc.headers.get("Retry-After") if exc.headers else None
-            try:
-                cooldown = max(1, min(3600, int(retry_after)))
-            except (TypeError, ValueError):
-                cooldown = 60
-            _PROPLINE_COOLDOWN_UNTIL = time.time() + cooldown
-            if cached_events is not None and age < _PROPLINE_STALE_TTL:
-                return cached_events, "stale-cache", _PROPLINE_CACHE.get("headers") or {}
-            raise HTTPException(status_code=503, detail="PropLine request limit reached. Retry in " + str(cooldown) + " seconds.") from exc
-        if exc.code in (401, 403):
-            raise HTTPException(status_code=502, detail="PropLine rejected PROPLINE_API_KEY or this account tier.") from exc
-        raise HTTPException(status_code=502, detail="PropLine NBA odds endpoint returned HTTP " + str(exc.code) + ".") from exc
-    except HTTPException:
-        raise
-    except Exception as exc:
-        if cached_events is not None and age < _PROPLINE_STALE_TTL:
-            return cached_events, "stale-cache", _PROPLINE_CACHE.get("headers") or {}
-        raise HTTPException(status_code=502, detail="Could not retrieve DraftKings NBA props from PropLine: " + type(exc).__name__ + ".") from exc
-
 
 def _propline_market_props(events, market):
     """Normalize DraftKings main-line Over/Under outcomes into one row per player."""
@@ -2707,56 +2436,19 @@ def cron_freeze_daily(request: FastRequest):
 
 @app.get("/api/bettingpros-books")
 def bettingpros_books():
-    """Return active BettingPros sportsbook IDs/names so book IDs are never guessed."""
-    api_key = os.getenv("BETTINGPROS_API_KEY", "").strip()
-    if not api_key:
-        raise HTTPException(status_code=503, detail="BETTINGPROS_API_KEY is missing.")
-    req = Request(
-        "https://api.bettingpros.com/v3/books?sport=NBA",
-        headers={"x-api-key": api_key, "accept": "application/json", "user-agent": "ColtsNBAEdge/1.0"},
-        method="GET",
+    """BettingPros sportsbook lookup is disabled by the free-only policy."""
+    raise HTTPException(
+        status_code=503,
+        detail="Free-only policy: BettingPros is disabled; no paid request was made.",
     )
-    try:
-        with urlopen(req, timeout=15) as response:
-            payload = json.loads(response.read().decode("utf-8", "replace"))
-    except HTTPError as exc:
-        raise HTTPException(status_code=502, detail="BettingPros books endpoint returned HTTP " + str(exc.code)) from exc
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail="Could not retrieve BettingPros sportsbook IDs.") from exc
-    books = payload.get("books", []) if isinstance(payload, dict) else []
-    return JSONResponse({"books": books, "count": len(books), "source": "BettingPros API"})
-
 
 @app.get("/api/bettingpros-offers")
 def bettingpros_offers(market: str = "rebounds", event_id: int | None = None):
-    """Expose current offers for supported NBA prop markets, preserving per-book prices."""
-    market = market.lower().strip()
-    market_id = BP_MARKETS.get(market)
-    if market_id is None:
-        raise HTTPException(status_code=400, detail="Unsupported NBA prop market.")
-    api_key = os.getenv("BETTINGPROS_API_KEY", "").strip()
-    if not api_key:
-        raise HTTPException(status_code=503, detail="BETTINGPROS_API_KEY is missing.")
-    params = {"sport": "NBA", "market_id": market_id, "page": 1, "limit": 50}
-    if event_id is not None:
-        params["event_id"] = event_id
-    req = Request(
-        "https://api.bettingpros.com/v3/offers?" + urlencode(params),
-        headers={"x-api-key": api_key, "accept": "application/json", "user-agent": "ColtsNBAEdge/1.0"},
-        method="GET",
+    """BettingPros offer lookup is disabled by the free-only policy."""
+    raise HTTPException(
+        status_code=503,
+        detail="Free-only policy: BettingPros is disabled; no paid request was made.",
     )
-    try:
-        with urlopen(req, timeout=20) as response:
-            payload = json.loads(response.read().decode("utf-8", "replace"))
-    except HTTPError as exc:
-        raise HTTPException(status_code=502, detail="BettingPros offers endpoint returned HTTP " + str(exc.code)) from exc
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail="Could not retrieve BettingPros offers.") from exc
-    rows = payload.get("offers", []) if isinstance(payload, dict) else []
-    return JSONResponse({"market": market, "market_id": market_id, "offers": rows,
-                         "pagination": payload.get("_pagination", {}) if isinstance(payload, dict) else {},
-                         "source": "BettingPros API"})
-
 
 @app.get("/api/bettingpros-props")
 def bettingpros_props(market: str = "rebounds"):
@@ -3185,102 +2877,20 @@ _TANK01_HOST = "tank01-fantasy-stats.p.rapidapi.com"
 
 
 def _tank01_request(path, params=None, timeout=15):
-    """Call Tank01 through RapidAPI without ever exposing credentials."""
-    api_key = os.getenv("TANK01_API_KEY", "").strip()
-    if not api_key:
-        raise RuntimeError("TANK01_API_KEY is not configured.")
-    query = urlencode(params or {})
-    url = "https://" + _TANK01_HOST + path + (("?" + query) if query else "")
-    request = Request(url, headers={
-        "X-RapidAPI-Key": api_key,
-        "X-RapidAPI-Host": _TANK01_HOST,
-        "Accept": "application/json",
-        "User-Agent": "ColtsNBAEdge/1.0",
-    })
-    with urlopen(request, timeout=timeout) as response:
-        payload = json.loads(response.read().decode("utf-8", "replace"))
-        headers = response.headers
-    if not isinstance(payload, dict):
-        raise ValueError("Tank01 returned an unexpected response type.")
-    status_code = payload.get("statusCode")
-    if status_code not in (None, 200, "200"):
-        raise RuntimeError("Tank01 endpoint returned status " + str(status_code) + ".")
-    if payload.get("error"):
-        raise RuntimeError("Tank01 endpoint error: " + str(payload.get("error"))[:160])
-    return payload, headers
-
+    """Tank01/RapidAPI is disabled until a verified no-cost source is available."""
+    raise RuntimeError(
+        "Free-only policy: Tank01/RapidAPI is disabled; no paid request was made."
+    )
 
 @app.get("/api/tank01-dvp-probe")
 def tank01_dvp_probe():
-    """Safe first-call diagnostic: validates Tank01 and reports schema keys only."""
-    now = time.time()
-    cached = _TANK01_DVP_PROBE_CACHE.get("data")
-    if cached and now - _TANK01_DVP_PROBE_CACHE.get("at", 0.0) < 900:
-        return JSONResponse(cached)
-    if not os.getenv("TANK01_API_KEY", "").strip():
-        return JSONResponse({
-            "configured": False, "authenticated": False,
-            "message": "TANK01_API_KEY is not configured in this deployment."
-        }, status_code=503)
-    try:
-        payload, headers = _tank01_request(
-            "/getNBATeams", {"teamStats": "true"}, timeout=20
-        )
-        body = payload.get("body")
-        if isinstance(body, dict):
-            teams = list(body.values()) if body and all(isinstance(v, dict) for v in body.values()) else []
-        elif isinstance(body, list):
-            teams = body
-        else:
-            teams = []
-        sample = next((team for team in teams if isinstance(team, dict) and team.get("defensiveStats")), None)
-        defensive = sample.get("defensiveStats") if sample else None
-        schema = {
-            "team_keys": sorted(sample.keys()) if sample else [],
-            "defensive_stats_type": type(defensive).__name__ if defensive is not None else None,
-            "defensive_stats_keys": sorted(defensive.keys()) if isinstance(defensive, dict) else [],
-            "defensive_stats_sample_keys": {
-                str(key): sorted(value.keys()) if isinstance(value, dict) else type(value).__name__
-                for key, value in list((defensive or {}).items())[:8]
-            } if isinstance(defensive, dict) else {},
-            "defensive_stats_sample_values": {
-                str(key): {str(pos): value for pos, value in list(item.items())[:6]}
-                for key, item in list((defensive or {}).items())[:8]
-                if isinstance(item, dict)
-            } if isinstance(defensive, dict) else {},
-            "games_played": defensive.get("gamesPlayed") if isinstance(defensive, dict) else None,
-        }
-        output = {
-            "configured": True,
-            "authenticated": bool(teams),
-            "source": "Tank01 RapidAPI",
-            "endpoint_tested": "/getNBATeams?teamStats=true",
-            "team_count": len(teams),
-            "teams_with_defensive_stats": sum(
-                1 for team in teams if isinstance(team, dict) and team.get("defensiveStats")
-            ),
-            "schema": schema,
-            "rate_limit_remaining": headers.get("x-ratelimit-requests-remaining"),
-            "tested_at": datetime.now(timezone.utc).isoformat(),
-            "message": "Tank01 authentication succeeded; schema inspection completed."
-                if sample else "Tank01 responded, but no team defensiveStats object was found.",
-        }
-        _TANK01_DVP_PROBE_CACHE.update({"at": now, "data": output})
-        return JSONResponse(output)
-    except HTTPError as exc:
-        message = "RapidAPI rejected the Tank01 request." if exc.code in (401, 403) else "Tank01 returned HTTP " + str(exc.code) + "."
-        return JSONResponse({
-            "configured": True, "authenticated": False, "http_status": exc.code,
-            "endpoint_tested": "/getNBATeams?teamStats=true", "message": message,
-        }, status_code=502)
-    except Exception as exc:
-        return JSONResponse({
-            "configured": True, "authenticated": False,
-            "error_type": type(exc).__name__,
-            "message": str(exc)[:220],
-        }, status_code=502)
-
-
+    """Do not probe a keyed RapidAPI endpoint under the free-only policy."""
+    return JSONResponse({
+        "configured": bool(os.getenv("TANK01_API_KEY", "").strip()),
+        "authenticated": False,
+        "status": "disabled",
+        "message": "Tank01/RapidAPI is disabled by the free-only policy. No request was made.",
+    }, status_code=503)
 
 @app.get("/api/tank01-dvp-status")
 def tank01_dvp_status():
